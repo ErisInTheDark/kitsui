@@ -1,0 +1,22 @@
+import { describe, expect, it } from "vitest";
+import * as kitsui from "../src/index";
+
+describe("kitsui entrypoint", () => {
+	it("re-exports the core building blocks", () => {
+		expect(kitsui).toHaveProperty("AttributeManipulator");
+		expect(kitsui).toHaveProperty("Component");
+		expect(kitsui).toHaveProperty("ClassManipulator");
+		expect(kitsui).toHaveProperty("State");
+		expect(kitsui).toHaveProperty("Style");
+	});
+
+	it("initializes the registered component and state extensions", () => {
+		const component = kitsui.Component("div").mount(document.body);
+		const state = kitsui.State<string | null>(component, null);
+
+		expect(typeof component.place).toBe("function");
+		expect(typeof component.appendTo).toBe("function");
+		expect(typeof state.map).toBe("function");
+		expect(state.truthy).toBeInstanceOf(kitsui.State);
+	});
+});
