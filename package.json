@@ -2,9 +2,13 @@
   "name": "kitsui",
   "version": "0.1.0",
   "description": "UI framework template built around mutable Component wrappers and explicit State transitions.",
-  "main": "dist/kitsui.umd.js",
+  "main": "./dist/kitsui.umd.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/kitsui.umd.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/kitsui.umd.js"
+    }
   },
   "unpkg": "dist/kitsui.umd.js",
   "jsdelivr": "dist/kitsui.umd.js",
