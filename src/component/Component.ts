@@ -10,31 +10,100 @@ declare global {
 	}
 }
 
+/**
+ * A child node that can be appended or prepended to a component.
+ * Supports components, raw DOM elements, and strings (converted to text nodes).
+ */
 export type ComponentChild = Component | HTMLElement | string;
+
+/**
+ * A render function that responds to state changes.
+ * @typeParam TValue - The type of state value being rendered.
+ */
 export type ComponentRender<TValue> = (value: TValue, component: Component) => void;
+
+/**
+ * Specifies the direction for inserting a component relative to an anchor.
+ */
 export type InsertWhere = "before" | "after";
+
+/**
+ * A node that can be inserted into the DOM tree.
+ * Falsy values (null, undefined, false) are filtered out and do not produce nodes.
+ */
 export type InsertableNode = Node | Component | Falsy;
+
+/**
+ * One or more nodes that can be inserted.
+ * Supports individual nodes or iterables (arrays, sets, etc.) of nodes.
+ */
 export type InsertableSelection = InsertableNode | Iterable<InsertableNode>;
+
+/**
+ * One or more components, potentially empty (falsy) or an iterable collection.
+ * Used with stateful rendering to dynamically control which components are in the DOM.
+ */
 export type ComponentSelection = Component | Falsy | Iterable<Component | Falsy>;
+
+/**
+ * Represents a stateful source of component selections.
+ * Used to dynamically render different components based on state changes.
+ */
 export interface ComponentSelectionState {
 	readonly value: ComponentSelection;
 	subscribe (owner: Owner, listener: (value: ComponentSelection) => void): CleanupFunction;
 }
+
+/**
+ * A child node that can be appended or prepended to a component.
+ * Extends ComponentChild to include stateful selections.
+ */
 export type AppendableComponentChild = ComponentChild | ComponentSelectionState;
+
+/**
+ * A node that can be inserted relative to a component.
+ * Extends InsertableSelection to include stateful selections.
+ */
 export type InsertableComponentChild = InsertableSelection | ComponentSelectionState;
 
+/**
+ * Configuration options when creating a new component.
+ */
 export interface ComponentOptions {
+	/**
+	 * Optional CSS class names to apply to the element.
+	 */
 	className?: string;
+	/**
+	 * Optional text content to set on the element.
+	 */
 	textContent?: string;
 }
 
 type ConditionalNode = ComponentChild | InsertableNode;
 
+/**
+ * A function that resolves the owner of a component in a custom context.
+ * Registered via registerComponentOwnerResolver to handle components outside standard parent-child hierarchies.
+ */
 export type ComponentOwnerResolver = (component: Component) => Owner | null;
+
+/**
+ * A function invoked when a component is moved (inserted or mounted).
+ * Registered via registerComponentMoveHandler to respond to component positioning changes.
+ */
 export type ComponentMoveHandler = (component: Component) => void;
 
+/**
+ * A marker interface for module-level component extensions.
+ * Extend this interface to add methods to all Component instances.
+ */
 export interface ComponentExtensions { }
 
+/**
+ * The Component constructor class, used internally by Component.extend() to access prototype.
+ * Allows adding custom methods to all component instances.
+ */
 export type ExtendableComponentClass = (abstract new (...args: never[]) => Component) & {
 	prototype: Component;
 };
@@ -128,6 +197,12 @@ function applyComponentMoveHandlers (component: Component): void {
 	}
 }
 
+/**
+ * Registers a handler to be called whenever a component is moved or mounted.
+ * Useful for extensions that need to respond to component positioning changes.
+ * @param handler - Function to invoke when a component moves.
+ * @returns A cleanup function that unregisters the handler.
+ */
 export function registerComponentMoveHandler (handler: ComponentMoveHandler): CleanupFunction {
 	componentMoveHandlers.add(handler);
 
@@ -136,6 +211,13 @@ export function registerComponentMoveHandler (handler: ComponentMoveHandler): Cl
 	};
 }
 
+/**
+ * Registers a resolver to determine the owner of a component in custom contexts.
+ * Useful for managing component lifecycles outside the standard parent-child hierarchy.
+ * Called when a component needs to resolve its owner (e.g., during append operations).
+ * @param resolver - Function that returns the owner for a given component, or null if not applicable.
+ * @returns A cleanup function that unregisters the resolver.
+ */
 export function registerComponentOwnerResolver (resolver: ComponentOwnerResolver): CleanupFunction {
 	componentOwnerResolvers.add(resolver);
 
@@ -170,12 +252,21 @@ function resolveHost (target: HTMLElement | string): HTMLElement {
 }
 
 class ComponentClass extends Owner {
+	/**
+	 * The underlying DOM element managed by this component.
+	 */
 	readonly element: HTMLElement;
 	private owner: Owner | null = null;
 	private releaseOwner: CleanupFunction = noop;
 	private readonly structuralCleanups = new Set<CleanupFunction>();
 	private orphanCheckId: ReturnType<typeof setTimeout> | null = null;
 
+	/**
+	 * Creates a new component that wraps a DOM element.
+	 * @param tagNameOrElement - Either an HTML tag name (creates new element) or an existing HTMLElement to wrap.
+	 * @param options - Optional configuration for className and textContent.
+	 * @throws If wrapping an element that already has a component.
+	 */
 	constructor (tagNameOrElement: string | HTMLElement, options: ComponentOptions = {}) {
 		super();
 		installNodeComponentAccessor();
@@ -201,10 +292,19 @@ class ComponentClass extends Owner {
 		this.refreshOrphanCheck();
 	}
 
+	/**
+	 * Wraps an existing HTMLElement in a component.
+	 * @param element - The DOM element to wrap.
+	 * @returns A component wrapping the element.
+	 * @throws If the element already has a component attached.
+	 */
 	static wrap (element: HTMLElement): ComponentClass {
 		return new ComponentClass(element);
 	}
 
+	/**
+	 * Lazily creates and memoizes a ClassManipulator for adding/removing CSS classes.
+	 */
 	get class (): ClassManipulator {
 		this.ensureActive();
 
@@ -219,6 +319,9 @@ class ComponentClass extends Owner {
 		return manipulator;
 	}
 
+	/**
+	 * Lazily creates and memoizes an AttributeManipulator for managing element attributes.
+	 */
 	get attribute (): AttributeManipulator {
 		this.ensureActive();
 
@@ -233,6 +336,9 @@ class ComponentClass extends Owner {
 		return manipulator;
 	}
 
+	/**
+	 * Lazily creates and memoizes an AriaManipulator for managing ARIA attributes.
+	 */
 	get aria (): AriaManipulator {
 		this.ensureActive();
 
@@ -247,6 +353,13 @@ class ComponentClass extends Owner {
 		return manipulator;
 	}
 
+	/**
+	 * Appends children to this component's element.
+	 * Strings are converted to text nodes. Falsy values are ignored.
+	 * Components are owned by this component and removed when this component is removed.
+	 * @param children - Nodes, components, strings, or ComponentSelectionState.
+	 * @returns This component for chaining.
+	 */
 	append (...children: AppendableComponentChild[]): this {
 		this.ensureActive();
 
@@ -266,6 +379,13 @@ class ComponentClass extends Owner {
 		return this;
 	}
 
+	/**
+	 * Prepends children to this component's element, before existing content.
+	 * Strings are converted to text nodes. Falsy values are ignored.
+	 * Components are owned by this component and removed when this component is removed.
+	 * @param children - Nodes, components, strings, or ComponentSelectionState.
+	 * @returns This component for chaining.
+	 */
 	prepend (...children: AppendableComponentChild[]): this {
 		this.ensureActive();
 		const referenceNode = this.element.firstChild;
@@ -286,6 +406,14 @@ class ComponentClass extends Owner {
 		return this;
 	}
 
+	/**
+	 * Inserts children before or after this component (relative to its parent).
+	 * Falsy values are filtered out. Useful for inserting siblings.
+	 * @param where - "before" to insert before this component, or "after" to insert after.
+	 * @param nodes - One or more nodes or iterables of nodes to insert.
+	 * @returns This component for chaining.
+	 * @throws If this component has no parent node.
+	 */
 	insert (where: InsertWhere, ...nodes: InsertableComponentChild[]): this {
 		this.ensureActive();
 
@@ -322,6 +450,13 @@ class ComponentClass extends Owner {
 		return this;
 	}
 
+	/**
+	 * Appends a child conditionally based on state.
+	 * When the state becomes true, the child is inserted. When false, it's stored but stays in the DOM as a placeholder.
+	 * @param state - A State<boolean> that controls visibility.
+	 * @param child - The child to append conditionally.
+	 * @returns A cleanup function that removes the conditional binding and the child.
+	 */
 	appendWhen (state: State<boolean>, child: ComponentChild): CleanupFunction {
 		this.ensureActive();
 		return this.attachConditionalNode(state, child, {
@@ -331,6 +466,13 @@ class ComponentClass extends Owner {
 		});
 	}
 
+	/**
+	 * Prepends a child conditionally based on state.
+	 * When the state becomes true, the child is inserted before existing content.
+	 * @param state - A State<boolean> that controls visibility.
+	 * @param child - The child to prepend conditionally.
+	 * @returns A cleanup function that removes the conditional binding and the child.
+	 */
 	prependWhen (state: State<boolean>, child: ComponentChild): CleanupFunction {
 		this.ensureActive();
 		return this.attachConditionalNode(state, child, {
@@ -340,6 +482,14 @@ class ComponentClass extends Owner {
 		});
 	}
 
+	/**
+	 * Inserts children conditionally before or after this component, based on state.
+	 * When the state becomes true, children are inserted. When false, they're stored but stay in the DOM as a placeholder.
+	 * @param state - A State<boolean> that controls visibility.
+	 * @param where - "before" to insert before this component, or "after" to insert after.
+	 * @param nodes - Nodes or iterables of nodes to insert conditionally.
+	 * @returns A cleanup function that removes all conditional bindings and children.
+	 */
 	insertWhen (state: State<boolean>, where: InsertWhere, ...nodes: InsertableSelection[]): CleanupFunction {
 		this.ensureActive();
 		const insertables = this.expandConditionalNodes(nodes);
@@ -371,12 +521,23 @@ class ComponentClass extends Owner {
 		return this;
 	}
 
+	/**
+	 * Sets a single attribute on the element.
+	 * @param name - The attribute name.
+	 * @param value - The attribute value.
+	 * @returns This component for chaining.
+	 */
 	setAttribute (name: string, value: string): this {
 		this.ensureActive();
 		this.element.setAttribute(name, value);
 		return this;
 	}
 
+	/**
+	 * Sets the element's text content, removing all child nodes and disposing managed component children.
+	 * @param text - The text to set.
+	 * @returns This component for chaining.
+	 */
 	setText (text: string): this {
 		this.ensureActive();
 		this.releaseStructuralCleanups();
@@ -389,6 +550,12 @@ class ComponentClass extends Owner {
 		return this;
 	}
 
+	/**
+	 * Mounts this component into the DOM tree at the specified target.
+	 * @param target - An HTMLElement or CSS selector string identifying the mount point.
+	 * @returns This component for chaining.
+	 * @throws If the target selector does not resolve to an HTMLElement.
+	 */
 	mount (target: HTMLElement | string): this {
 		this.ensureActive();
 		applyComponentMoveHandlers(this);
@@ -399,6 +566,15 @@ class ComponentClass extends Owner {
 		return this;
 	}
 
+	/**
+	 * Subscribes this component to state changes and re-renders when the state updates.
+	 * The render function is called immediately with the current state value, then again each time the state changes.
+	 * The subscription is automatically cleaned up when this component is removed.
+	 * @typeParam TValue - The type of state value being rendered.
+	 * @param state - The state to subscribe to.
+	 * @param render - Function called with the state value and this component, for each update.
+	 * @returns A cleanup function that unsubscribes from the state.
+	 */
 	bindState<TValue> (state: State<TValue>, render: ComponentRender<TValue>): CleanupFunction {
 		this.ensureActive();
 		render(state.value, this);
@@ -408,10 +584,22 @@ class ComponentClass extends Owner {
 		});
 	}
 
+	/**
+	 * Removes this component from the DOM and disposes its resources.
+	 * Owned child components are also removed.
+	 * The component cannot be modified after removal.
+	 */
 	remove (): void {
 		super.dispose();
 	}
 
+	/**
+	 * Sets or clears the owner of this component.
+	 * When a component has an owner, it is removed when the owner is disposed.
+	 * Used to establish parent-child lifecycle relationships.
+	 * @param owner - The owner component or state, or null to remove ownership.
+	 * @returns This component for chaining.
+	 */
 	setOwner (owner: Owner | null): this {
 		this.ensureActive();
 
@@ -434,6 +622,10 @@ class ComponentClass extends Owner {
 		return this;
 	}
 
+	/**
+	 * Gets the current owner of this component.
+	 * @returns The owner component/state, or null if no owner is set.
+	 */
 	getOwner (): Owner | null {
 		return this.owner;
 	}
@@ -904,6 +1096,18 @@ interface ComponentClass extends ComponentExtensions { }
 
 export type Component = ComponentClass;
 
+/**
+ * Creates a new component that wraps or creates an HTMLElement.
+ * Can be called with or without the `new` keyword.
+ * @param tagNameOrElement - HTML tag name to create, or an existing HTMLElement to wrap. Defaults to "span".
+ * @param options - Optional configuration for className and textContent.
+ * @returns A new component instance.
+ * @throws If wrapping an element that already has a component attached.
+ * @example
+ * const div = Component("div");
+ * const section = new Component("section", { className: "panel" });
+ * const wrapped = Component(document.getElementById("existing"));
+ */
 export const Component = function Component (
 	tagNameOrElement: string | HTMLElement = "span",
 	options: ComponentOptions = {},
@@ -916,9 +1120,25 @@ export const Component = function Component (
 } as ComponentConstructor;
 
 Component.prototype = ComponentClass.prototype;
+
+/**
+ * Wraps an existing HTMLElement in a component.
+ * @param element - The DOM element to wrap.
+ * @returns A component wrapping the element.
+ * @throws If the element already has a component attached.
+ */
 Component.wrap = function wrap (element: HTMLElement): Component {
 	return ComponentClass.wrap(element);
 };
+
+/**
+ * Returns the extendable Component class for adding custom methods to all component instances.
+ * Used to define custom extensions that should be available on every component.
+ * @returns The Component class prototype that can be extended.
+ * @example
+ * const ComponentClass = Component.extend();
+ * ComponentClass.prototype.custom = function() { return "custom"; };
+ */
 Component.extend = function extend (): ExtendableComponentClass {
 	return ComponentClass as ExtendableComponentClass;
 };

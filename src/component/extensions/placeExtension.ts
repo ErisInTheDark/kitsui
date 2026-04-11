@@ -1,16 +1,22 @@
 import { Owner, State, type CleanupFunction } from "../../state/State";
 import type { Falsy } from "../ClassManipulator";
 import {
-	Component,
-	registerComponentMoveHandler,
-	registerComponentOwnerResolver,
-	type ExtendableComponentClass,
-	type InsertWhere,
-	type InsertableNode,
+    Component,
+    registerComponentMoveHandler,
+    registerComponentOwnerResolver,
+    type ExtendableComponentClass,
+    type InsertWhere,
+    type InsertableNode,
 } from "../Component";
 
+/** A placement target: a DOM node, Component, Place marker, or null/falsy. */
 export type PlacementTarget = Node | Component | Place | Falsy;
 
+/**
+ * A reactive source for placement that emits Place or null.
+ * @property value The current place or null.
+ * @property subscribe Subscribes to placement changes.
+ */
 export interface PlaceSource {
 	readonly value: Place | null;
 	subscribe (owner: Owner, listener: (value: Place | null) => void): CleanupFunction;
@@ -22,16 +28,75 @@ type PlaceConstructor = {
 	prototype: Place;
 };
 
+/** A function that receives a Place constructor and returns a PlaceSource for reactive placement. */
 export type PlacerFunction = (Place: PlaceConstructor) => PlaceSource;
 
 declare module "../Component" {
 	interface ComponentExtensions {
+		/**
+		 * Appends this component to the end of the target component's element.
+		 * Sets this component's owner to the target component.
+		 * @param component The target component.
+		 * @returns This component for chaining.
+		 * @throws If this or target component is disposed.
+		 */
 		appendTo (component: Component): this;
+
+		/**
+		 * Conditionally appends this component based on a boolean state.
+		 * Automatically removes the component when the state becomes false.
+		 * @param state The boolean state that controls visibility.
+		 * @param component The target component.
+		 * @returns A cleanup function to stop listening to state changes.
+		 */
 		appendToWhen (state: State<boolean>, component: Component): CleanupFunction;
+
+		/**
+		 * Prepends this component to the start of the target component's element.
+		 * Sets this component's owner to the target component.
+		 * @param component The target component.
+		 * @returns This component for chaining.
+		 * @throws If this or target component is disposed.
+		 */
 		prependTo (component: Component): this;
+
+		/**
+		 * Conditionally prepends this component based on a boolean state.
+		 * Automatically removes the component when the state becomes false.
+		 * @param state The boolean state that controls visibility.
+		 * @param component The target component.
+		 * @returns A cleanup function to stop listening to state changes.
+		 */
 		prependToWhen (state: State<boolean>, component: Component): CleanupFunction;
+
+		/**
+		 * Inserts this component before or after a reference node, component, or place.
+		 * Sets the owner based on the target's owner if applicable.
+		 * @param where \"before\" or \"after\" the target.
+		 * @param target The reference node, component, place, or null.
+		 * @returns This component for chaining, or unchanged if target does not exist.
+		 * @throws If this component is disposed or target's parent is not a valid insert location.
+		 */
 		insertTo (where: InsertWhere, target: PlacementTarget): this;
+
+		/**
+		 * Conditionally inserts this component based on a boolean state.
+		 * Automatically removes the component when the state becomes false.
+		 * @param state The boolean state that controls visibility.
+		 * @param where \"before\" or \"after\" the target.
+		 * @param target The reference node, component, place, or null.
+		 * @returns A cleanup function to stop listening to state changes.
+		 */
 		insertToWhen (state: State<boolean>, where: InsertWhere, target: PlacementTarget): CleanupFunction;
+
+		/**
+		 * Manually controls component placement with a reactive placer function.
+		 * The placer receives a Place constructor and returns a PlaceSource that controls where the component is inserted.
+		 * @param owner The owner who manages the placement lifecycle.
+		 * @param placer A function that produces a PlaceSource determining the component's location.
+		 * @returns A cleanup function to stop placement and remove the component.
+		 * @throws If this component is disposed.
+		 */
 		place (owner: Owner, placer: PlacerFunction): CleanupFunction;
 	}
 }
@@ -133,6 +198,11 @@ function resolveInsertableNode (component: Component, node: InsertableNode, owne
 	return node;
 }
 
+/**
+ * A placement marker representing a location in the DOM that components can be moved to.
+ * @property marker The comment node used as a DOM anchor for this placement.
+ * @property owner The owner responsible for managing this placement.
+ */
 class PlaceClass {
 	readonly marker: Comment;
 
@@ -143,18 +213,35 @@ class PlaceClass {
 		this.marker = marker;
 	}
 
+	/**
+	 * Moves this placement marker to the end of the target component's element.
+	 * @param component The target component.
+	 * @returns This place for chaining.
+	 */
 	appendTo (component: Component): this {
 		ensureActive(component);
 		moveNode(component.element, this.marker, null);
 		return this;
 	}
 
+	/**
+	 * Moves this placement marker to the start of the target component's element.
+	 * @param component The target component.
+	 * @returns This place for chaining.
+	 */
 	prependTo (component: Component): this {
 		ensureActive(component);
 		moveNode(component.element, this.marker, component.element.firstChild);
 		return this;
 	}
 
+	/**
+	 * Moves this placement marker before or after a reference node/component/place.
+	 * @param where "before" or "after" the target.
+	 * @param target The reference node, component, or place.
+	 * @returns This place for chaining, or this unchanged if target does not exist.
+	 * @throws If the target's parent is not a valid insert location.
+	 */
 	insertTo (where: InsertWhere, target: PlacementTarget): this {
 		const referenceNode = resolvePlacementReferenceNode(target);
 
@@ -172,11 +259,15 @@ class PlaceClass {
 		return this;
 	}
 
+	/**
+	 * Removes this placement marker from the DOM.
+	 */
 	remove (): void {
 		this.marker.remove();
 	}
 }
 
+/** A placement marker that anchors component positioning in the DOM. */
 export type Place = PlaceClass;
 
 function resolvePlacementReferenceNode (target: PlacementTarget): Node | null {
@@ -224,6 +315,11 @@ function toPlaceSource (state: State<boolean>, place: Place): PlaceSource {
 	};
 }
 
+/**
+ * Registers Component placement extensions (appendTo, insertTo, place, etc.).
+ * Safe to call multiple times; extension is registered only once.
+ * Patches Component.prototype with placement control methods.
+ */
 export default function placeExtension (): void {
 	if (patched) {
 		return;

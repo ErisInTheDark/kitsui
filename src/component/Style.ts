@@ -1,4 +1,17 @@
+/**
+ * A CSS property value that can be a string or number.
+ * Numbers are automatically suffixed with "px" during serialization.
+ */
 export type StyleValue = string | number;
+
+/**
+ * CSS style property definition. Supports:
+ * - Standard CSS properties (camelCase, e.g., `backgroundColor`)
+ * - Custom CSS variables (prefixed with `$`, e.g., `$cardGap` becomes `--card-gap`)
+ * - Variable shorthand in values (e.g., `gap: "$cardGap"` or `gap: "${varName: fallback}"`)
+ * 
+ * Properties with `null` or `undefined` values are filtered during serialization.
+ */
 export type StyleDefinition = (
 	& { [KEY in keyof CSSStyleDeclaration as CSSStyleDeclaration[KEY] extends string ? KEY : never]?: StyleValue | null | undefined }
 	& { [KEY in `$${string}`]?: StyleValue | null | undefined }
@@ -254,11 +267,41 @@ function createStyle (
 
 export type Style = StyleClass;
 
+/**
+ * Creates or retrieves a CSS stylesheet entry with the given class name and style definition.
+ * Can be called with or without the `new` keyword.
+ * 
+ * The style is immediately registered in a `<style>` element and available for use.
+ * CSS property names are converted from camelCase to kebab-case.
+ * Custom variables are prefixed with `$` in the definition and become `--` in CSS.
+ * 
+ * @param className - Unique identifier for the style class. Must be unique or identical rules.
+ * @param definition - CSS property definitions to register.
+ * @returns The registered Style instance with a `.className` property.
+ * @throws If `className` is already registered with different rules.
+ * 
+ * @example
+ * const cardStyle = Style("card", { backgroundColor: "#fff", borderRadius: 8 });
+ * // className: "card", renders: .card { background-color: #fff; border-radius: 8px }
+ */
 export const Style = function Style (className: string, definition: StyleDefinition): Style {
 	return createStyle(className, definition);
 } as StyleConstructor;
 
 Style.prototype = StyleClass.prototype;
+
+/**
+ * Creates a style that will be rendered after the given dependency styles.
+ * Useful for ensuring CSS specificity or cascading order when styles depend on others.
+ * 
+ * @param classes - One or more Style instances that this style should be ordered after.
+ * @returns An object with a `create` method for defining the dependent style.
+ * 
+ * @example
+ * const base = Style("base", { color: "black" });
+ * const accent = Style.after(base).create("accent", { color: "red" });
+ * // In the stylesheet, .base appears before .accent
+ */
 Style.after = function after (...classes: Style[]) {
 	return {
 		create (className: string, definition: StyleDefinition): Style {

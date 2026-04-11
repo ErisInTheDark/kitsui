@@ -4,9 +4,33 @@ type Nullish = null | undefined;
 
 declare module "../State" {
 	interface StateExtensions<TValue> {
+		/**
+		 * Creates a new state containing the mapped value of this state.
+		 * The mapped state subscribes to changes in the source and automatically updates.
+		 * @param owner The owner responsible for managing the mapped state's lifecycle.
+		 * @param mapValue Function that transforms each value from the source state.
+		 * @returns A new state with the transformed values.
+		 */
 		map<TMapped> (owner: Owner, mapValue: (value: TValue) => TMapped): State<TMapped>;
+
+		/**
+		 * A boolean state indicating whether the current value is truthy.
+		 * The value is memoized per state instance for efficiency.
+		 */
 		readonly truthy: State<boolean>;
+
+		/**
+		 * A boolean state indicating whether the current value is falsy.
+		 * The value is memoized per state instance for efficiency.
+		 */
 		readonly falsy: State<boolean>;
+
+		/**
+		 * Returns a state that falls back to a computed value when this state is null or undefined.
+		 * Otherwise, returns the original value.
+		 * @param getValue Function invoked to compute the fallback value when needed.
+		 * @returns A new state with the original or fallback value.
+		 */
 		or<TFallback> (getValue: () => TFallback): State<Exclude<TValue, Nullish> | TFallback>;
 	}
 }
@@ -39,6 +63,12 @@ function createMappedState<TValue, TMapped> (
 	return mapped;
 }
 
+/**
+ * Extends the State class with mapping and transformation methods.
+ * This extension adds the {@link StateExtensions.map}, {@link StateExtensions.truthy},
+ * {@link StateExtensions.falsy}, and {@link StateExtensions.or} methods to all State instances.
+ * Safe to call multiple times; subsequent calls are no-ops.
+ */
 export default function mappingExtension (): void {
 	if (patched) {
 		return;
