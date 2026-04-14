@@ -1,39 +1,110 @@
 import { Owner, type CleanupFunction } from "../state/State";
 import type { Falsy } from "./ClassManipulator";
+import type { Component } from "./Component";
+/**
+ * Types accepted as attribute names: a single string, or any iterable of strings.
+ * Falsy values are ignored.
+ */
 export type AttributeNameSelection = string | Falsy | Iterable<string | Falsy>;
+/**
+ * A subscribable source for attribute names.
+ */
 export interface AttributeNameSource {
     readonly value: AttributeNameSelection;
     subscribe(owner: Owner, listener: (value: AttributeNameSelection) => void): CleanupFunction;
 }
+/**
+ * Valid types for HTML attribute values. All are serializable to strings.
+ */
 export type AttributeValue = string | number | bigint | boolean;
+/**
+ * Attribute values including nullish options for attribute removal.
+ */
 export type AttributeValueSelection = AttributeValue | null | undefined;
+/**
+ * A subscribable source for attribute values.
+ */
 export interface AttributeValueSource {
     readonly value: AttributeValueSelection;
     subscribe(owner: Owner, listener: (value: AttributeValueSelection) => void): CleanupFunction;
 }
+/**
+ * Attribute name input: either a direct name selection or a subscribable source.
+ */
 export type AttributeNameInput = AttributeNameSelection | AttributeNameSource;
+/**
+ * Attribute value input: either a direct value or a subscribable source.
+ */
 export type AttributeValueInput = AttributeValueSelection | AttributeValueSource;
+/**
+ * Maps an attribute name to a value.
+ */
 export interface AttributeEntry {
     name: AttributeNameInput;
     value: AttributeValueInput;
 }
+/**
+ * Manages HTML element attributes on a DOM element, supporting both static and state-driven values.
+ * Attributes can be added, set, removed, and bound to reactive state.
+ * Values are kept in sync with their sources and invalid configurations are rejected.
+ */
 export declare class AttributeManipulator {
     private readonly owner;
     private readonly element;
     private readonly attributeDeterminers;
-    constructor(owner: Owner, element: HTMLElement);
-    add(...attributes: AttributeNameInput[]): this;
-    set(name: AttributeNameInput, value: AttributeValueInput): this;
-    set(...entries: AttributeEntry[]): this;
-    remove(...attributes: AttributeNameInput[]): this;
+    /**
+     * @param owner The component owner managing this manipulator's cleanup.
+     * @param element The DOM element whose attributes are managed.
+     */
+    constructor(owner: Component, element: HTMLElement);
+    /**
+     * Adds valueless attributes to the element. Multiple names can be passed as separate arguments or as an iterable.
+     * @param attributes Attribute names to add.
+     * @returns The owning component for fluent chaining.
+     */
+    add(...attributes: AttributeNameInput[]): Component;
+    /**
+     * Sets attribute values using either a (name, value) pair or entries with name and value.
+     * Values or names can be subscribable sources that update automatically.
+     * @param name - Attribute name or source.
+     * @param value - Attribute value or source.
+     * @returns The owning component for fluent chaining.
+     */
+    set(name: AttributeNameInput, value: AttributeValueInput): Component;
+    /**
+     * Sets attribute values using entries with name and value pairs.
+     * Values or names can be subscribable sources that update automatically.
+     * @param entries - Objects with `name` and `value` properties.
+     * @returns The owning component for fluent chaining.
+     */
+    set(...entries: AttributeEntry[]): Component;
+    /**
+     * Removes attributes from the element. Multiple names can be passed as separate arguments or as an iterable.
+     * @param attributes Attribute names to remove.
+     * @returns The owning component for fluent chaining.
+     */
+    remove(...attributes: AttributeNameInput[]): Component;
+    /**
+     * Binds valueless attributes to a boolean state, adding/removing them based on state value.
+     * @param state A subscribable boolean state.
+     * @param attributes Attribute names to bind.
+     * @returns The owning component for fluent chaining.
+     */
     bind(state: {
         readonly value: boolean;
         subscribe(owner: Owner, listener: (value: boolean) => void): CleanupFunction;
-    }, ...attributes: AttributeNameInput[]): CleanupFunction;
+    }, ...attributes: AttributeNameInput[]): Component;
+    /**
+     * Binds attribute entries to a boolean state, setting/removing them based on state value.
+     * When state is true, attributes are set; when false, they are removed.
+     * @param state A subscribable boolean state.
+     * @param entries Objects with `name` and `value` properties.
+     * @returns The owning component for fluent chaining.
+     */
     bind(state: {
         readonly value: boolean;
         subscribe(owner: Owner, listener: (value: boolean) => void): CleanupFunction;
-    }, ...entries: AttributeEntry[]): CleanupFunction;
+    }, ...entries: AttributeEntry[]): Component;
     private ensureActive;
     private resolveSetEntries;
     private installAttributePresence;
