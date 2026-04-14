@@ -6,16 +6,21 @@ describe("kitsui entrypoint", () => {
 		expect(kitsui).toHaveProperty("AttributeManipulator");
 		expect(kitsui).toHaveProperty("Component");
 		expect(kitsui).toHaveProperty("ClassManipulator");
+		expect(kitsui).toHaveProperty("EventManipulator");
 		expect(kitsui).toHaveProperty("State");
 		expect(kitsui).toHaveProperty("Style");
+		expect(kitsui).toHaveProperty("whenStuck");
+		expect(kitsui).toHaveProperty("TextManipulator");
 	});
 
 	it("initializes the registered component and state extensions", () => {
-		const component = kitsui.Component("div").mount(document.body);
+		const component = kitsui.Component("div").appendTo(document.body);
 		const state = kitsui.State<string | null>(component, null);
 
 		expect(typeof component.place).toBe("function");
 		expect(typeof component.appendTo).toBe("function");
+		expect(component.event).toBe(component.event);
+		expect(component.text).toBe(component.text);
 		expect(typeof state.map).toBe("function");
 		expect(state.truthy).toBeInstanceOf(kitsui.State);
 	});

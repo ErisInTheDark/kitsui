@@ -7,14 +7,17 @@ import { State } from "../../src/state/State";
 
 declare module "../../src/component/Component" {
 	interface ComponentExtensions {
+		/** @hidden */
 		testComponentExtension (): string;
 	}
 }
 
 placeExtension();
 
-function mountedComponent (tagName: string = "div", options?: { className?: string; textContent?: string }): Component {
-	return Component(tagName, options).mount(document.body);
+function mountedComponent (tagName: string = "div", configure?: (component: Component) => void): Component {
+	const component = Component(tagName);
+	configure?.(component);
+	return component.appendTo(document.body);
 }
 
 async function flushEffects (): Promise<void> {
@@ -40,10 +43,22 @@ function findCommentNode (element: HTMLElement, data: string): Comment | undefin
 	return Array.from(element.childNodes).find((node) => node instanceof Comment && node.data === data) as Comment | undefined;
 }
 
+if (!Element.prototype.moveBefore) { 
+	Object.defineProperty(Element.prototype, "moveBefore", {
+		value (this: Element, movedNode: Element, referenceNode: Element | null): void {
+			if (this.isConnected !== movedNode.isConnected) {
+				throw new Error("State-preserving atomic move cannot be performed on nodes participating in an invalid hierarchy.");
+			}
+
+			this.insertBefore(movedNode, referenceNode);
+		},
+	})
+}
+
 describe("Component", () => {
 	it("can be constructed with or without new and still supports instanceof", () => {
-		const withNew = new Component("div").mount(document.body);
-		const withoutNew = Component("span").mount(document.body);
+		const withNew = new Component("div").appendTo(document.body);
+		const withoutNew = Component("span").appendTo(document.body);
 
 		expect(withNew).toBeInstanceOf(Component);
 		expect(withoutNew).toBeInstanceOf(Component);
@@ -67,20 +82,54 @@ describe("Component", () => {
 		delete (ComponentClass.prototype as Partial<typeof ComponentClass.prototype>).testComponentExtension;
 	});
 
+	it("supports fluent chaining across component manipulators", async () => {
+		const emphasized = Style.Class("component-test-emphasized", {
+			fontWeight: 700,
+		});
+		const component = Component("button")
+			.class.add(emphasized)
+			.text.set("Save")
+			.attribute.set("type", "button")
+			.aria.role("button")
+			.appendTo(document.body);
+		const active = State(component, false);
+
+		component
+			.class.bind(active, emphasized)
+			.text.bind(active, "Active")
+			.attribute.bind(active, "disabled");
+
+		expect(component.element.getAttribute("type")).toBe("button");
+		expect(component.element.getAttribute("role")).toBe("button");
+		expect(component.element.classList.contains(emphasized.className)).toBe(false);
+		expect(component.element.textContent).toBe("");
+		expect(component.element.hasAttribute("disabled")).toBe(false);
+
+		active.set(true);
+		await flushEffects();
+
+		expect(component.element.classList.contains(emphasized.className)).toBe(true);
+		expect(component.element.textContent).toBe("Active");
+		expect(component.element.hasAttribute("disabled")).toBe(true);
+		component.remove();
+	});
+
 	it("exposes wrapped components through node.component and rejects duplicate wraps", () => {
 		const element = document.createElement("div");
 		document.body.append(element);
 		const component = Component(element);
 
 		expect(element.component).toBe(component);
-		expect(() => Component.wrap(element)).toThrow("already has a component");
+		expect(() => Component(element)).toThrow("already has a component");
 		component.remove();
 		expect(element.component).toBeUndefined();
 	});
 
 	it("wraps DOM elements and appends children", () => {
-		const root = mountedComponent("div", { className: "shell" });
-		const child = Component("span", { textContent: "world" });
+		const root = mountedComponent("div", (component) => {
+			component.attribute.set("class", "shell");
+		});
+		const child = Component("span").text.set("world");
 
 		root.append("hello ", child);
 
@@ -91,24 +140,104 @@ describe("Component", () => {
 		expect(child.element.parentElement).toBe(root.element);
 	});
 
+	it("ignores falsy append children", () => {
+		const root = mountedComponent("div");
+		const child = Component("span").text.set("child");
+
+		try {
+			root.append(null, undefined, false, child);
+
+			expect(Array.from(root.element.childNodes), "append() should ignore falsy values instead of creating DOM nodes").toEqual([
+				child.element,
+			]);
+			expect(child.element.parentElement, "append() should still append real children when falsy values are present").toBe(root.element);
+		} finally {
+			child.remove();
+			root.remove();
+		}
+	});
+
+	it("flattens append iterables", () => {
+		const root = mountedComponent("div");
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
+
+		try {
+			root.append([first, second]);
+
+			expect(Array.from(root.element.childNodes), "append() should flatten iterable children in order").toEqual([
+				first.element,
+				second.element,
+			]);
+			expect(root.element.textContent, "append() should preserve the text content of flattened children").toBe("firstsecond");
+		} finally {
+			first.remove();
+			second.remove();
+			root.remove();
+		}
+	});
+
 	it("prepends children in-order", () => {
 		const root = mountedComponent("div");
-		const first = Component("span", { textContent: "first" });
-		const second = Component("span", { textContent: "second" });
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
 
-		root.append(Component("span", { textContent: "tail" }));
+		root.append(Component("span").text.set("tail"));
 		root.prepend(first, second);
 
 		expect(root.element.textContent).toBe("firstsecondtail");
 	});
 
+	it("ignores falsy prepend children", () => {
+		const root = mountedComponent("div");
+		const child = Component("span").text.set("child");
+		const tail = Component("span").text.set("tail");
+
+		try {
+			root.append(tail);
+			root.prepend(null, undefined, false, child);
+
+			expect(Array.from(root.element.childNodes), "prepend() should ignore falsy values instead of creating DOM nodes").toEqual([
+				child.element,
+				tail.element,
+			]);
+			expect(child.element.parentElement, "prepend() should still prepend real children when falsy values are present").toBe(root.element);
+		} finally {
+			child.remove();
+			root.remove();
+		}
+	});
+
+	it("flattens prepend iterables", () => {
+		const root = mountedComponent("div");
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
+		const tail = Component("span").text.set("tail");
+
+		try {
+			root.append(tail);
+			root.prepend([first, second]);
+
+			expect(Array.from(root.element.childNodes), "prepend() should flatten iterable children in order").toEqual([
+				first.element,
+				second.element,
+				tail.element,
+			]);
+			expect(root.element.textContent, "prepend() should preserve the text content of flattened children").toBe("firstsecondtail");
+		} finally {
+			first.remove();
+			second.remove();
+			root.remove();
+		}
+	});
+
 	it("renders append state children anchored by a comment and replaces old selections", async () => {
 		const host = mountedComponent("div");
-		const trailing = Component("span", { textContent: "trailing" });
+		const trailing = Component("span").text.set("trailing");
 		const dynamic = State<Component | Array<Component | null> | null>(host, null);
-		const alpha = Component("span", { textContent: "alpha" });
-		const beta = Component("span", { textContent: "beta" });
-		const gamma = Component("span", { textContent: "gamma" });
+		const alpha = Component("span").text.set("alpha");
+		const beta = Component("span").text.set("beta");
+		const gamma = Component("span").text.set("gamma");
 
 		host.append(dynamic, trailing);
 		expect(nonCommentNodes(host.element)).toEqual([trailing.element]);
@@ -131,10 +260,10 @@ describe("Component", () => {
 
 	it("renders prepend state children before existing content", async () => {
 		const host = mountedComponent("div");
-		const trailing = Component("span", { textContent: "trailing" });
+		const trailing = Component("span").text.set("trailing");
 		const dynamic = State<Component | Array<Component | null> | null>(host, null);
-		const alpha = Component("span", { textContent: "alpha" });
-		const beta = Component("span", { textContent: "beta" });
+		const alpha = Component("span").text.set("alpha");
+		const beta = Component("span").text.set("beta");
 
 		host.append(trailing);
 		host.prepend(dynamic);
@@ -150,10 +279,10 @@ describe("Component", () => {
 
 	it("renders insert state children relative to the component", async () => {
 		const host = mountedComponent("div");
-		const anchor = Component("span", { textContent: "anchor" });
+		const anchor = Component("span").text.set("anchor");
 		const dynamic = State<Component | Array<Component | null> | null>(host, null);
-		const before = Component("span", { textContent: "before" });
-		const after = Component("span", { textContent: "after" });
+		const before = Component("span").text.set("before");
+		const after = Component("span").text.set("after");
 
 		host.append(anchor);
 		anchor.insert("before", dynamic);
@@ -167,11 +296,11 @@ describe("Component", () => {
 		expect(nonCommentNodes(host.element)).toEqual([anchor.element]);
 	});
 
-	it("reacts to state changes through bindState", async () => {
+	it("reacts to state changes through use with a state", async () => {
 		const component = mountedComponent("div");
 		const counter = State(component, 0);
-		const unsubscribe = component.bindState(counter, (value, target) => {
-			target.setText(`count:${value}`);
+		component.use(counter, (value, target) => {
+			target.text.set(`count:${value}`);
 		});
 
 		expect(component.element.textContent).toBe("count:0");
@@ -180,18 +309,26 @@ describe("Component", () => {
 		await flushEffects();
 		expect(component.element.textContent).toBe("count:2");
 
-		unsubscribe();
 		counter.set(3);
 		await flushEffects();
-		expect(component.element.textContent).toBe("count:2");
+		expect(component.element.textContent).toBe("count:3");
 	});
 
-	it("releases state bindings when the component is removed", () => {
+	it("supports fluent setup blocks through use without a state", () => {
+		const component = mountedComponent("div").use((target) => {
+			target.text.set("ready").attribute.set("role", "status");
+		});
+
+		expect(component.element.textContent).toBe("ready");
+		expect(component.element.getAttribute("role")).toBe("status");
+	});
+
+	it("releases use state bindings when the component is removed", () => {
 		const component = mountedComponent("div");
 		const counter = State(component, 0);
 		const calls: number[] = [];
 
-		component.bindState(counter, (value) => {
+		component.use(counter, (value) => {
 			calls.push(value);
 		});
 
@@ -216,17 +353,30 @@ describe("Component", () => {
 		expect(child.element.isConnected).toBe(false);
 	});
 
-	it("setOwner can release a component from its owner", () => {
-		const owner = mountedComponent("section");
+	it("setOwner can set and release explicit ownership", () => {
+		const explicitOwner = mountedComponent("section");
 		const child = Component("div");
 
-		owner.append(child);
-		child.setOwner(null);
-		owner.remove();
+		child.setOwner(explicitOwner);
+		expect(child.getOwner(), "explicit owner should be set").toBe(explicitOwner);
 
-		expect(child.disposed).toBe(false);
-		expect(child.element.parentElement).toBe(owner.element);
+		child.setOwner(null);
+		expect(child.getOwner(), "explicit owner should be cleared").toBeNull();
+
+		explicitOwner.remove();
+		expect(child.disposed, "child should not be disposed when a released explicit owner is removed").toBe(false);
+
 		child.remove();
+	});
+
+	it("removing a parent disposes implicitly owned children appended via append", () => {
+		const parent = mountedComponent("section");
+		const child = Component("div");
+
+		parent.append(child);
+		parent.remove();
+
+		expect(child.disposed, "child should be disposed when parent is removed").toBe(true);
 	});
 
 	it("clear disposes managed component children", () => {
@@ -240,12 +390,12 @@ describe("Component", () => {
 		expect(host.element.childNodes).toHaveLength(0);
 	});
 
-	it("setText disposes managed component children", () => {
+	it("text.set disposes managed component children", () => {
 		const host = mountedComponent("div");
 		const child = Component("span");
 
 		host.append(child);
-		host.setText("done");
+		host.text.set("done");
 
 		expect(child.disposed).toBe(true);
 		expect(host.element.textContent).toBe("done");
@@ -264,8 +414,8 @@ describe("Component", () => {
 
 	it("parks conditional children behind a placeholder comment", async () => {
 		const host = mountedComponent("div");
-		const leading = Component("span", { textContent: "leading" });
-		const toggled = Component("span", { textContent: "toggled" });
+		const leading = Component("span").text.set("leading");
+		const toggled = Component("span").text.set("toggled");
 		const visible = State(host, false);
 
 		host.append(leading);
@@ -289,7 +439,7 @@ describe("Component", () => {
 
 	it("keeps conditional component children alive while parked and disposes them on cleanup", async () => {
 		const host = mountedComponent("div");
-		const toggled = Component("span", { textContent: "toggled" });
+		const toggled = Component("span").text.set("toggled");
 		const visible = State(host, false);
 		const cleanup = host.appendWhen(visible, toggled);
 
@@ -309,8 +459,8 @@ describe("Component", () => {
 
 	it("prepends conditional children at the front of the component", async () => {
 		const host = mountedComponent("div");
-		const trailing = Component("span", { textContent: "trailing" });
-		const toggled = Component("span", { textContent: "prepended" });
+		const trailing = Component("span").text.set("trailing");
+		const toggled = Component("span").text.set("prepended");
 		const visible = State(host, true);
 
 		host.append(trailing);
@@ -327,8 +477,8 @@ describe("Component", () => {
 
 	it("inserts sibling nodes before and after itself and inherits the current owner", () => {
 		const owner = mountedComponent("div");
-		const target = Component("span", { textContent: "target" });
-		const before = Component("span", { textContent: "before" });
+		const target = Component("span").text.set("target");
+		const before = Component("span").text.set("before");
 		const after = document.createElement("hr");
 
 		owner.append(target);
@@ -343,10 +493,10 @@ describe("Component", () => {
 
 	it("accepts arrays of insertables in insert", () => {
 		const host = mountedComponent("div");
-		const anchor = Component("span", { textContent: "anchor" });
-		const leading = Component("span", { textContent: "leading" });
+		const anchor = Component("span").text.set("anchor");
+		const leading = Component("span").text.set("leading");
 		const middle = document.createElement("hr");
-		const trailing = Component("span", { textContent: "trailing" });
+		const trailing = Component("span").text.set("trailing");
 
 		host.append(anchor);
 		anchor.insert("before", [leading, middle]);
@@ -360,11 +510,31 @@ describe("Component", () => {
 		]);
 	});
 
+	it("accepts strings in insert", () => {
+		const host = mountedComponent("div");
+		const anchor = Component("span").text.set("anchor");
+		const leading = Component("span").text.set("leading");
+
+		try {
+			host.append(anchor);
+			anchor.insert("before", "before" as any, [leading, "after"] as any);
+
+			expect(host.element.childNodes[0], "insert() should convert string children to text nodes").toBeInstanceOf(Text);
+			expect(host.element.childNodes[0].textContent, "insert() should preserve string child content").toBe("before");
+			expect(host.element.childNodes[1], "insert() should preserve component children when mixed with strings").toBe(leading.element);
+			expect(host.element.childNodes[2], "insert() should convert strings inside iterables to text nodes").toBeInstanceOf(Text);
+			expect(host.element.childNodes[2].textContent, "insert() should preserve iterable string child content").toBe("after");
+			expect(host.element.childNodes[3], "insert() should keep the anchor at the end of the inserted sequence").toBe(anchor.element);
+		} finally {
+			host.remove();
+		}
+	});
+
 	it("toggles sibling insertion with insertWhen", async () => {
 		const host = mountedComponent("div");
-		const anchor = Component("span", { textContent: "anchor" });
-		const before = Component("span", { textContent: "before" });
-		const after = Component("span", { textContent: "after" });
+		const anchor = Component("span").text.set("anchor");
+		const before = Component("span").text.set("before");
+		const after = Component("span").text.set("after");
 		const visible = State(host, false);
 
 		host.append(anchor);
@@ -390,9 +560,9 @@ describe("Component", () => {
 
 	it("accepts arrays of insertables in insertWhen", async () => {
 		const host = mountedComponent("div");
-		const anchor = Component("span", { textContent: "anchor" });
-		const first = Component("span", { textContent: "first" });
-		const second = Component("span", { textContent: "second" });
+		const anchor = Component("span").text.set("anchor");
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
 		const visible = State(host, false);
 
 		host.append(anchor);
@@ -413,8 +583,8 @@ describe("Component", () => {
 
 	it("appendTo and prependTo move components into their destination component", () => {
 		const host = mountedComponent("div");
-		const child = Component("span", { textContent: "child" });
-		const trailing = Component("span", { textContent: "trailing" });
+		const child = Component("span").text.set("child");
+		const trailing = Component("span").text.set("trailing");
 
 		host.append(trailing);
 		child.prependTo(host);
@@ -430,11 +600,243 @@ describe("Component", () => {
 		expect(child.disposed).toBe(true);
 	});
 
+	it("appendTo and prependTo accept raw DOM parents like document.body", () => {
+		const trailing = document.createElement("hr");
+		document.body.replaceChildren(trailing);
+
+		const prepended = Component("span").text.set("prepended");
+		const appended = Component("span").text.set("appended");
+
+		prepended.prependTo(document.body);
+		appended.appendTo(document.body);
+
+		expect(Array.from(document.body.childNodes)).toEqual([
+			prepended.element,
+			trailing,
+			appended.element,
+		]);
+		expect(prepended.getOwner()).toBe(null);
+		expect(appended.getOwner()).toBe(null);
+
+		prepended.remove();
+		appended.remove();
+		trailing.remove();
+	});
+
+	describe("lifecycle mounting", () => {
+		it("Component inside a raw DOM element knows it's mounted when the container enters the document", () => {
+			vi.useFakeTimers();
+
+			const container = document.createElement("div");
+			const component = Component("span");
+			const mountCallback = vi.fn();
+			component.event.owned.on.Mount(mountCallback);
+
+			component.setOwner(null);
+			container.appendChild(component.element);
+			document.body.appendChild(container);
+
+			try {
+				expect(component.element.isConnected, "raw DOM mounting should connect the component element").toBe(true);
+				expect(mountCallback, "Mount event should not fire before the orphan check").not.toHaveBeenCalled();
+				expect(() => {
+					vi.advanceTimersByTime(0);
+				}, "the orphan check should not throw once the raw container is in the document").not.toThrow();
+				expect(component.disposed, "a connected component should not be disposed by the orphan check").toBe(false);
+				expect(mountCallback, "Mount event should fire as a self-healing operation when the orphan check finds isConnected").toHaveBeenCalledTimes(1);
+			} finally {
+				component.remove();
+				container.remove();
+				vi.useRealTimers();
+			}
+		});
+
+		it("removing a parent Component disposes owned descendant Components through non-wrapped intermediaries", () => {
+			const parent = mountedComponent("section");
+			const child = Component("span");
+			const mountCallback = vi.fn();
+			const disposeCallback = vi.fn();
+			const intermediary = document.createElement("div");
+
+			child.event.owned.on.Mount(mountCallback);
+			child.event.owned.on.Dispose(disposeCallback);
+
+			parent.append(child);
+			expect(mountCallback, "Mount event should fire when child is appended via kitsui API").toHaveBeenCalledTimes(1);
+
+			parent.element.appendChild(intermediary);
+			intermediary.appendChild(child.element);
+
+			expect(child.element.parentElement, "the owned child should be nested under the raw intermediary before removal").toBe(intermediary);
+			expect(child.disposed, "the owned child should remain active before the parent is removed").toBe(false);
+
+			parent.remove();
+
+			expect(disposeCallback, "Dispose event should fire when parent is removed").toHaveBeenCalledTimes(1);
+			expect(child.disposed, "removing the parent should dispose owned descendants even through raw DOM intermediaries").toBe(true);
+			expect(child.element.isConnected, "disposed descendants should no longer be connected").toBe(false);
+		});
+
+		it("removing a parent Component disposes descendant Components inside intermediate non-wrapped elements", () => {
+			vi.useFakeTimers();
+
+			const parent = mountedComponent("section");
+			const intermediary = document.createElement("div");
+			const child = Component("span");
+			const mountCallback = vi.fn();
+			const disposeCallback = vi.fn();
+
+			child.event.owned.on.Mount(mountCallback);
+			child.event.owned.on.Dispose(disposeCallback);
+
+			parent.element.appendChild(intermediary);
+			intermediary.appendChild(child.element);
+
+			try {
+				expect(child.element.isConnected, "the raw DOM child should be connected before the parent is removed").toBe(true);
+				expect(mountCallback, "Mount event should not fire before the orphan check").not.toHaveBeenCalled();
+				expect(() => {
+					vi.advanceTimersByTime(0);
+				}, "the orphan check should not throw while the raw DOM child is connected").not.toThrow();
+				expect(mountCallback, "Mount event should fire as a self-healing operation").toHaveBeenCalledTimes(1);
+
+				parent.remove();
+
+				expect(disposeCallback, "Dispose event should fire when parent tree is removed").toHaveBeenCalledTimes(1);
+				expect(child.disposed, "descendant Components inside raw DOM intermediaries should be disposed when the parent is removed").toBe(true);
+				expect(child.element.isConnected, "disposed descendants should no longer be connected").toBe(false);
+			} finally {
+				intermediary.remove();
+				vi.useRealTimers();
+				vi.useRealTimers();
+			}
+		});
+
+		it("preserves explicitly-owned components when their implicit parent is removed, allowing re-append", () => {
+			const parent = mountedComponent("section");
+			const newParent = mountedComponent("article");
+			const explicitOwner = mountedComponent("aside");
+			const child = Component("div");
+
+			child.setOwner(explicitOwner);
+			parent.append(child);
+
+			expect(child.element.parentElement, "child should be in parent").toBe(parent.element);
+			expect(child.disposed, "child should not be disposed before parent removal").toBe(false);
+
+			parent.remove();
+
+			expect(child.disposed, "child should survive parent removal due to explicit owner").toBe(false);
+			expect(child.element.isConnected, "child element should be disconnected after parent removal").toBe(false);
+
+			newParent.append(child);
+
+			expect(child.element.parentElement, "child should be in new parent").toBe(newParent.element);
+			expect(child.element.isConnected, "child should be connected after re-append").toBe(true);
+			expect(child.disposed, "child should still be alive after re-append").toBe(false);
+
+			explicitOwner.remove();
+
+			expect(child.disposed, "child should be disposed when explicit owner is removed").toBe(true);
+		});
+	});
+
+	describe("Mount event", () => {
+		it("fires when component is appended to DOM via appendTo", () => {
+			const component = Component("div");
+			const mountCallback = vi.fn();
+
+			component.event.owned.on.Mount(mountCallback);
+			component.appendTo(document.body);
+
+			expect(mountCallback, "Mount event should fire when appended to the DOM").toHaveBeenCalledTimes(1);
+
+			component.remove();
+		});
+
+		it("fires when component is appended as a child via append", () => {
+			const parent = mountedComponent("div");
+			const child = Component("div");
+			const mountCallback = vi.fn();
+
+			child.event.owned.on.Mount(mountCallback);
+			parent.append(child);
+
+			expect(mountCallback, "Mount event should fire when appended as a child").toHaveBeenCalledTimes(1);
+
+			parent.remove();
+		});
+
+		it("fires only once even when component is moved", () => {
+			const firstParent = mountedComponent("div");
+			const secondParent = mountedComponent("section");
+			const mountCallback = vi.fn();
+			const child = Component("div");
+
+			child.event.owned.on.Mount(mountCallback);
+			firstParent.append(child);
+			secondParent.append(child);
+
+			expect(mountCallback, "Mount event fires only once, not on each move").toHaveBeenCalledTimes(1);
+
+			secondParent.remove();
+			firstParent.remove();
+		});
+
+		it("is accessible via event.owned.on.Mount", () => {
+			const component = Component("div");
+			const mountCallback = vi.fn();
+
+			component.event.owned.on.Mount(mountCallback);
+			component.appendTo(document.body);
+
+			expect(mountCallback, "event.owned.on.Mount listener should fire").toHaveBeenCalledTimes(1);
+
+			component.remove();
+		});
+	});
+
+	describe("Dispose event", () => {
+		it("fires when component is removed", () => {
+			const component = mountedComponent("div");
+			const disposeCallback = vi.fn();
+
+			component.event.owned.on.Dispose(disposeCallback);
+			component.remove();
+
+			expect(disposeCallback, "Dispose event should fire on removal").toHaveBeenCalledTimes(1);
+		});
+
+		it("fires before the element is detached from DOM", () => {
+			const component = mountedComponent("div");
+			let wasConnected = false;
+
+			component.event.owned.on.Dispose(() => {
+				wasConnected = component.element.isConnected;
+			});
+			component.remove();
+
+			expect(wasConnected, "element should still be connected when Dispose fires").toBe(true);
+		});
+
+		it("is accessible via event.owned.on.Dispose", () => {
+			const component = mountedComponent("div");
+			const disposeCallback = vi.fn();
+
+			component.event.owned.on.Dispose(disposeCallback);
+			component.remove();
+
+			expect(disposeCallback, "event.owned.on.Dispose listener should fire").toHaveBeenCalledTimes(1);
+		});
+	});
+
 	it("appendToWhen toggles self-placement and parks the component in storage when hidden", async () => {
 		const host = mountedComponent("div");
-		const child = Component("span", { textContent: "child" });
+		const child = Component("span").text.set("child");
 		const visible = State(host, false);
-		const cleanup = child.appendToWhen(visible, host);
+		const result = child.appendToWhen(visible, host);
+
+		expect(result).toBe(child);
 
 		expect(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
 
@@ -446,17 +848,56 @@ describe("Component", () => {
 		await flushEffects();
 		expect(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
 
-		cleanup();
+		child.remove();
 		visible.set(true);
 		await flushEffects();
-		expect(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
-		child.remove();
+		expect(child.element.parentElement).toBeNull();
+	});
+
+	it("conditional raw-node placement without a wrapped ancestor uses a stable lifecycle owner", async () => {
+		const visibilityOwner = mountedComponent("div");
+		const leading = document.createElement("hr");
+		const trailing = document.createElement("hr");
+		const appended = Component("span").text.set("appended");
+		const prepended = Component("span").text.set("prepended");
+		const inserted = Component("span").text.set("inserted");
+		const visible = State(visibilityOwner, false);
+		document.body.replaceChildren(leading, trailing);
+		const appendResult = appended.appendToWhen(visible, document.body);
+		const prependResult = prepended.prependToWhen(visible, document.body);
+		const insertResult = inserted.insertToWhen(visible, "before", trailing);
+
+		expect(appendResult).toBe(appended);
+		expect(prependResult).toBe(prepended);
+		expect(insertResult).toBe(inserted);
+
+		expect(appended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(prepended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(inserted.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(document.body)).toEqual([
+			prepended.element,
+			leading,
+			inserted.element,
+			trailing,
+			appended.element,
+		]);
+
+		appended.remove();
+		prepended.remove();
+		inserted.remove();
+		visibilityOwner.remove();
+		leading.remove();
+		trailing.remove();
 	});
 
 	it("prependToWhen toggles self-placement at the front of the destination component", async () => {
 		const host = mountedComponent("div");
-		const trailing = Component("span", { textContent: "trailing" });
-		const child = Component("span", { textContent: "child" });
+		const trailing = Component("span").text.set("trailing");
+		const child = Component("span").text.set("child");
 		const visible = State(host, true);
 
 		host.append(trailing);
@@ -469,11 +910,49 @@ describe("Component", () => {
 		expect(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
 	});
 
+	it("appendToWhen and prependToWhen inherit the nearest wrapped ancestor from raw DOM parents", async () => {
+		const owner = mountedComponent("div");
+		const slot = document.createElement("div");
+		const trailing = document.createElement("hr");
+		const appended = Component("span").text.set("appended");
+		const prepended = Component("span").text.set("prepended");
+		const visible = State(owner, false);
+
+		owner.element.append(slot);
+		slot.append(trailing);
+		const appendedResult = appended.appendToWhen(visible, slot);
+		const prependedResult = prepended.prependToWhen(visible, slot);
+
+		expect(appendedResult).toBe(appended);
+		expect(prependedResult).toBe(prepended);
+
+		expect(appended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(prepended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(slot)).toEqual([
+			prepended.element,
+			trailing,
+			appended.element,
+		]);
+
+		owner.remove();
+		expect(nonCommentNodes(slot)).toEqual([trailing]);
+		expect(Array.from(slot.childNodes).filter((node) => node instanceof Comment)).toHaveLength(0);
+		expect(appended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(prepended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+
+		appended.remove();
+		prepended.remove();
+	});
+
 	it("insertTo and insertToWhen place components relative to existing nodes", async () => {
 		const host = mountedComponent("div");
-		const anchor = Component("span", { textContent: "anchor" });
-		const child = Component("span", { textContent: "child" });
-		const trailing = Component("span", { textContent: "trailing" });
+		const anchor = Component("span").text.set("anchor");
+		const child = Component("span").text.set("child");
+		const trailing = Component("span").text.set("trailing");
 		const visible = State(host, false);
 
 		host.append(anchor, trailing);
@@ -481,7 +960,7 @@ describe("Component", () => {
 
 		expect(Array.from(host.element.childNodes)).toEqual([anchor.element, child.element, trailing.element]);
 
-		const conditional = Component("span", { textContent: "conditional" });
+		const conditional = Component("span").text.set("conditional");
 		conditional.insertToWhen(visible, "before", trailing);
 
 		expect(conditional.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
@@ -496,11 +975,56 @@ describe("Component", () => {
 		]);
 	});
 
+	it("insertTo and insertToWhen inherit the nearest wrapped ancestor from raw reference nodes", async () => {
+		const owner = mountedComponent("div");
+		const slot = document.createElement("div");
+		const anchor = document.createElement("hr");
+		const trailing = document.createElement("hr");
+		const child = Component("span").text.set("child");
+		const conditional = Component("span").text.set("conditional");
+		const visible = State(owner, false);
+
+		owner.element.append(slot);
+		slot.append(anchor, trailing);
+		child.insertTo("after", anchor);
+		const result = conditional.insertToWhen(visible, "before", trailing);
+
+		expect(result).toBe(conditional);
+
+		expect(nonCommentNodes(slot)).toEqual([
+			anchor,
+			child.element,
+			trailing,
+		]);
+		expect(conditional.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(slot)).toEqual([
+			anchor,
+			child.element,
+			conditional.element,
+			trailing,
+		]);
+
+		owner.remove();
+		expect(child.disposed).toBe(true);
+		expect(nonCommentNodes(slot)).toEqual([
+			anchor,
+			trailing,
+		]);
+		expect(Array.from(slot.childNodes).filter((node) => node instanceof Comment)).toHaveLength(0);
+		expect(conditional.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+
+		conditional.remove();
+	});
+
 	it("place switches between markers and storage", async () => {
 		const owner = mountedComponent("section");
 		const left = mountedComponent("div");
 		const right = mountedComponent("div");
-		const child = Component("span", { textContent: "child" });
+		const child = Component("span").text.set("child");
 		const current = State<any>(owner, null);
 		let leftPlace: any;
 		let rightPlace: any;
@@ -531,8 +1055,8 @@ describe("Component", () => {
 	it("place can move between explicit marker targets and cleans them up with the owner", async () => {
 		const owner = mountedComponent("section");
 		const host = mountedComponent("div");
-		const anchor = Component("span", { textContent: "anchor" });
-		const child = Component("span", { textContent: "child" });
+		const anchor = Component("span").text.set("anchor");
+		const child = Component("span").text.set("child");
 		const current = State<any>(owner, null);
 		let beforeAnchor: any;
 		let afterAnchor: any;
@@ -563,7 +1087,7 @@ describe("Component", () => {
 	it("treats a removed place marker as null placement and logs an error", async () => {
 		const owner = mountedComponent("section");
 		const host = mountedComponent("div");
-		const child = Component("span", { textContent: "child" });
+		const child = Component("span").text.set("child");
 		const current = State<any>(owner, null);
 		let targetPlace: any;
 
@@ -587,8 +1111,8 @@ describe("Component", () => {
 
 	it("removes the owning component when a conditional marker is removed", async () => {
 		const host = mountedComponent("div");
-		const anchor = Component("span", { textContent: "anchor" });
-		const sibling = Component("span", { textContent: "sibling" });
+		const anchor = Component("span").text.set("anchor");
+		const sibling = Component("span").text.set("sibling");
 		const visible = State(host, false);
 
 		host.append(anchor);
@@ -606,7 +1130,7 @@ describe("Component", () => {
 	it("replaces earlier placement controllers when a new placement is applied", () => {
 		const left = mountedComponent("div");
 		const right = mountedComponent("div");
-		const child = Component("span", { textContent: "child" });
+		const child = Component("span").text.set("child");
 		const visible = State(left, false);
 
 		child.appendToWhen(visible, left);
@@ -617,28 +1141,9 @@ describe("Component", () => {
 		expect(left.element.childNodes).toHaveLength(0);
 	});
 
-	it("uses moveBefore when the parent node provides it", () => {
-		const host = mountedComponent("div");
-		const child = Component("span", { textContent: "child" });
-		const calls: Array<[Node, Node | null]> = [];
-		const moveHost = host.element as HTMLElement & {
-			moveBefore?: (node: Node, child: Node | null) => void;
-		};
-
-		moveHost.moveBefore = (node, beforeNode) => {
-			calls.push([node, beforeNode]);
-			host.element.insertBefore(node, beforeNode);
-		};
-
-		child.appendTo(host);
-
-		expect(calls).toEqual([[child.element, null]]);
-		expect(host.element.firstElementChild).toBe(child.element);
-	});
-
 	it("creates and memoizes a ClassManipulator from the style getter", () => {
 		const component = mountedComponent("div");
-		const style = Style("component-style-memo", { color: "red" });
+		const style = Style.Class("component-style-memo", { color: "red" });
 
 		expect(component.class).toBe(component.class);
 

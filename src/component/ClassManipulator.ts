@@ -1,4 +1,5 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
+import type { Component } from "./Component";
 import { Style } from "./Style";
 
 /**
@@ -11,7 +12,7 @@ export type Falsy = false | 0 | 0n | "" | null | undefined;
  * A single style, falsy value, or iterable collection of styles and falsy values.
  * Falsy values in iterables are filtered out during resolution.
  */
-export type StyleSelection = Style | Falsy | Iterable<Style | Falsy>;
+export type StyleSelection = Style.Class | Falsy | Iterable<Style.Class | Falsy>;
 
 /**
  * A reactive source of style selections, such as a State.
@@ -30,7 +31,7 @@ export interface StyleSelectionSource {
 /**
  * A style input: a static style, falsy value, reactive style source, or any combination.
  */
-export type StyleInput = Style | Falsy | StyleSelectionSource;
+export type StyleInput = Style.Class | Falsy | StyleSelectionSource;
 
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
@@ -50,22 +51,22 @@ function isStyleInputState (value: StyleInput): value is StyleSelectionSource {
 	return value instanceof State;
 }
 
-function isIterableStyleSelection (value: StyleSelection): value is Iterable<Style | Falsy> {
+function isIterableStyleSelection (value: StyleSelection): value is Iterable<Style.Class | Falsy> {
 	return value !== null
 		&& value !== undefined
 		&& typeof value === "object"
 		&& Symbol.iterator in value
-		&& !(value instanceof Style);
+		&& !(value instanceof Style.Class);
 }
 
-function resolveStyleSelection (selection: StyleSelection): Map<string, Style> {
-	const styles = new Map<string, Style>();
+function resolveStyleSelection (selection: StyleSelection): Map<string, Style.Class> {
+	const styles = new Map<string, Style.Class>();
 
 	if (!selection) {
 		return styles;
 	}
 
-	if (selection instanceof Style) {
+	if (selection instanceof Style.Class) {
 		styles.set(selection.className, selection);
 		return styles;
 	}
@@ -79,7 +80,7 @@ function resolveStyleSelection (selection: StyleSelection): Map<string, Style> {
 			continue;
 		}
 
-		if (!(item instanceof Style)) {
+		if (!(item instanceof Style.Class)) {
 			throw new TypeError("Unsupported style selection item.");
 		}
 
@@ -98,8 +99,8 @@ function resolveStyleSelection (selection: StyleSelection): Map<string, Style> {
  *
  * @example
  * const component = Component("div");
- * const primaryStyle = Style("primary", { color: "blue" });
- * const accentStyle = Style("accent", { fontWeight: "bold" });
+ * const primaryStyle = Style.Class("primary", { color: "blue" });
+ * const accentStyle = Style.Class("accent", { fontWeight: "bold" });
  *
  * // Static invocations
  * component.class.add(primaryStyle);
@@ -107,7 +108,7 @@ function resolveStyleSelection (selection: StyleSelection): Map<string, Style> {
  *
  * // Reactive binding
  * const isActive = State(component, false);
- * const cleanup = component.class.bind(isActive, accentStyle);
+ * component.class.bind(isActive, accentStyle);
  *
  * // Multiple styles or iterables
  * component.class.add([primaryStyle, accentStyle]);
@@ -120,7 +121,7 @@ export class ClassManipulator {
 	 * @param element The HTML element to manipulate.
 	 */
 	constructor (
-		private readonly owner: Owner,
+		private readonly owner: Component,
 		private readonly element: HTMLElement,
 	) { }
 
@@ -130,7 +131,7 @@ export class ClassManipulator {
 	 *
 	 * @param classes Static or reactive styles to add. Accepts individual styles,
 	 * falsy values for conditional logic, or reactive style sources (States).
-	 * @returns This manipulator for method chaining.
+	 * @returns The owning component for fluent chaining.
 	 * @throws If the owner is disposed.
 	 *
 	 * @example
@@ -144,14 +145,14 @@ export class ClassManipulator {
 	 * const selection = State(component, null);
 	 * component.class.add(selection);
 	 */
-	add (...classes: StyleInput[]): this {
+	add (...classes: StyleInput[]): Component {
 		this.ensureActive();
 
 		for (const style of classes) {
 			this.installAddInput(style);
 		}
 
-		return this;
+		return this.owner;
 	}
 
 	/**
@@ -160,17 +161,17 @@ export class ClassManipulator {
 	 *
 	 * @param classes Static or reactive styles to remove. Accepts individual styles,
 	 * falsy values for conditional logic, or reactive style sources (States).
-	 * @returns This manipulator for method chaining.
+	 * @returns The owning component for fluent chaining.
 	 * @throws If the owner is disposed.
 	 */
-	remove (...classes: StyleInput[]): this {
+	remove (...classes: StyleInput[]): Component {
 		this.ensureActive();
 
 		for (const style of classes) {
 			this.installRemoveInput(style);
 		}
 
-		return this;
+		return this.owner;
 	}
 
 	/**
@@ -181,49 +182,43 @@ export class ClassManipulator {
 	 * @param state A boolean State controlling the visibility of the classes.
 	 * @param classes Styles to bind to the state. Accepts individual styles, falsy
 	 * values, or reactive style sources.
-	 * @returns A cleanup function that stops the binding and removes the classes.
+	 * @returns The owning component for fluent chaining.
 	 * @throws If the owner is disposed.
 	 *
 	 * @example
 	 * const isActive = State(component, false);
-	 * const cleanup = component.class.bind(isActive, activeStyle);
+	 * component.class.bind(isActive, activeStyle);
 	 * // activeStyle is present iff isActive.value is true
-	 * cleanup(); // removes the binding and the classes
 	 */
-	bind (state: State<boolean>, ...classes: StyleInput[]): CleanupFunction {
+	bind (state: State<boolean>, ...classes: StyleInput[]): Component {
 		this.ensureActive();
 
-		const cleanups = classes
-			.filter((style): style is Exclude<StyleInput, Falsy> => Boolean(style))
-			.map((style) => {
-				if (isStyleInputState(style)) {
-					return this.installStateDrivenStyles(style, () => state.value, {
-						logStateReplacement: true,
-						subscribePresenceChanges: (listener) => state.subscribe(this.owner, () => {
-							listener();
-						}),
-					});
-				}
-
-				return this.replaceDeterminer(style, (applyIfCurrent) => {
-					applyIfCurrent(state.value);
-
-					const cleanup = state.subscribe(this.owner, (value) => {
-						applyIfCurrent(value);
-					});
-
-					return () => {
-						cleanup();
-						this.element.classList.remove(style.className);
-					};
+		for (const style of classes.filter((value): value is Exclude<StyleInput, Falsy> => Boolean(value))) {
+			if (isStyleInputState(style)) {
+				this.installStateDrivenStyles(style, () => state.value, {
+					logStateReplacement: true,
+					subscribePresenceChanges: (listener) => state.subscribe(this.owner, () => {
+						listener();
+					}),
 				});
-			});
-
-		return () => {
-			for (const cleanup of cleanups) {
-				cleanup();
+				continue;
 			}
-		};
+
+			this.replaceDeterminer(style, (applyIfCurrent) => {
+				applyIfCurrent(state.value);
+
+				const cleanup = state.subscribe(this.owner, (value) => {
+					applyIfCurrent(value);
+				});
+
+				return () => {
+					cleanup();
+					this.element.classList.remove(style.className);
+				};
+			});
+		}
+
+		return this.owner;
 	}
 
 	/**
@@ -233,8 +228,7 @@ export class ClassManipulator {
 	 *
 	 * @param owner The external owner managing the lifetime of these class additions.
 	 * @param classes Static or reactive styles to add.
-	 * @returns A cleanup function that may be called early if needed. Calling this
-	 * before the owner cleanup will prevent the automatic removal via the owner.
+	 * @returns The owning component for fluent chaining.
 	 * @throws If this manipulator's owner is disposed.
 	 *
 	 * @example
@@ -242,43 +236,33 @@ export class ClassManipulator {
 	 * component.class.addFrom(externalOwner, externalStyle);
 	 * // externalStyle is removed when externalOwner is cleaned up
 	 */
-	addFrom (owner: Owner, ...classes: StyleInput[]): CleanupFunction {
+	addFrom (owner: Owner, ...classes: StyleInput[]): Component {
 		this.ensureActive();
 
-		const cleanups = classes
-			.filter((style): style is Exclude<StyleInput, Falsy> => Boolean(style))
-			.map((style) => {
-				if (isStyleInputState(style)) {
-					const cleanup = this.installStateDrivenStyles(style, () => true, {
-						logStateReplacement: true,
-					});
-					const releaseOwner = owner.onCleanup(cleanup);
-
-					return () => {
-						releaseOwner();
-						cleanup();
-					};
-				}
-
-				return this.replaceDeterminer(style, (applyIfCurrent) => {
-					applyIfCurrent(true);
-
-					const releaseOwner = owner.onCleanup(() => {
-						applyIfCurrent(false);
-					});
-
-					return () => {
-						releaseOwner();
-						this.element.classList.remove(style.className);
-					};
+		for (const style of classes.filter((value): value is Exclude<StyleInput, Falsy> => Boolean(value))) {
+			if (isStyleInputState(style)) {
+				const cleanup = this.installStateDrivenStyles(style, () => true, {
+					logStateReplacement: true,
 				});
-			});
-
-		return () => {
-			for (const cleanup of cleanups) {
-				cleanup();
+				owner.onCleanup(cleanup);
+				continue;
 			}
-		};
+
+			this.replaceDeterminer(style, (applyIfCurrent) => {
+				applyIfCurrent(true);
+
+				const releaseOwner = owner.onCleanup(() => {
+					applyIfCurrent(false);
+				});
+
+				return () => {
+					releaseOwner();
+					this.element.classList.remove(style.className);
+				};
+			});
+		}
+
+		return this.owner;
 	}
 
 	private ensureActive (): void {
@@ -427,7 +411,7 @@ export class ClassManipulator {
 	}
 
 	private replaceDeterminer (
-		style: Style,
+		style: Style.Class,
 		install: (applyIfCurrent: (present: boolean) => void) => CleanupFunction,
 		options: ReplaceDeterminerOptions = {},
 	): CleanupFunction {

@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClassManipulator } from "../../src/component/ClassManipulator";
 import { Component } from "../../src/component/Component";
+import placeExtension from "../../src/component/extensions/placeExtension";
 import { Style } from "../../src/component/Style";
 import { State } from "../../src/state/State";
 
+placeExtension();
+
 function mountedComponent (tagName: string = "div"): Component {
-	return Component(tagName).mount(document.body);
+	return Component(tagName).appendTo(document.body);
 }
 
 async function flushEffects (): Promise<void> {
@@ -26,7 +29,7 @@ async function flushEffects (): Promise<void> {
 describe("ClassManipulator", () => {
 	it("adds and removes style classes", () => {
 		const component = mountedComponent("div");
-		const card = Style("class-manipulator-card", { color: "red" });
+		const card = Style.Class("class-manipulator-card", { color: "red" });
 
 		expect(component.class).toBeInstanceOf(ClassManipulator);
 
@@ -39,7 +42,7 @@ describe("ClassManipulator", () => {
 
 	it("ignores all falsy static inputs", () => {
 		const component = mountedComponent("div");
-		const card = Style("class-manipulator-falsy-card", { color: "red" });
+		const card = Style.Class("class-manipulator-falsy-card", { color: "red" });
 
 		component.class.add(false, null, undefined, 0, 0n, "", card);
 		expect(component.element.classList.contains(card.className)).toBe(true);
@@ -50,9 +53,9 @@ describe("ClassManipulator", () => {
 
 	it("binds classes to boolean state", async () => {
 		const component = mountedComponent("div");
-		const active = Style("class-manipulator-active", { color: "green" });
+		const active = Style.Class("class-manipulator-active", { color: "green" });
 		const state = State(component, false);
-		const cleanup = component.class.bind(state, active);
+		component.class.bind(state, active);
 
 		expect(component.element.classList.contains(active.className)).toBe(false);
 
@@ -60,15 +63,15 @@ describe("ClassManipulator", () => {
 		await flushEffects();
 		expect(component.element.classList.contains(active.className)).toBe(true);
 
-		cleanup();
+		component.class.remove(active);
 		expect(component.element.classList.contains(active.className)).toBe(false);
 	});
 
 	it("adds styles from a style-selection state", async () => {
 		const component = mountedComponent("div");
-		const primary = Style("class-manipulator-state-add-primary", { color: "red" });
-		const secondary = Style("class-manipulator-state-add-secondary", { color: "blue" });
-		const selection = State<Style | Array<Style | null> | null>(component, null);
+		const primary = Style.Class("class-manipulator-state-add-primary", { color: "red" });
+		const secondary = Style.Class("class-manipulator-state-add-secondary", { color: "blue" });
+		const selection = State<Style.Class | Array<Style.Class | null> | null>(component, null);
 
 		component.class.add(selection);
 		expect(component.element.className).toBe("");
@@ -89,9 +92,9 @@ describe("ClassManipulator", () => {
 
 	it("removes styles from a style-selection state", async () => {
 		const component = mountedComponent("div");
-		const primary = Style("class-manipulator-state-remove-primary", { color: "red" });
-		const secondary = Style("class-manipulator-state-remove-secondary", { color: "blue" });
-		const selection = State<Style | Array<Style | null> | null>(component, primary);
+		const primary = Style.Class("class-manipulator-state-remove-primary", { color: "red" });
+		const secondary = Style.Class("class-manipulator-state-remove-secondary", { color: "blue" });
+		const selection = State<Style.Class | Array<Style.Class | null> | null>(component, primary);
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
 
 		component.class.add(primary, secondary);
@@ -111,11 +114,11 @@ describe("ClassManipulator", () => {
 
 	it("binds boolean presence for styles from a style-selection state", async () => {
 		const component = mountedComponent("div");
-		const primary = Style("class-manipulator-state-bind-primary", { color: "red" });
-		const secondary = Style("class-manipulator-state-bind-secondary", { color: "blue" });
+		const primary = Style.Class("class-manipulator-state-bind-primary", { color: "red" });
+		const secondary = Style.Class("class-manipulator-state-bind-secondary", { color: "blue" });
 		const visible = State(component, false);
-		const selection = State<Style | Array<Style | null> | null>(component, primary);
-		const cleanup = component.class.bind(visible, selection, false, null);
+		const selection = State<Style.Class | Array<Style.Class | null> | null>(component, primary);
+		component.class.bind(visible, selection, false, null);
 
 		expect(component.element.className).toBe("");
 
@@ -132,12 +135,12 @@ describe("ClassManipulator", () => {
 		await flushEffects();
 		expect(component.element.className).toBe("");
 
-		cleanup();
+		component.class.remove(primary, secondary);
 	});
 
 	it("replaces a binding when add is called for the same style", async () => {
 		const component = mountedComponent("div");
-		const style = Style("class-manipulator-bind-then-add", { color: "purple" });
+		const style = Style.Class("class-manipulator-bind-then-add", { color: "purple" });
 		const state = State(component, false);
 
 		component.class.bind(state, style);
@@ -154,7 +157,7 @@ describe("ClassManipulator", () => {
 
 	it("replaces a binding when remove is called for the same style", async () => {
 		const component = mountedComponent("div");
-		const style = Style("class-manipulator-bind-then-remove", { color: "orange" });
+		const style = Style.Class("class-manipulator-bind-then-remove", { color: "orange" });
 		const state = State(component, true);
 
 		component.class.bind(state, style);
@@ -169,7 +172,7 @@ describe("ClassManipulator", () => {
 
 	it("replaces a static add when a binding is applied for the same style", async () => {
 		const component = mountedComponent("div");
-		const style = Style("class-manipulator-add-then-bind", { color: "brown" });
+		const style = Style.Class("class-manipulator-add-then-bind", { color: "brown" });
 		const state = State(component, false);
 
 		component.class.add(style);
@@ -186,7 +189,7 @@ describe("ClassManipulator", () => {
 	it("adds classes from another owner until that owner is disposed", () => {
 		const component = mountedComponent("div");
 		const owner = mountedComponent("section");
-		const elevated = Style("class-manipulator-elevated", { boxShadow: "0 0 1px black" });
+		const elevated = Style.Class("class-manipulator-elevated", { boxShadow: "0 0 1px black" });
 
 		component.class.addFrom(owner, elevated);
 		expect(component.element.classList.contains(elevated.className)).toBe(true);
@@ -198,9 +201,9 @@ describe("ClassManipulator", () => {
 	it("adds styles from a style-selection state until the external owner is disposed", async () => {
 		const component = mountedComponent("div");
 		const owner = mountedComponent("section");
-		const primary = Style("class-manipulator-state-add-from-primary", { color: "red" });
-		const secondary = Style("class-manipulator-state-add-from-secondary", { color: "blue" });
-		const selection = State<Style | Array<Style | null> | null>(component, primary);
+		const primary = Style.Class("class-manipulator-state-add-from-primary", { color: "red" });
+		const secondary = Style.Class("class-manipulator-state-add-from-secondary", { color: "blue" });
+		const selection = State<Style.Class | Array<Style.Class | null> | null>(component, primary);
 
 		component.class.addFrom(owner, selection);
 		expect(component.element.classList.contains(primary.className)).toBe(true);
@@ -217,7 +220,7 @@ describe("ClassManipulator", () => {
 	it("replaces addFrom ownership when add is called for the same style", () => {
 		const component = mountedComponent("div");
 		const owner = mountedComponent("section");
-		const style = Style("class-manipulator-add-from-then-add", { position: "sticky" });
+		const style = Style.Class("class-manipulator-add-from-then-add", { position: "sticky" });
 
 		component.class.addFrom(owner, style);
 		component.class.add(style);
@@ -228,9 +231,9 @@ describe("ClassManipulator", () => {
 
 	it("logs an error and replaces an existing determiner when a style-selection state takes control", async () => {
 		const component = mountedComponent("div");
-		const style = Style("class-manipulator-state-replaces-bind", { color: "red" });
+		const style = Style.Class("class-manipulator-state-replaces-bind", { color: "red" });
 		const visible = State(component, true);
-		const selection = State<Style | null>(component, style);
+		const selection = State<Style.Class | null>(component, style);
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
 
 		component.class.bind(visible, style);
@@ -247,10 +250,10 @@ describe("ClassManipulator", () => {
 
 	it("lets a style-selection state replace bind ownership for the same style", async () => {
 		const component = mountedComponent("div");
-		const primary = Style("class-manipulator-state-owns-primary", { color: "red" });
-		const secondary = Style("class-manipulator-state-owns-secondary", { color: "blue" });
+		const primary = Style.Class("class-manipulator-state-owns-primary", { color: "red" });
+		const secondary = Style.Class("class-manipulator-state-owns-secondary", { color: "blue" });
 		const visible = State(component, true);
-		const selection = State<Style | null>(component, primary);
+		const selection = State<Style.Class | null>(component, primary);
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
 
 		component.class.bind(visible, primary);

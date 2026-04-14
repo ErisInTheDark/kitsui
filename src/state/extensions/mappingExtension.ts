@@ -1,9 +1,28 @@
-import { Owner, State } from "../State";
+import { Owner, State, type StateOptions } from "../State";
 
 type Nullish = null | undefined;
 
+export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
+
+export interface RecomputableState<T> extends State<T> {
+	/**
+	 * Recomputes the current value of the state by reapplying all mapping and transformation functions.
+	 * Useful when external conditions affecting the mapped values have changed and a manual update is needed.
+	 */
+	recompute (): void;
+}
+
 declare module "../State" {
-	interface StateExtensions<TValue> {
+	interface StateExtensions<T> {
+		/**
+		 * Creates a new ownerless state containing the mapped value of this state.
+		 * The mapped state subscribes to changes in the source and automatically updates.
+		 * The mapped state must gain an owner before the next tick.
+		 * @param mapValue Function that transforms each value from the source state.
+		 * @returns A new ownerless state with the transformed values.
+		 */
+		map<TMapped> (mapValue: Mapper<T, TMapped>): RecomputableState<TMapped>;
+
 		/**
 		 * Creates a new state containing the mapped value of this state.
 		 * The mapped state subscribes to changes in the source and automatically updates.
@@ -11,7 +30,7 @@ declare module "../State" {
 		 * @param mapValue Function that transforms each value from the source state.
 		 * @returns A new state with the transformed values.
 		 */
-		map<TMapped> (owner: Owner, mapValue: (value: TValue) => TMapped): State<TMapped>;
+		map<TMapped> (owner: Owner, mapValue: Mapper<T, TMapped>): RecomputableState<TMapped>;
 
 		/**
 		 * A boolean state indicating whether the current value is truthy.
@@ -31,7 +50,15 @@ declare module "../State" {
 		 * @param getValue Function invoked to compute the fallback value when needed.
 		 * @returns A new state with the original or fallback value.
 		 */
-		or<TFallback> (getValue: () => TFallback): State<Exclude<TValue, Nullish> | TFallback>;
+		or<TFallback> (getValue: () => TFallback): RecomputableState<Exclude<T, Nullish> | TFallback>;
+
+		/**
+		 * Returns a boolean state that is true when this state equals the provided value.
+		 * Uses strict equality (===) for comparison.
+		 * @param compareValue The value to compare against the current state value.
+		 * @returns A new state that is true when the values are strictly equal, false otherwise.
+		 */
+		equals (compareValue: T): State<boolean>;
 	}
 }
 
@@ -40,16 +67,20 @@ const falsyStates = new WeakMap<State<unknown>, State<boolean>>();
 
 let patched = false;
 
-function createMappedState<TValue, TMapped> (
-	source: State<TValue>,
-	owner: Owner,
-	mapValue: (value: TValue) => TMapped,
-): State<TMapped> {
-	const mapped = State(owner, mapValue(source.value), {
+function createMappedState<T, TMapped> (
+	source: State<T>,
+	owner: Owner | null,
+	mapValue: Mapper<T, TMapped>,
+): RecomputableState<TMapped> {
+	const graphOption = {
 		graph: source.getGraph(),
-	} as Parameters<typeof State>[2]);
-	const releaseSourceSubscription = source.subscribeImmediate(mapped, (value) => {
-		mapped.set(mapValue(value));
+	};
+	const mapped = (owner
+		? State(owner, mapValue(source.value), graphOption as Parameters<typeof State>[2])
+		: State(mapValue(source.value), graphOption as StateOptions<TMapped>)
+	) as RecomputableState<TMapped>;
+	const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
+		mapped.set(mapValue(value, oldValue));
 	});
 	const releaseSourceCleanup = source.onCleanup(() => {
 		mapped.dispose();
@@ -59,6 +90,10 @@ function createMappedState<TValue, TMapped> (
 		releaseSourceCleanup();
 		releaseSourceSubscription();
 	});
+
+	mapped.recompute = () => {
+		mapped.set(mapValue(source.value, source.value));
+	};
 
 	return mapped;
 }
@@ -77,14 +112,14 @@ export default function mappingExtension (): void {
 	patched = true;
 
 	const StateClass = State.extend<unknown>();
-	type StatePrototype = State<unknown> & {
-		map<TMapped> (owner: Owner, mapValue: (value: unknown) => TMapped): State<TMapped>;
-		or<TFallback> (getValue: () => TFallback): State<TFallback | unknown>;
-	};
-	const prototype = StateClass.prototype as StatePrototype;
+	const prototype = StateClass.prototype;
 
-	prototype.map = function map<TMapped> (owner: Owner, mapValue: (value: unknown) => TMapped): State<TMapped> {
-		return createMappedState(this, owner, mapValue);
+	prototype.map = function map<TMapped> (ownerOrMapValue: Owner | (Mapper<unknown, TMapped>), maybeMapValue?: Mapper<unknown, TMapped>): RecomputableState<TMapped> {
+		if (ownerOrMapValue instanceof Owner) {
+			return createMappedState(this, ownerOrMapValue, maybeMapValue!);
+		}
+
+		return createMappedState(this, null, ownerOrMapValue);
 	};
 
 	Object.defineProperty(prototype, "truthy", {
@@ -117,7 +152,7 @@ export default function mappingExtension (): void {
 		},
 	});
 
-	prototype.or = function or<TFallback> (getValue: () => TFallback): State<unknown | TFallback> {
+	prototype.or = function or<TFallback> (getValue: () => TFallback): RecomputableState<unknown | TFallback> {
 		return createMappedState<unknown, unknown | TFallback>(this, this, (value) => {
 			if (value === null || value === undefined) {
 				return getValue();
@@ -125,5 +160,9 @@ export default function mappingExtension (): void {
 
 			return value;
 		});
+	};
+
+	prototype.equals = function equals (compareValue: unknown): State<boolean> {
+		return createMappedState(this, this, (value) => value === compareValue);
 	};
 }

@@ -9,31 +9,31 @@ export type CleanupFunction = () => void;
  * @param nextValue The next state value.
  * @returns True if the values are equal, false otherwise.
  */
-export type StateEqualityFunction<TValue> = (currentValue: TValue, nextValue: TValue) => boolean;
+export type StateEqualityFunction<T> = (currentValue: T, nextValue: T) => boolean;
 
 /**
  * Callback invoked when state value changes.
  * @param value The new state value.
  * @param previousValue The previous state value.
  */
-export type StateListener<TValue> = (value: TValue, previousValue: TValue) => void;
+export type StateListener<T> = (value: T, previousValue: T) => void;
 
 /**
  * Function that transforms the current state value into a new value.
  * @param currentValue The current state value.
  * @returns The transformed state value.
  */
-export type StateUpdater<TValue> = (currentValue: TValue) => TValue;
+export type StateUpdater<T> = (currentValue: T) => T;
 
 /**
  * Options for creating a new state instance.
  */
-export interface StateOptions<TValue> {
+export interface StateOptions<T> {
 	/**
 	 * Custom equality function for comparing state values.
 	 * Defaults to `Object.is` if not provided.
 	 */
-	equals?: StateEqualityFunction<TValue>;
+	equals?: StateEqualityFunction<T>;
 }
 
 /**
@@ -41,19 +41,19 @@ export interface StateOptions<TValue> {
  * Modules can augment this interface to add custom behavior to all State instances.
  * @example
  * declare module "./State" {
- *   interface StateExtensions<TValue> {
- *     map<TMapped>(owner: Owner, fn: (val: TValue) => TMapped): State<TMapped>;
+ *   interface StateExtensions<T> {
+ *     map<TMapped>(owner: Owner, fn: (val: T) => TMapped): State<TMapped>;
  *   }
  * }
  */
-export interface StateExtensions<TValue> { }
+export interface StateExtensions<T> { }
 
 /**
  * Constructor type for extending the State class with custom methods.
  * Used with {@link State.extend} to access and modify the State prototype.
  */
-export type ExtendableStateClass<TValue = unknown> = (abstract new (...args: never[]) => State<TValue>) & {
-	prototype: State<TValue>;
+export type ExtendableStateClass<T = unknown> = (abstract new (...args: never[]) => State<T>) & {
+	prototype: State<T>;
 };
 
 interface StateGraph {
@@ -61,22 +61,23 @@ interface StateGraph {
 	scheduled: boolean;
 }
 
-interface ImmediateStateListenerRecord<TValue> {
+interface ImmediateStateListenerRecord<T> {
 	active: boolean;
-	listener: StateListener<TValue>;
+	listener: StateListener<T>;
 }
 
-interface QueuedStateListenerRecord<TValue> {
+interface QueuedStateListenerRecord<T> {
 	active: boolean;
 	graph: StateGraph;
-	listener: StateListener<TValue>;
+	listener: StateListener<T>;
 	pending: boolean;
-	pendingOriginalValue: TValue;
-	pendingFinalValue: TValue;
-	equals: StateEqualityFunction<TValue>;
+	pendingOriginalValue: T;
+	pendingFinalValue: T;
+	equals: StateEqualityFunction<T>;
 }
 
-type StateInternalOptions<TValue> = StateOptions<TValue> & {
+/** @hidden */
+type StateInternalOptions<T> = StateOptions<T> & {
 	graph?: StateGraph;
 };
 
@@ -139,6 +140,9 @@ function scheduleGraphFlush (graph: StateGraph): void {
 export abstract class Owner {
 	private readonly cleanupFunctions = new Set<CleanupFunction>();
 	private disposedValue = false;
+
+	/** @hidden */
+	constructor () { }
 
 	/**
 	 * Whether this owner has been disposed.
@@ -225,37 +229,49 @@ export abstract class Owner {
 	}
 }
 
-class StateClass<TValue> extends Owner {
-	private readonly owner: Owner;
-	private releaseOwner: CleanupFunction = noop;
-	private currentValue: TValue;
-	private equals: StateEqualityFunction<TValue>;
-	private readonly graph: StateGraph;
-	private readonly immediateListeners = new Set<ImmediateStateListenerRecord<TValue>>();
-	private readonly queuedListeners = new Set<QueuedStateListenerRecord<TValue>>();
+const orphanedStateErrorMessage = "States must have an owner before the next tick.";
 
-	constructor (owner: Owner, initialValue: TValue, options: StateInternalOptions<TValue> = {}) {
+/** @group State */
+class StateClass<T> extends Owner {
+	private owner: Owner | null;
+	private releaseOwner: CleanupFunction = noop;
+	private isImplicitOwner = false;
+	private requiresExplicitOwner = false;
+	private orphanCheckId: ReturnType<typeof setTimeout> | null = null;
+	private currentValue: T;
+	private equalityFunction: StateEqualityFunction<T>;
+	private readonly graph: StateGraph;
+	private readonly immediateListeners = new Set<ImmediateStateListenerRecord<T>>();
+	private readonly queuedListeners = new Set<QueuedStateListenerRecord<T>>();
+
+	constructor (owner: Owner | null, initialValue: T, options: StateInternalOptions<T> = {}) {
 		super();
 		this.owner = owner;
 		this.currentValue = initialValue;
-		this.equals = options.equals ?? Object.is;
+		this.equalityFunction = options.equals ?? Object.is;
 		this.graph = options.graph ?? createStateGraph();
-		this.releaseOwner = owner.onCleanup(() => {
-			this.dispose();
-		});
+
+		if (owner) {
+			this.releaseOwner = owner.onCleanup(() => {
+				this.dispose();
+			});
+		}
+		else {
+			this.refreshOrphanCheck();
+		}
 	}
 
 	/**
-	 * Returns the owner that manages this state's lifecycle.
+	 * Returns the owner that manages this state's lifecycle, or null if ownerless.
 	 */
-	getOwner (): Owner {
+	getOwner (): Owner | null {
 		return this.owner;
 	}
 
 	/**
 	 * The current state value. Changes to this value trigger listeners.
 	 */
-	get value (): TValue {
+	get value (): T {
 		return this.currentValue;
 	}
 
@@ -277,10 +293,10 @@ class StateClass<TValue> extends Owner {
 	 * @returns The new state value.
 	 * @throws If the state has been disposed.
 	 */
-	set (nextValue: TValue): TValue {
+	set (nextValue: T): T {
 		this.ensureActive();
 
-		if (this.equals(this.currentValue, nextValue)) {
+		if (this.equalityFunction(this.currentValue, nextValue)) {
 			return this.currentValue;
 		}
 
@@ -304,7 +320,7 @@ class StateClass<TValue> extends Owner {
 				listenerRecord.pending = true;
 				listenerRecord.pendingOriginalValue = previousValue;
 				listenerRecord.pendingFinalValue = this.currentValue;
-				listenerRecord.equals = this.equals;
+				listenerRecord.equals = this.equalityFunction;
 				listenerRecord.graph.pendingListeners.add(listenerRecord as QueuedStateListenerRecord<unknown>);
 				scheduleGraphFlush(listenerRecord.graph);
 				continue;
@@ -322,7 +338,7 @@ class StateClass<TValue> extends Owner {
 	 * @returns The new state value.
 	 * @throws If the state has been disposed.
 	 */
-	update (updater: StateUpdater<TValue>): TValue {
+	update (updater: StateUpdater<T>): T {
 		this.ensureActive();
 		return this.set(updater(this.currentValue));
 	}
@@ -334,9 +350,9 @@ class StateClass<TValue> extends Owner {
 	 * @returns This state instance for method chaining.
 	 * @throws If the state has been disposed.
 	 */
-	setEquality (equals: StateEqualityFunction<TValue>): this {
+	setEquality (equals: StateEqualityFunction<T>): this {
 		this.ensureActive();
-		this.equals = equals;
+		this.equalityFunction = equals;
 		return this;
 	}
 
@@ -347,12 +363,12 @@ class StateClass<TValue> extends Owner {
 	 * @param listener Function called with (newValue, previousValue) on each change.
 	 * @returns Function to unsubscribe the listener.
 	 */
-	subscribeImmediateUnbound (listener: StateListener<TValue>): CleanupFunction {
+	subscribeImmediateUnbound (listener: StateListener<T>): CleanupFunction {
 		if (this.disposed) {
 			return noop;
 		}
 
-		const listenerRecord: ImmediateStateListenerRecord<TValue> = {
+		const listenerRecord: ImmediateStateListenerRecord<T> = {
 			active: true,
 			listener,
 		};
@@ -376,14 +392,14 @@ class StateClass<TValue> extends Owner {
 	 * @param listener Function called with (finalValue, originalValue) after batched changes.
 	 * @returns Function to unsubscribe the listener.
 	 */
-	subscribeUnbound (listener: StateListener<TValue>): CleanupFunction {
+	subscribeUnbound (listener: StateListener<T>): CleanupFunction {
 		if (this.disposed) {
 			return noop;
 		}
 
-		const listenerRecord: QueuedStateListenerRecord<TValue> = {
+		const listenerRecord: QueuedStateListenerRecord<T> = {
 			active: true,
-			equals: this.equals,
+			equals: this.equalityFunction,
 			graph: this.graph,
 			listener,
 			pending: false,
@@ -415,7 +431,8 @@ class StateClass<TValue> extends Owner {
 	 * @param listener Function called with (newValue, previousValue) on each change.
 	 * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
 	 */
-	subscribeImmediate (owner: Owner, listener: StateListener<TValue>): CleanupFunction {
+	subscribeImmediate (owner: Owner, listener: StateListener<T>): CleanupFunction {
+		this.setImplicitOwnerCandidate(owner);
 		const unsubscribe = this.subscribeImmediateUnbound(listener);
 		let active = true;
 
@@ -447,7 +464,8 @@ class StateClass<TValue> extends Owner {
 	 * @param listener Function called with (finalValue, originalValue) after batched changes.
 	 * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
 	 */
-	subscribe (owner: Owner, listener: StateListener<TValue>): CleanupFunction {
+	subscribe (owner: Owner, listener: StateListener<T>): CleanupFunction {
+		this.setImplicitOwnerCandidate(owner);
 		const unsubscribe = this.subscribeUnbound(listener);
 		let active = true;
 
@@ -472,6 +490,7 @@ class StateClass<TValue> extends Owner {
 	}
 
 	protected beforeDispose (): void {
+		this.clearOrphanCheck();
 		this.releaseOwner();
 		this.releaseOwner = noop;
 
@@ -491,6 +510,71 @@ class StateClass<TValue> extends Owner {
 		this.queuedListeners.clear();
 	}
 
+	private clearOrphanCheck (): void {
+		if (this.orphanCheckId === null) {
+			return;
+		}
+
+		clearTimeout(this.orphanCheckId);
+		this.orphanCheckId = null;
+	}
+
+	private refreshOrphanCheck (): void {
+		if (this.disposed || this.owner !== null) {
+			this.clearOrphanCheck();
+			return;
+		}
+
+		if (this.orphanCheckId !== null) {
+			return;
+		}
+
+		this.orphanCheckId = setTimeout(() => {
+			this.orphanCheckId = null;
+
+			if (this.disposed || this.owner !== null) {
+				return;
+			}
+
+			throw new Error(orphanedStateErrorMessage);
+		}, 0);
+	}
+
+	private setImplicitOwnerCandidate (candidate: Owner): void {
+		if (candidate instanceof StateClass) {
+			return;
+		}
+
+		if (this.requiresExplicitOwner) {
+			return;
+		}
+
+		if (this.owner !== null && !this.isImplicitOwner) {
+			return;
+		}
+
+		if (this.owner === candidate) {
+			return;
+		}
+
+		if (this.isImplicitOwner) {
+			this.releaseOwner();
+			this.releaseOwner = noop;
+			this.owner = null;
+			this.isImplicitOwner = false;
+			this.requiresExplicitOwner = true;
+			this.refreshOrphanCheck();
+			return;
+		}
+
+		this.owner = candidate;
+		this.isImplicitOwner = true;
+		this.releaseOwner = candidate.onCleanup(() => {
+			this.dispose();
+		});
+		this.clearOrphanCheck();
+	}
+
 	private ensureActive (): void {
 		if (this.disposed) {
 			throw new Error("Disposed states cannot be modified.");
@@ -498,7 +582,7 @@ class StateClass<TValue> extends Owner {
 	}
 }
 
-interface StateClass<TValue> extends StateExtensions<TValue> { }
+interface StateClass<T> extends StateExtensions<T> { }
 
 /**
  * Reactive state container that notifies listeners when the value changes.
@@ -526,18 +610,28 @@ interface StateClass<TValue> extends StateExtensions<TValue> { }
  * items.update(current => [...current, newItem]);
  * ```
  */
-export type State<TValue> = StateClass<TValue>;
+/** @group State */
+export type State<T> = StateClass<T>;
 
+/** @group State */
 type StateConstructor = {
-	<TValue> (owner: Owner, initialValue: TValue, options?: StateOptions<TValue>): State<TValue>;
-	new <TValue>(owner: Owner, initialValue: TValue, options?: StateOptions<TValue>): State<TValue>;
+	<T> (initialValue: T, options?: StateOptions<T>): State<T>;
+	<T> (owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
+	new <T>(initialValue: T, options?: StateOptions<T>): State<T>;
+	new <T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
 	prototype: State<unknown>;
-	extend<TValue = unknown> (): ExtendableStateClass<TValue>;
+	extend<T = unknown> (): ExtendableStateClass<T>;
 };
 
 /**
  * Creates a reactive state container with an initial value.
- * State is managed by an owner and is automatically disposed when the owner is disposed.
+ *
+ * When called with an owner, the state is automatically disposed when the owner is disposed.
+ *
+ * When called without an owner, the state must gain an owner before the next tick.
+ * If the ownerless state is subscribed to by a non-State owner (e.g., a Component),
+ * that owner becomes the implicit owner. If a different non-State owner later subscribes,
+ * the implicit owner is cleared and an explicit owner is required.
  *
  * @param owner The owner responsible for disposing the state.
  * @param initialValue The initial state value.
@@ -551,9 +645,23 @@ type StateConstructor = {
  * counter.set(1);
  * console.log(counter.value); // 1
  * ```
+ *
+ * @example Ownerless state with implicit owner:
+ * ```
+ * const count = State(0);
+ * // count must gain an owner before the next tick.
+ * Component("div").use(count, (value, component) => {
+ *   // The component is now count's implicit owner.
+ * });
+ * ```
+ * @group State
  */
-export const State = function State<TValue> (owner: Owner, initialValue: TValue, options: StateOptions<TValue> = {}): State<TValue> {
-	return new StateClass(owner, initialValue, options);
+export const State = function State<T> (ownerOrValue: Owner | T, valueOrOptions?: T | StateOptions<T>, options?: StateOptions<T>): State<T> {
+	if (ownerOrValue instanceof Owner && arguments.length >= 2) {
+		return new StateClass(ownerOrValue, valueOrOptions as T, (options ?? {}) as StateInternalOptions<T>);
+	}
+
+	return new StateClass(null, ownerOrValue as T, ((arguments.length >= 2 ? valueOrOptions : undefined) ?? {}) as StateInternalOptions<T>);
 } as StateConstructor;
 
 State.prototype = StateClass.prototype;
@@ -575,6 +683,6 @@ State.prototype = StateClass.prototype;
  * num.double(); // 10
  * ```
  */
-State.extend = function extend<TValue = unknown> (): ExtendableStateClass<TValue> {
-	return StateClass as ExtendableStateClass<TValue>;
+State.extend = function extend<T = unknown> (): ExtendableStateClass<T> {
+	return StateClass as ExtendableStateClass<T>;
 };

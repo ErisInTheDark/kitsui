@@ -1,5 +1,6 @@
 import { Owner, type CleanupFunction } from "../state/State";
 import type { Falsy } from "./ClassManipulator";
+import type { Component } from "./Component";
 
 /**
  * Types accepted as attribute names: a single string, or any iterable of strings.
@@ -166,23 +167,23 @@ export class AttributeManipulator {
 	 * @param element The DOM element whose attributes are managed.
 	 */
 	constructor (
-		private readonly owner: Owner,
+		private readonly owner: Component,
 		private readonly element: HTMLElement,
 	) { }
 
 	/**
 	 * Adds valueless attributes to the element. Multiple names can be passed as separate arguments or as an iterable.
 	 * @param attributes Attribute names to add.
-	 * @returns This manipulator for chaining.
+	 * @returns The owning component for fluent chaining.
 	 */
-	add (...attributes: AttributeNameInput[]): this {
+	add (...attributes: AttributeNameInput[]): Component {
 		this.ensureActive();
 
 		for (const attribute of attributes) {
 			this.installAttributePresence(attribute, () => "", isStateSource(attribute));
 		}
 
-		return this;
+		return this.owner;
 	}
 
 	/**
@@ -190,17 +191,17 @@ export class AttributeManipulator {
 	 * Values or names can be subscribable sources that update automatically.
 	 * @param name - Attribute name or source.
 	 * @param value - Attribute value or source.
-	 * @returns This manipulator for chaining.
+	 * @returns The owning component for fluent chaining.
 	 */
-	set (name: AttributeNameInput, value: AttributeValueInput): this;
+	set (name: AttributeNameInput, value: AttributeValueInput): Component;
 	/**
 	 * Sets attribute values using entries with name and value pairs.
 	 * Values or names can be subscribable sources that update automatically.
 	 * @param entries - Objects with `name` and `value` properties.
-	 * @returns This manipulator for chaining.
+	 * @returns The owning component for fluent chaining.
 	 */
-	set (...entries: AttributeEntry[]): this;
-	set (...argumentsList: [AttributeNameInput, AttributeValueInput] | AttributeEntry[]): this {
+	set (...entries: AttributeEntry[]): Component;
+	set (...argumentsList: [AttributeNameInput, AttributeValueInput] | AttributeEntry[]): Component {
 		this.ensureActive();
 
 		const entries = this.resolveSetEntries(argumentsList);
@@ -209,72 +210,68 @@ export class AttributeManipulator {
 			this.installAttributeValue(entry);
 		}
 
-		return this;
+		return this.owner;
 	}
 
 	/**
 	 * Removes attributes from the element. Multiple names can be passed as separate arguments or as an iterable.
 	 * @param attributes Attribute names to remove.
-	 * @returns This manipulator for chaining.
+	 * @returns The owning component for fluent chaining.
 	 */
-	remove (...attributes: AttributeNameInput[]): this {
+	remove (...attributes: AttributeNameInput[]): Component {
 		this.ensureActive();
 
 		for (const attribute of attributes) {
 			this.installAttributePresence(attribute, () => null, isStateSource(attribute));
 		}
 
-		return this;
+		return this.owner;
 	}
 
 	/**
 	 * Binds valueless attributes to a boolean state, adding/removing them based on state value.
 	 * @param state A subscribable boolean state.
 	 * @param attributes Attribute names to bind.
-	 * @returns A cleanup function to unbind the state.
+	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction }, ...attributes: AttributeNameInput[]): CleanupFunction;
+	bind (state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction }, ...attributes: AttributeNameInput[]): Component;
 	/**
 	 * Binds attribute entries to a boolean state, setting/removing them based on state value.
 	 * When state is true, attributes are set; when false, they are removed.
 	 * @param state A subscribable boolean state.
 	 * @param entries Objects with `name` and `value` properties.
-	 * @returns A cleanup function to unbind the state.
+	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction }, ...entries: AttributeEntry[]): CleanupFunction;
+	bind (state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction }, ...entries: AttributeEntry[]): Component;
 	bind (
 		state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction },
 		...inputs: Array<AttributeNameInput | AttributeEntry>
-	): CleanupFunction {
+	): Component {
 		this.ensureActive();
 
 		if (inputs.some(isAttributeEntry)) {
-			const cleanups = (inputs as AttributeEntry[]).map((entry) => this.installAttributeValue(entry, {
-				getPresence: () => state.value,
-				logDynamicReplacement: true,
+			for (const entry of inputs as AttributeEntry[]) {
+				this.installAttributeValue(entry, {
+					getPresence: () => state.value,
+					logDynamicReplacement: true,
+					subscribePresenceChanges: (listener) => state.subscribe(this.owner, () => {
+						listener();
+					}),
+				});
+			}
+
+			return this.owner;
+		}
+
+		for (const attribute of inputs as AttributeNameInput[]) {
+			this.installAttributePresence(attribute, () => state.value ? "" : null, true, {
 				subscribePresenceChanges: (listener) => state.subscribe(this.owner, () => {
 					listener();
 				}),
-			}));
-
-			return () => {
-				for (const cleanup of cleanups) {
-					cleanup();
-				}
-			};
+			});
 		}
 
-		const cleanups = (inputs as AttributeNameInput[]).map((attribute) => this.installAttributePresence(attribute, () => state.value ? "" : null, true, {
-			subscribePresenceChanges: (listener) => state.subscribe(this.owner, () => {
-				listener();
-			}),
-		}));
-
-		return () => {
-			for (const cleanup of cleanups) {
-				cleanup();
-			}
-		};
+		return this.owner;
 	}
 
 	private ensureActive (): void {

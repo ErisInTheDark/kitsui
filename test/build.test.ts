@@ -1,11 +1,8 @@
-import { execFile } from "node:child_process";
 import { access, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-
-const execFileAsync = promisify(execFile);
+import { buildProject } from "../scripts/build";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "..");
@@ -36,9 +33,7 @@ describe("build output", () => {
 			types: "./dist/index.d.ts"
 		});
 
-		await execFileAsync(process.execPath, ["./scripts/build.mjs"], {
-			cwd: projectRoot
-		});
+		await buildProject();
 
 		await expect(access(bundleFile)).resolves.toBeUndefined();
 		await expect(access(declarationFile)).resolves.toBeUndefined();

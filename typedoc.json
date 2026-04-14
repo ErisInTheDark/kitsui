@@ -1,0 +1,14 @@
+{
+	"$schema": "./node_modules/typedoc/typedoc-config.schema.json",
+	"entryPoints": ["src/**/*.ts"],
+	"entryPointStrategy": "expand",
+	"tsconfig": "tsconfig.json",
+	"json": "docs/kitsui.json",
+	"excludeInternal": true,
+	"excludePrivate": true,
+	"excludeProtected": true,
+	"sort": ["source-order"],
+	"plugin": ["typedoc-plugin-missing-exports"],
+	"placeInternalsInOwningModule": true,
+	"excludeExternals": true,
+}

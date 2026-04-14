@@ -32,6 +32,27 @@
       "dependsOrder": "parallel",
       "dependsOn": ["agent: typecheck", "agent: test"],
       "problemMatcher": []
+    },
+    {
+      "label": "watch",
+      "type": "process",
+      "command": "pnpm",
+      "args": ["watch"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+      "problemMatcher": [],
+      "runOptions": {
+        "runOn": "folderOpen"
+      },
+      "presentation": {
+        "showReuseMessage": false
+      }
     }
   ]
 }

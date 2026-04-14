@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { AttributeManipulator } from "../../src/component/AttributeManipulator";
 import { Component } from "../../src/component/Component";
+import placeExtension from "../../src/component/extensions/placeExtension";
 import { State } from "../../src/state/State";
 
+placeExtension();
+
 function mountedComponent (tagName: string = "div"): Component {
-	return Component(tagName).mount(document.body);
+	return Component(tagName).appendTo(document.body);
 }
 
 async function flushEffects (): Promise<void> {
@@ -145,7 +148,7 @@ describe("AttributeManipulator", () => {
 	it("binds valueless attributes to a boolean state", async () => {
 		const component = mountedComponent("button");
 		const visible = State(component, false);
-		const cleanup = component.attribute.bind(visible, "disabled", "hidden");
+		component.attribute.bind(visible, "disabled", "hidden");
 
 		expect(component.element.hasAttribute("disabled")).toBe(false);
 
@@ -154,7 +157,7 @@ describe("AttributeManipulator", () => {
 		expect(component.element.hasAttribute("disabled")).toBe(true);
 		expect(component.element.hasAttribute("hidden")).toBe(true);
 
-		cleanup();
+		component.attribute.remove("disabled", "hidden");
 		expect(component.element.hasAttribute("disabled")).toBe(false);
 		expect(component.element.hasAttribute("hidden")).toBe(false);
 	});
@@ -164,7 +167,7 @@ describe("AttributeManipulator", () => {
 		const enabled = State(component, false);
 		const label = State<string | null>(component, "Save");
 
-		const cleanup = component.attribute.bind(enabled, { name: "aria-label", value: label });
+		component.attribute.bind(enabled, { name: "aria-label", value: label });
 
 		expect(component.element.hasAttribute("aria-label")).toBe(false);
 
@@ -180,7 +183,7 @@ describe("AttributeManipulator", () => {
 		await flushEffects();
 		expect(component.element.hasAttribute("aria-label")).toBe(false);
 
-		cleanup();
+		component.attribute.remove("aria-label");
 	});
 
 	it("binds valued attributes with dynamic names", async () => {

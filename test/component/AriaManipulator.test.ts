@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { AriaManipulator } from "../../src/component/AriaManipulator";
 import { Component } from "../../src/component/Component";
+import placeExtension from "../../src/component/extensions/placeExtension";
 import { State } from "../../src/state/State";
 
+placeExtension();
+
 function mountedComponent (tagName: string = "div"): Component {
-	return Component(tagName).mount(document.body);
+	return Component(tagName).appendTo(document.body);
 }
 
 async function flushEffects (): Promise<void> {
@@ -37,9 +40,9 @@ describe("AriaManipulator", () => {
 
 		component.aria
 			.role(role)
-			.label(label)
-			.description("Persists the form")
-			.expanded(false);
+			.aria.label(label)
+			.aria.description("Persists the form")
+			.aria.expanded(false);
 
 		expect(component.element.getAttribute("role")).toBe("button");
 		expect(component.element.getAttribute("aria-label")).toBe("Save");
@@ -60,7 +63,7 @@ describe("AriaManipulator", () => {
 		const description = document.createElement("p");
 		document.body.append(description);
 
-		component.aria.labelledBy([label, description]).describedBy(description);
+		component.aria.labelledBy([label, description]).aria.describedBy(description);
 
 		expect(label.element.id).toMatch(/^kitsui-aria-ref-/);
 		expect(description.id).toMatch(/^kitsui-aria-ref-/);

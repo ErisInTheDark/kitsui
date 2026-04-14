@@ -1,6 +1,7 @@
 import { Owner, type CleanupFunction } from "../state/State";
 import type { AttributeManipulator, AttributeValueInput } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
+import type { Component } from "./Component";
 
 /**
  * Valid ARIA role values.
@@ -247,17 +248,20 @@ function toReferenceValueInput (value: AriaReferenceInput): AttributeValueInput 
  * Fluent builder for setting ARIA attributes on an element.
  * 
  * All methods accept static values or reactive sources (AriaValueSource).
- * Methods return `this` to enable method chaining.
+ * Methods return the owning Component to enable fluent chaining.
  * Internally uses an AttributeManipulator to apply changes.
  */
 export class AriaManipulator {
-	constructor (private readonly attribute: AttributeManipulator) { }
+	constructor (
+		private readonly owner: Component,
+		private readonly attribute: AttributeManipulator,
+	) { }
 
 	/**
 	 * Set the ARIA role.
 	 * @param value The role value or reactive source.
 	 */
-	role (value: AriaRoleInput): this {
+	role (value: AriaRoleInput): Component {
 		return this.set("role", value);
 	}
 
@@ -265,7 +269,7 @@ export class AriaManipulator {
 	 * Set the ARIA label.
 	 * @param value The label text or reactive source.
 	 */
-	label (value: AriaTextInput): this {
+	label (value: AriaTextInput): Component {
 		return this.set("aria-label", value);
 	}
 
@@ -273,7 +277,7 @@ export class AriaManipulator {
 	 * Set the ARIA description.
 	 * @param value The description text or reactive source.
 	 */
-	description (value: AriaTextInput): this {
+	description (value: AriaTextInput): Component {
 		return this.set("aria-description", value);
 	}
 
@@ -281,7 +285,7 @@ export class AriaManipulator {
 	 * Set the ARIA role description.
 	 * @param value The role description text or reactive source.
 	 */
-	roleDescription (value: AriaTextInput): this {
+	roleDescription (value: AriaTextInput): Component {
 		return this.set("aria-roledescription", value);
 	}
 
@@ -289,7 +293,7 @@ export class AriaManipulator {
 	 * Set aria-labelledby: elements that label this element.
 	 * @param value Element reference(s) or reactive source.
 	 */
-	labelledBy (value: AriaReferenceInput): this {
+	labelledBy (value: AriaReferenceInput): Component {
 		return this.set("aria-labelledby", toReferenceValueInput(value));
 	}
 
@@ -297,7 +301,7 @@ export class AriaManipulator {
 	 * Set aria-describedby: elements that describe this element.
 	 * @param value Element reference(s) or reactive source.
 	 */
-	describedBy (value: AriaReferenceInput): this {
+	describedBy (value: AriaReferenceInput): Component {
 		return this.set("aria-describedby", toReferenceValueInput(value));
 	}
 
@@ -305,7 +309,7 @@ export class AriaManipulator {
 	 * Set aria-controls: elements controlled by this element.
 	 * @param value Element reference(s) or reactive source.
 	 */
-	controls (value: AriaReferenceInput): this {
+	controls (value: AriaReferenceInput): Component {
 		return this.set("aria-controls", toReferenceValueInput(value));
 	}
 
@@ -313,7 +317,7 @@ export class AriaManipulator {
 	 * Set aria-details: elements that provide details for this element.
 	 * @param value Element reference(s) or reactive source.
 	 */
-	details (value: AriaReferenceInput): this {
+	details (value: AriaReferenceInput): Component {
 		return this.set("aria-details", toReferenceValueInput(value));
 	}
 
@@ -321,7 +325,7 @@ export class AriaManipulator {
 	 * Set aria-owns: elements owned by this element.
 	 * @param value Element reference(s) or reactive source.
 	 */
-	owns (value: AriaReferenceInput): this {
+	owns (value: AriaReferenceInput): Component {
 		return this.set("aria-owns", toReferenceValueInput(value));
 	}
 
@@ -329,7 +333,7 @@ export class AriaManipulator {
 	 * Set aria-flowto: elements that follow this element.
 	 * @param value Element reference(s) or reactive source.
 	 */
-	flowTo (value: AriaReferenceInput): this {
+	flowTo (value: AriaReferenceInput): Component {
 		return this.set("aria-flowto", toReferenceValueInput(value));
 	}
 
@@ -337,7 +341,7 @@ export class AriaManipulator {
 	 * Set aria-hidden: whether this element is hidden from assistive technology.
 	 * @param value The boolean value or reactive source.
 	 */
-	hidden (value: AriaBooleanInput): this {
+	hidden (value: AriaBooleanInput): Component {
 		return this.set("aria-hidden", value);
 	}
 
@@ -345,7 +349,7 @@ export class AriaManipulator {
 	 * Set aria-disabled: whether this element is disabled.
 	 * @param value The boolean value or reactive source.
 	 */
-	disabled (value: AriaBooleanInput): this {
+	disabled (value: AriaBooleanInput): Component {
 		return this.set("aria-disabled", value);
 	}
 
@@ -353,7 +357,7 @@ export class AriaManipulator {
 	 * Set aria-expanded: whether this element is expanded.
 	 * @param value The boolean value or reactive source.
 	 */
-	expanded (value: AriaBooleanInput): this {
+	expanded (value: AriaBooleanInput): Component {
 		return this.set("aria-expanded", value);
 	}
 
@@ -361,7 +365,7 @@ export class AriaManipulator {
 	 * Set aria-busy: whether this element is busy/loading.
 	 * @param value The boolean value or reactive source.
 	 */
-	busy (value: AriaBooleanInput): this {
+	busy (value: AriaBooleanInput): Component {
 		return this.set("aria-busy", value);
 	}
 
@@ -369,7 +373,7 @@ export class AriaManipulator {
 	 * Set aria-selected: whether this element is selected.
 	 * @param value The boolean value or reactive source.
 	 */
-	selected (value: AriaBooleanInput): this {
+	selected (value: AriaBooleanInput): Component {
 		return this.set("aria-selected", value);
 	}
 
@@ -377,7 +381,7 @@ export class AriaManipulator {
 	 * Set aria-checked: whether this element is checked (true, false, or "mixed").
 	 * @param value The boolean/mixed value or reactive source.
 	 */
-	checked (value: AriaBooleanMixedInput): this {
+	checked (value: AriaBooleanMixedInput): Component {
 		return this.set("aria-checked", value);
 	}
 
@@ -385,7 +389,7 @@ export class AriaManipulator {
 	 * Set aria-pressed: whether this element is pressed (true, false, or "mixed").
 	 * @param value The boolean/mixed value or reactive source.
 	 */
-	pressed (value: AriaBooleanMixedInput): this {
+	pressed (value: AriaBooleanMixedInput): Component {
 		return this.set("aria-pressed", value);
 	}
 
@@ -393,7 +397,7 @@ export class AriaManipulator {
 	 * Set aria-current: mark this element or one of its descendants as the current page/step/location.
 	 * @param value The current value (true, false, or a location type) or reactive source.
 	 */
-	current (value: AriaCurrentInput): this {
+	current (value: AriaCurrentInput): Component {
 		return this.set("aria-current", value);
 	}
 
@@ -401,12 +405,12 @@ export class AriaManipulator {
 	 * Set aria-live: announce dynamic content updates (off, polite, or assertive).
 	 * @param value The politeness level or reactive source.
 	 */
-	live (value: AriaLiveInput): this {
+	live (value: AriaLiveInput): Component {
 		return this.set("aria-live", value);
 	}
 
-	private set (name: string, value: AttributeValueInput): this {
+	private set (name: string, value: AttributeValueInput): Component {
 		this.attribute.set(name, value);
-		return this;
+		return this.owner;
 	}
 }
