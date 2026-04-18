@@ -6,7 +6,7 @@ import Parameter from "./Parameter";
 import Type from "./Type";
 import TypeParameter from "./TypeParameter";
 
-const signatureStyle = Style.Class("docs-signature", {
+export const fancyAccentBlock = Style({
 	position: "relative",
 	display: "flex",
 	flexDirection: "column",
@@ -14,19 +14,49 @@ const signatureStyle = Style.Class("docs-signature", {
 	zIndex: 1,
 	paddingBlock: "12px",
 	marginTop: "8px",
+	$docsAccent: "$syntaxMethod",
 	...pseudoBefore({
 		content: "''",
 		display: "block",
 		position: "absolute",
 		inset: "0",
 		left: "-24px",
-		borderLeft: "2px solid $syntaxMethod",
-		background: "linear-gradient(to right, $syntaxMethod, transparent)",
+		borderLeft: "2px solid $docsAccent",
+		background: "linear-gradient(to right, $docsAccent, transparent)",
 		backgroundSize: "300% 100%",
 		backgroundPosition: "-200% 0",
 		opacity: 0.4,
 		zIndex: -1,
 	})
+});
+
+const signatureStyle = Style.Class("docs-signature", {
+	...fancyAccentBlock,
+	$docsAccent: "$syntaxMethod",
+});
+
+const signatureAccentMethodStyle = Style.Class("docs-signature-accent-method", {
+	$docsAccent: "$syntaxMethod",
+});
+
+const signatureAccentTypeStyle = Style.Class("docs-signature-accent-type", {
+	$docsAccent: "$syntaxType",
+});
+
+const signatureAccentReferenceStyle = Style.Class("docs-signature-accent-reference", {
+	$docsAccent: "$syntaxReference",
+});
+
+const signatureAccentLiteralStyle = Style.Class("docs-signature-accent-literal", {
+	$docsAccent: "$syntaxLiteral",
+});
+
+const signatureAccentKeywordStyle = Style.Class("docs-signature-accent-keyword", {
+	$docsAccent: "$syntaxKeyword",
+});
+
+const signatureAccentPropertyStyle = Style.Class("docs-signature-accent-property", {
+	$docsAccent: "$textPrimary",
 });
 
 const signatureCodeStyle = Style.Class("docs-signature-code", {
@@ -71,6 +101,42 @@ export interface SignatureOptions {
 	skipSummary?: boolean;
 	name?: string;
 	pairedSignature?: JSONOutput.SignatureReflection;
+	accent?: "method" | "type" | "reference" | "literal" | "keyword" | "property";
+	leadingComment?: JSONOutput.Comment;
+}
+
+function mergeComments (
+	leadingComment: JSONOutput.Comment | undefined,
+	signatureComment: JSONOutput.Comment | undefined,
+): JSONOutput.Comment | undefined {
+	if (!leadingComment)
+		return signatureComment;
+
+	if (!signatureComment)
+		return leadingComment;
+
+	const summary = leadingComment.summary.length > 0 ? leadingComment.summary : signatureComment.summary;
+	const blockTags = [
+		...(leadingComment.blockTags ?? []),
+		...(signatureComment.blockTags ?? []),
+	];
+
+	return {
+		...signatureComment,
+		summary,
+		blockTags,
+	};
+}
+
+function accentClass (accent: NonNullable<SignatureOptions["accent"]> | undefined): Style.Class {
+	switch (accent) {
+		case "type": return signatureAccentTypeStyle;
+		case "reference": return signatureAccentReferenceStyle;
+		case "literal": return signatureAccentLiteralStyle;
+		case "keyword": return signatureAccentKeywordStyle;
+		case "property": return signatureAccentPropertyStyle;
+		default: return signatureAccentMethodStyle;
+	}
 }
 
 function renderSignatureCode (sig: JSONOutput.SignatureReflection, code: Component, name: string | undefined): void {
@@ -117,7 +183,7 @@ function renderSignatureCode (sig: JSONOutput.SignatureReflection, code: Compone
 }
 
 export default function Signature (sig: JSONOutput.SignatureReflection, options?: SignatureOptions): Component {
-	const container = Component("div").class.add(signatureStyle);
+	const container = Component("div").class.add(signatureStyle, accentClass(options?.accent));
 
 	// Build context for block tag rendering
 	const blockTagContext: BlockTagContext = {};
@@ -126,10 +192,12 @@ export default function Signature (sig: JSONOutput.SignatureReflection, options?
 	}
 
 	// Comment (excluding returns/throws — those render after params)
-	if (sig.comment) {
+	const signatureComment = mergeComments(options?.leadingComment, sig.comment);
+	if (signatureComment) {
 		const comment = options?.skipSummary
-			? { ...sig.comment, summary: [] as JSONOutput.CommentDisplayPart[] }
-			: sig.comment;
+			&& !options?.leadingComment
+			? { ...signatureComment, summary: [] as JSONOutput.CommentDisplayPart[] }
+			: signatureComment;
 		const hasContent = comment.summary.length > 0
 			|| comment.blockTags?.some(tag => !isReturnsOrThrowsTag(tag));
 		if (hasContent) {
@@ -168,8 +236,8 @@ export default function Signature (sig: JSONOutput.SignatureReflection, options?
 	}
 
 	// Returns and throws (after params)
-	if (sig.comment?.blockTags?.some(isReturnsOrThrowsTag)) {
-		renderBlockTags(sig.comment.blockTags, isReturnsOrThrowsTag, blockTagContext).appendTo(container);
+	if (signatureComment?.blockTags?.some(isReturnsOrThrowsTag)) {
+		renderBlockTags(signatureComment.blockTags, isReturnsOrThrowsTag, blockTagContext).appendTo(container);
 	}
 
 	return container;

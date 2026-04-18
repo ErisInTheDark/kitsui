@@ -8,9 +8,11 @@
  */
 
 import placeExtension from "./component/extensions/placeExtension";
+import groupExtension from "./state/extensions/groupExtension";
 import mappingExtension from "./state/extensions/mappingExtension";
 
 placeExtension();
+groupExtension();
 mappingExtension();
 
 export { AriaManipulator } from "./component/AriaManipulator";
@@ -28,8 +30,7 @@ export type {
     AriaRole,
     AriaRoleInput,
     AriaText,
-    AriaTextInput,
-    AriaValueSource
+    AriaTextInput
 } from "./component/AriaManipulator";
 export { AttributeManipulator } from "./component/AttributeManipulator";
 export type {
@@ -52,10 +53,12 @@ export type {
     InsertWhere
 } from "./component/Component";
 export { EventManipulator } from "./component/EventManipulator";
-export type { ComponentEvent, ComponentEventListener, EventListenerInput, EventListenerSource } from "./component/EventManipulator";
-export type { Place, PlaceSource, PlacementTarget, PlacerFunction } from "./component/extensions/placeExtension";
+export type { ComponentEvent, ComponentEventListener, EventListenerInput } from "./component/EventManipulator";
+export type { Place, PlacementTarget, PlacerFunction } from "./component/extensions/placeExtension";
+export { Marker } from "./component/Marker";
+export type { ExtendableMarkerClass, MarkerEventMap, MarkerExtensions, MarkerStaticExtensions } from "./component/Marker";
 export {
-    Style, StyleFontFace, StyleImport, StyleReset, darkScheme, elements, lightScheme,
+    Style, StyleAnimation, StyleFontFace, StyleImport, StyleReset, StyleRoot, StyleSelector, darkScheme, elements, lightScheme,
     pseudoAfter, pseudoBefore,
     whenActive, whenActiveSelf,
     whenClosed,
@@ -68,9 +71,9 @@ export {
     whenOpen,
     whenStuck
 } from "./component/Style";
-export type { FontFaceDefinition, StyleDefinition, StyleValue } from "./component/Style";
+export type { AnimationMarker, FontFaceDefinition, KeyframesDefinition, StyleDefinition, StyleValue } from "./component/Style";
 export { TextManipulator } from "./component/TextManipulator";
-export type { TextInput, TextSelection, TextSource, TextValue } from "./component/TextManipulator";
+export type { TextInput, TextSelection, TextValue } from "./component/TextManipulator";
 export type { Mapper } from "./state/extensions/mappingExtension";
 export { Owner, State } from "./state/State";
 export type {

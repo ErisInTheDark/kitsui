@@ -437,11 +437,13 @@ describe("Component", () => {
 		expect(toggled.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
 	});
 
-	it("keeps conditional component children alive while parked and disposes them on cleanup", async () => {
+	it("returns this from appendWhen and disposes parked children when host is removed", async () => {
 		const host = mountedComponent("div");
 		const toggled = Component("span").text.set("toggled");
 		const visible = State(host, false);
-		const cleanup = host.appendWhen(visible, toggled);
+		const result = host.appendWhen(visible, toggled);
+
+		expect(result).toBe(host);
 
 		expect(toggled.disposed).toBe(false);
 
@@ -453,8 +455,27 @@ describe("Component", () => {
 		await flushEffects();
 		expect(toggled.disposed).toBe(false);
 
-		cleanup();
+		host.remove();
 		expect(toggled.disposed).toBe(true);
+	});
+
+	it("accepts multiple children in appendWhen", async () => {
+		const host = mountedComponent("div");
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
+		const visible = State(host, false);
+
+		host.appendWhen(visible, first, [second]);
+		expect(first.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(second.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			first.element,
+			second.element,
+		]);
 	});
 
 	it("prepends conditional children at the front of the component", async () => {
@@ -474,6 +495,339 @@ describe("Component", () => {
 		expect(host.element.firstChild).toBeInstanceOf(Comment);
 		expect(host.element.lastElementChild).toBe(trailing.element);
 	});
+
+	it("accepts multiple children in prependWhen", async () => {
+		const host = mountedComponent("div");
+		const trailing = Component("span").text.set("trailing");
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
+		const third = Component("span").text.set("third");
+		const visible = State(host, true);
+
+		host.append(trailing);
+		const result = host.prependWhen(visible, first, [second], third);
+
+		expect(result).toBe(host);
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			first.element,
+			second.element,
+			third.element,
+			trailing.element,
+		]);
+	});
+
+	it("handles prependWhen hide/show when the original reference node was removed", async () => {
+		const host = mountedComponent("div");
+		const trailing = Component("span").text.set("trailing");
+		const prepended = Component("span").text.set("prepended");
+		const visible = State(host, true);
+
+		host.append(trailing);
+		host.prependWhen(visible, prepended);
+
+		trailing.remove();
+		visible.set(false);
+		await flushEffects();
+		visible.set(true);
+		await flushEffects();
+
+		expect(Array.from(host.element.children)).toEqual([prepended.element]);
+	});
+
+	it("keeps appendWhen anchored to its placeholder instead of relocking to the end", async () => {
+		const host = mountedComponent("div");
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
+		const toggled = Component("span").text.set("toggled");
+		const visible = State(host, true);
+
+		host.append(first);
+		host.appendWhen(visible, toggled);
+		host.append(second);
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			first.element,
+			toggled.element,
+			second.element,
+		]);
+
+		visible.set(false);
+		await flushEffects();
+		expect(host.element.contains(toggled.element)).toBe(false);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			first.element,
+			toggled.element,
+			second.element,
+		]);
+	});
+
+	it("keeps prependWhen anchored to its placeholder instead of relocking to the start", async () => {
+		const host = mountedComponent("div");
+		const first = Component("span").text.set("first");
+		const second = Component("span").text.set("second");
+		const toggled = Component("span").text.set("toggled");
+		const visible = State(host, true);
+
+		host.append(first, second);
+		host.prependWhen(visible, toggled);
+		first.insertTo("after", second);
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			toggled.element,
+			second.element,
+			first.element,
+		]);
+
+		visible.set(false);
+		await flushEffects();
+		expect(host.element.contains(toggled.element)).toBe(false);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			toggled.element,
+			second.element,
+			first.element,
+		]);
+	});
+
+	it("supports ComponentSelectionState in conditional insertion methods", async () => {
+		const host = mountedComponent("div");
+		const anchor = Component("span").text.set("anchor");
+		const visible = State(host, true);
+		const appendA = Component("span").text.set("append-a");
+		const prependA = Component("span").text.set("prepend-a");
+		const afterA = Component("span").text.set("after-a");
+		const appendSelection = State(host, appendA);
+		const prependSelection = State(host, prependA);
+		const afterSelection = State(host, afterA);
+		const elementChildren = () => Array.from(host.element.children);
+
+		host.append(anchor);
+		host.appendWhen(visible, appendSelection);
+		host.prependWhen(visible, prependSelection);
+		anchor.insertWhen(visible, "after", afterSelection);
+
+		expect(elementChildren()).toEqual([
+			prependA.element,
+			anchor.element,
+			afterA.element,
+			appendA.element,
+		]);
+
+		const appendB = Component("span").text.set("append-b");
+		const prependB = Component("span").text.set("prepend-b");
+		const afterB = Component("span").text.set("after-b");
+		appendSelection.set(appendB);
+		prependSelection.set(prependB);
+		afterSelection.set(afterB);
+		await flushEffects();
+
+		expect(elementChildren()).toEqual([
+			prependB.element,
+			anchor.element,
+			afterB.element,
+			appendB.element,
+		]);
+
+		visible.set(false);
+		await flushEffects();
+
+		expect(host.element.contains(prependB.element)).toBe(false);
+		expect(host.element.contains(afterB.element)).toBe(false);
+		expect(host.element.contains(appendB.element)).toBe(false);
+		expect(host.element.contains(anchor.element)).toBe(true);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(elementChildren()).toEqual([
+			prependB.element,
+			anchor.element,
+			afterB.element,
+			appendB.element,
+		]);
+	});
+
+	it("preserves multi-component selection order across hidden conditional transitions", async () => {
+		const host = mountedComponent("div");
+		const anchor = Component("span").text.set("anchor");
+		const visible = State(host, true);
+		const owned = (label: string) => Component("span").text.set(label).setOwner(host);
+		const appendA = owned("append-a");
+		const appendB = owned("append-b");
+		const prependA = owned("prepend-a");
+		const prependB = owned("prepend-b");
+		const beforeA = owned("before-a");
+		const beforeB = owned("before-b");
+		const afterA = owned("after-a");
+		const afterB = owned("after-b");
+		const appendSelection = State(host, [appendA, appendB]);
+		const prependSelection = State(host, [prependA, prependB]);
+		const beforeSelection = State(host, [beforeA, beforeB]);
+		const afterSelection = State(host, [afterA, afterB]);
+
+		host.append(anchor);
+		host.appendWhen(visible, appendSelection);
+		host.prependWhen(visible, prependSelection);
+		anchor.insertWhen(visible, "before", beforeSelection);
+		anchor.insertWhen(visible, "after", afterSelection);
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			prependA.element,
+			prependB.element,
+			beforeA.element,
+			beforeB.element,
+			anchor.element,
+			afterA.element,
+			afterB.element,
+			appendA.element,
+			appendB.element,
+		]);
+
+		visible.set(false);
+		await flushEffects();
+
+		const appendC = owned("append-c");
+		const appendD = owned("append-d");
+		const prependC = owned("prepend-c");
+		const prependD = owned("prepend-d");
+		const beforeC = owned("before-c");
+		const beforeD = owned("before-d");
+		const afterC = owned("after-c");
+		const afterD = owned("after-d");
+
+		appendSelection.set([appendC, appendD]);
+		prependSelection.set([prependC, prependD]);
+		beforeSelection.set([beforeC, beforeD]);
+		afterSelection.set([afterC, afterD]);
+		await flushEffects();
+
+		expect(nonCommentNodes(host.element)).toEqual([anchor.element]);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			prependC.element,
+			prependD.element,
+			beforeC.element,
+			beforeD.element,
+			anchor.element,
+			afterC.element,
+			afterD.element,
+			appendC.element,
+			appendD.element,
+		]);
+	});
+
+	it("does not dispose explicitly owned deselected components while hidden in conditional selections", async () => {
+		const host = mountedComponent("div");
+		const retentionOwner = mountedComponent("section");
+		const visible = State(host, true);
+		const selectedA = Component("span").text.set("selected-a").setOwner(retentionOwner);
+		const selectedB = Component("span").text.set("selected-b").setOwner(retentionOwner);
+		const selection = State(host, selectedA as Component | Iterable<Component>);
+
+		host.appendWhen(visible, selection);
+		expect(host.element.contains(selectedA.element)).toBe(true);
+
+		visible.set(false);
+		await flushEffects();
+
+		selection.set(selectedB);
+		await flushEffects();
+
+		expect(selectedA.disposed).toBe(false);
+		expect(selectedB.disposed).toBe(false);
+		expect(selectedA.getOwner()).toBe(retentionOwner);
+		expect(selectedB.getOwner()).toBe(retentionOwner);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(host.element.contains(selectedA.element)).toBe(false);
+		expect(host.element.contains(selectedB.element)).toBe(true);
+	});
+
+	it("disposes retained hidden conditional selections when the host is removed", async () => {
+		const host = mountedComponent("div");
+		const visible = State(host, true);
+		const selectedA = Component("span").text.set("selected-a").setOwner(host);
+		const selectedB = Component("span").text.set("selected-b").setOwner(host);
+		const selection = State(host, selectedA as Component | Iterable<Component>);
+
+		host.appendWhen(visible, selection);
+		visible.set(false);
+		await flushEffects();
+
+		selection.set(selectedB);
+		await flushEffects();
+
+		host.remove();
+
+		expect(selectedA.disposed).toBe(true);
+		expect(selectedB.disposed).toBe(true);
+	});
+
+	it("preserves nested conditional children inside hidden selected components", async () => {
+		const host = mountedComponent("div");
+		const visible = State(host, true);
+		const nestedVisible = State(host, true);
+		const outerA = Component("section").setOwner(host);
+		const outerB = Component("section").setOwner(host);
+		const outerAText = Component("span").text.set("outer-a").setOwner(outerA);
+		const nestedA = Component("span").text.set("nested-a").setOwner(outerA);
+		const outerBText = Component("span").text.set("outer-b").setOwner(outerB);
+		const nestedB = Component("span").text.set("nested-b").setOwner(outerB);
+		const selection = State(host, outerA as Component | Iterable<Component>);
+
+		outerA.append(outerAText).appendWhen(nestedVisible, nestedA);
+		outerB.append(outerBText).appendWhen(nestedVisible, nestedB);
+		host.appendWhen(visible, selection);
+
+		expect(nonCommentNodes(outerA.element)).toEqual([outerAText.element, nestedA.element]);
+
+		visible.set(false);
+		await flushEffects();
+		nestedVisible.set(false);
+		selection.set(outerB);
+		await flushEffects();
+
+		expect(outerA.disposed).toBe(false);
+		expect(outerB.disposed).toBe(false);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(host.element.contains(outerA.element)).toBe(false);
+		expect(host.element.contains(outerB.element)).toBe(true);
+		expect(nonCommentNodes(outerB.element)).toEqual([outerBText.element]);
+
+		nestedVisible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(outerB.element)).toEqual([outerBText.element, nestedB.element]);
+	});
+
+	it("throws when a conditional selection contains duplicate components", async () => {
+		const host = mountedComponent("div");
+		const visible = State(host, true);
+		const component = Component("span").text.set("test").setOwner(host);
+		const selection = State(host, [component, component]);
+
+		expect(() => {
+			host.appendWhen(visible, selection);
+		}).toThrow("Component selections cannot contain the same component more than once");
+	});
+
+
 
 	it("inserts sibling nodes before and after itself and inherits the current owner", () => {
 		const owner = mountedComponent("div");
@@ -538,8 +892,10 @@ describe("Component", () => {
 		const visible = State(host, false);
 
 		host.append(anchor);
-		anchor.insertWhen(visible, "before", before);
+		const result = anchor.insertWhen(visible, "before", before);
 		anchor.insertWhen(visible, "after", after);
+
+		expect(result).toBe(anchor);
 
 		expect(Array.from(host.element.childNodes).filter((node) => node instanceof Comment)).toHaveLength(2);
 		expect(before.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
@@ -548,7 +904,7 @@ describe("Component", () => {
 		visible.set(true);
 		await flushEffects();
 
-		expect(Array.from(host.element.childNodes)).toEqual([before.element, anchor.element, after.element]);
+		expect(nonCommentNodes(host.element)).toEqual([before.element, anchor.element, after.element]);
 
 		visible.set(false);
 		await flushEffects();
@@ -574,11 +930,224 @@ describe("Component", () => {
 		visible.set(true);
 		await flushEffects();
 
-		expect(Array.from(host.element.childNodes)).toEqual([
+		expect(nonCommentNodes(host.element)).toEqual([
 			anchor.element,
 			first.element,
 			second.element,
 		]);
+	});
+
+	it("keeps insertWhen anchored to its placeholder instead of relocking to the anchor", async () => {
+		const host = mountedComponent("div");
+		const leading = Component("span").text.set("leading");
+		const anchor = Component("span").text.set("anchor");
+		const trailing = Component("span").text.set("trailing");
+		const toggled = Component("span").text.set("toggled");
+		const visible = State(host, true);
+
+		host.append(leading, anchor, trailing);
+		anchor.insertWhen(visible, "after", toggled);
+		anchor.insertTo("before", leading);
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			anchor.element,
+			leading.element,
+			toggled.element,
+			trailing.element,
+		]);
+
+		visible.set(false);
+		await flushEffects();
+		expect(host.element.contains(toggled.element)).toBe(false);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			anchor.element,
+			leading.element,
+			toggled.element,
+			trailing.element,
+		]);
+	});
+
+	it("does not crash on recursive tree attempts in append, prepend, and insert", () => {
+		const root = mountedComponent("div");
+		const parent = Component("section");
+		const child = Component("article");
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		root.append(parent);
+		parent.append(child);
+
+		expect(() => {
+			parent.append(parent);
+		}).not.toThrow();
+		expect(() => {
+			child.append(parent);
+		}).not.toThrow();
+		expect(() => {
+			parent.prepend(parent);
+		}).not.toThrow();
+		expect(() => {
+			child.prepend(parent);
+		}).not.toThrow();
+		expect(() => {
+			child.insert("before", parent);
+		}).not.toThrow();
+
+		expect(parent.element.parentElement).toBe(root.element);
+		expect(child.element.parentElement).toBe(parent.element);
+		expect(errorSpy).toHaveBeenCalled();
+
+		errorSpy.mockRestore();
+	});
+
+	it("does not dispatch Mount when a recursive append move is blocked", () => {
+		const root = mountedComponent("div");
+		const parent = Component("section");
+		const child = Component("article");
+		const mountSpy = vi.fn();
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		parent.event.owned.on.Mount(mountSpy);
+		root.append(parent);
+		parent.append(child);
+
+		expect(mountSpy).toHaveBeenCalledTimes(1);
+
+		parent.append(parent);
+		parent.prepend(parent);
+		child.insert("before", parent);
+
+		expect(mountSpy).toHaveBeenCalledTimes(1);
+		expect(errorSpy).toHaveBeenCalled();
+
+		errorSpy.mockRestore();
+	});
+
+	it("does not crash on recursive tree attempts in appendWhen, prependWhen, and insertWhen", async () => {
+		const root = mountedComponent("div");
+		const parent = Component("section");
+		const child = Component("article");
+		const visible = State(root, true);
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		root.append(parent);
+		parent.append(child);
+
+		expect(() => {
+			parent.appendWhen(visible, parent);
+		}).not.toThrow();
+		expect(() => {
+			parent.prependWhen(visible, parent);
+		}).not.toThrow();
+		expect(() => {
+			child.insertWhen(visible, "before", parent);
+		}).not.toThrow();
+
+		visible.set(false);
+		await flushEffects();
+		visible.set(true);
+		await flushEffects();
+
+		expect(parent.disposed).toBe(false);
+		expect(child.disposed).toBe(false);
+		expect(parent.element.parentElement).toBe(root.element);
+		expect(child.element.parentElement).toBe(parent.element);
+		expect(errorSpy).toHaveBeenCalled();
+
+		errorSpy.mockRestore();
+	});
+
+	it("does not crash on recursive tree attempts in appendTo/prependTo/insertTo and their conditional variants", async () => {
+		const root = mountedComponent("div");
+		const parent = Component("section");
+		const child = Component("article");
+		const visible = State(root, true);
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		root.append(parent);
+		parent.append(child);
+
+		expect(() => {
+			parent.appendTo(child);
+		}).not.toThrow();
+		expect(() => {
+			parent.prependTo(child);
+		}).not.toThrow();
+		expect(() => {
+			parent.insertTo("before", child);
+		}).not.toThrow();
+		expect(() => {
+			parent.appendToWhen(visible, child);
+		}).not.toThrow();
+		expect(() => {
+			parent.prependToWhen(visible, child);
+		}).not.toThrow();
+		expect(() => {
+			parent.insertToWhen(visible, "before", child);
+		}).not.toThrow();
+
+		visible.set(false);
+		await flushEffects();
+		visible.set(true);
+		await flushEffects();
+
+		expect(parent.disposed).toBe(false);
+		expect(parent.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(parent.element.isConnected).toBe(false);
+		expect(child.element.parentElement).toBe(parent.element);
+		expect(errorSpy).toHaveBeenCalled();
+
+		errorSpy.mockRestore();
+	});
+
+	it("does not crash on recursive tree attempts in place", () => {
+		const root = mountedComponent("div");
+		const placementOwner = mountedComponent("section");
+		const parent = Component("article");
+		const child = Component("aside");
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		root.append(parent);
+		parent.append(child);
+
+		expect(() => {
+			parent.place(placementOwner, (Place) => {
+				return State.Readonly<ReturnType<typeof Place> | null>(Place().appendTo(child));
+			});
+		}).not.toThrow();
+
+		expect(parent.element.parentElement).toBe(root.element);
+		expect(child.element.parentElement).toBe(parent.element);
+		expect(errorSpy).toHaveBeenCalled();
+
+		errorSpy.mockRestore();
+	});
+
+	it("does not dispatch Mount when recursive place targets are blocked", () => {
+		const root = mountedComponent("div");
+		const placementOwner = mountedComponent("section");
+		const parent = Component("article");
+		const child = Component("aside");
+		const mountSpy = vi.fn();
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		parent.event.owned.on.Mount(mountSpy);
+		root.append(parent);
+		parent.append(child);
+
+		expect(mountSpy).toHaveBeenCalledTimes(1);
+
+		parent.place(placementOwner, (Place) => {
+			return State.Readonly<ReturnType<typeof Place> | null>(Place().appendTo(child));
+		});
+
+		expect(mountSpy).toHaveBeenCalledTimes(1);
+		expect(errorSpy).toHaveBeenCalled();
+
+		errorSpy.mockRestore();
 	});
 
 	it("appendTo and prependTo move components into their destination component", () => {
@@ -598,6 +1167,40 @@ describe("Component", () => {
 
 		secondHost.remove();
 		expect(child.disposed).toBe(true);
+	});
+
+	it("appendTo, prependTo, and insertTo inherit managed ownership from disconnected component targets", () => {
+		vi.useFakeTimers();
+
+		const root = mountedComponent("div");
+		const managedContainer = Component("section").setOwner(root);
+		const appended = Component("span").text.set("appended");
+		const prepended = Component("span").text.set("prepended");
+		const anchor = Component("span").text.set("anchor").setOwner(managedContainer);
+		const inserted = Component("span").text.set("inserted");
+
+		managedContainer.append(anchor);
+		appended.appendTo(managedContainer);
+		prepended.prependTo(managedContainer);
+		inserted.insertTo("after", anchor);
+
+		try {
+			expect(Array.from(managedContainer.element.childNodes)).toEqual([
+				prepended.element,
+				anchor.element,
+				inserted.element,
+				appended.element,
+			]);
+			expect(() => {
+				vi.advanceTimersByTime(0);
+			}).not.toThrow();
+			expect(appended.disposed).toBe(false);
+			expect(prepended.disposed).toBe(false);
+			expect(inserted.disposed).toBe(false);
+		} finally {
+			root.remove();
+			vi.useRealTimers();
+		}
 	});
 
 	it("appendTo and prependTo accept raw DOM parents like document.body", () => {
@@ -707,7 +1310,6 @@ describe("Component", () => {
 				expect(child.element.isConnected, "disposed descendants should no longer be connected").toBe(false);
 			} finally {
 				intermediary.remove();
-				vi.useRealTimers();
 				vi.useRealTimers();
 			}
 		});
@@ -1070,6 +1672,9 @@ describe("Component", () => {
 			return current;
 		});
 
+		expect(beforeAnchor.marker.node.data).toBe("kitsui:place");
+		expect(afterAnchor.marker.node.data).toBe("kitsui:place");
+
 		expect(nonCommentNodes(host.element)).toEqual([child.element, anchor.element]);
 		expect(Array.from(host.element.childNodes).filter((node) => node instanceof Comment)).toHaveLength(2);
 
@@ -1125,6 +1730,116 @@ describe("Component", () => {
 		expect(anchor.disposed).toBe(true);
 		expect(sibling.disposed).toBe(true);
 		expect(host.element.childNodes).toHaveLength(0);
+	});
+
+	it("removes the owner when an appendWhen marker is removed", async () => {
+		const host = mountedComponent("div");
+		const child = Component("span").text.set("child");
+		const visible = State(host, false);
+
+		host.appendWhen(visible, child);
+
+		findCommentNode(host.element, "kitsui:conditional")?.remove();
+		visible.set(true);
+		await flushEffects();
+
+		expect(host.disposed).toBe(true);
+		expect(child.disposed).toBe(true);
+		expect(host.element.childNodes).toHaveLength(0);
+	});
+
+	it("removes the owner when a prependWhen marker is removed", async () => {
+		const host = mountedComponent("div");
+		const trailing = Component("span").text.set("trailing");
+		const child = Component("span").text.set("child");
+		const visible = State(host, false);
+
+		host.append(trailing);
+		host.prependWhen(visible, child);
+
+		findCommentNode(host.element, "kitsui:conditional")?.remove();
+		visible.set(true);
+		await flushEffects();
+
+		expect(host.disposed).toBe(true);
+		expect(child.disposed).toBe(true);
+		expect(trailing.disposed).toBe(true);
+		expect(host.element.childNodes).toHaveLength(0);
+	});
+
+	it("does not reparent raw conditional nodes after marker-loss disposal", async () => {
+		const host = mountedComponent("div");
+		const anchor = Component("span").text.set("anchor");
+		const raw = document.createElement("em");
+		raw.textContent = "raw";
+		const visible = State(host, false);
+
+		host.append(anchor);
+		anchor.insertWhen(visible, "before", raw);
+
+		findCommentNode(host.element, "kitsui:conditional")?.remove();
+		visible.set(true);
+		await flushEffects();
+
+		expect(anchor.disposed).toBe(true);
+		expect(raw.parentNode).toBeNull();
+		expect(host.element.childNodes).toHaveLength(0);
+	});
+
+	it("preserves explicitly-owned appendWhen children when the host is removed", async () => {
+		const host = mountedComponent("div");
+		const retentionOwner = mountedComponent("section");
+		const visible = State(host, true);
+		const child = Component("span").text.set("child").setOwner(retentionOwner);
+
+		host.appendWhen(visible, child);
+		expect(host.element.contains(child.element)).toBe(true);
+
+		host.remove();
+
+		expect(child.disposed).toBe(false);
+		expect(child.element.isConnected).toBe(false);
+
+		retentionOwner.remove();
+		expect(child.disposed).toBe(true);
+	});
+
+	it("preserves explicitly-owned prependWhen children when the host is removed", async () => {
+		const host = mountedComponent("div");
+		const retentionOwner = mountedComponent("section");
+		const visible = State(host, true);
+		const child = Component("span").text.set("child").setOwner(retentionOwner);
+
+		host.prependWhen(visible, child);
+		expect(host.element.contains(child.element)).toBe(true);
+
+		host.remove();
+
+		expect(child.disposed).toBe(false);
+		expect(child.element.isConnected).toBe(false);
+
+		retentionOwner.remove();
+		expect(child.disposed).toBe(true);
+	});
+
+	it("preserves explicitly-owned insertWhen children when the host is removed", async () => {
+		const host = mountedComponent("div");
+		const retentionOwner = mountedComponent("section");
+		const visible = State(host, true);
+		const anchor = Component("span").text.set("anchor");
+		const child = Component("span").text.set("child").setOwner(retentionOwner);
+
+		host.append(anchor);
+		anchor.insertWhen(visible, "after", child);
+		expect(host.element.contains(child.element)).toBe(true);
+
+		host.remove();
+
+		expect(child.disposed).toBe(false);
+		expect(child.element.isConnected).toBe(false);
+
+		retentionOwner.remove();
+		expect(child.disposed).toBe(true);
 	});
 
 	it("replaces earlier placement controllers when a new placement is applied", () => {

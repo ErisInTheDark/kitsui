@@ -1,4 +1,4 @@
-import { Owner, type CleanupFunction } from "../state/State";
+import { Owner, State, type CleanupFunction } from "../state/State";
 import type { Falsy } from "./ClassManipulator";
 import type { Component } from "./Component";
 
@@ -8,13 +8,6 @@ import type { Component } from "./Component";
  */
 export type AttributeNameSelection = string | Falsy | Iterable<string | Falsy>;
 
-/**
- * A subscribable source for attribute names.
- */
-export interface AttributeNameSource {
-	readonly value: AttributeNameSelection;
-	subscribe (owner: Owner, listener: (value: AttributeNameSelection) => void): CleanupFunction;
-}
 
 /**
  * Valid types for HTML attribute values. All are serializable to strings.
@@ -26,23 +19,16 @@ export type AttributeValue = string | number | bigint | boolean;
  */
 export type AttributeValueSelection = AttributeValue | null | undefined;
 
-/**
- * A subscribable source for attribute values.
- */
-export interface AttributeValueSource {
-	readonly value: AttributeValueSelection;
-	subscribe (owner: Owner, listener: (value: AttributeValueSelection) => void): CleanupFunction;
-}
 
 /**
  * Attribute name input: either a direct name selection or a subscribable source.
  */
-export type AttributeNameInput = AttributeNameSelection | AttributeNameSource;
+export type AttributeNameInput = AttributeNameSelection | State<AttributeNameSelection>;
 
 /**
  * Attribute value input: either a direct value or a subscribable source.
  */
-export type AttributeValueInput = AttributeValueSelection | AttributeValueSource;
+export type AttributeValueInput = AttributeValueSelection | State<AttributeValueSelection>;
 
 /**
  * Maps an attribute name to a value.
@@ -70,11 +56,7 @@ function isStateSource<TValue> (value: unknown): value is {
 	readonly value: TValue;
 	subscribe (owner: Owner, listener: (value: TValue) => void): CleanupFunction;
 } {
-	return typeof value === "object"
-		&& value !== null
-		&& "value" in value
-		&& "subscribe" in value
-		&& typeof value.subscribe === "function";
+	return value instanceof State;
 }
 
 function isAttributeEntry (value: unknown): value is AttributeEntry {
@@ -132,26 +114,20 @@ function serializeAttributeValue (value: AttributeValueSelection): string | null
 	return String(value);
 }
 
-function toAttributeNameSource (value: AttributeNameInput): AttributeNameSource {
+function toAttributeNameSource (value: AttributeNameInput): State<AttributeNameSelection> {
 	if (isStateSource<AttributeNameSelection>(value)) {
-		return value;
+		return value as unknown as State<AttributeNameSelection>;
 	}
 
-	return {
-		subscribe: () => noop,
-		value,
-	};
+	return State.Readonly(value);
 }
 
-function toAttributeValueSource (value: AttributeValueInput): AttributeValueSource {
+function toAttributeValueSource (value: AttributeValueInput): State<AttributeValueSelection> {
 	if (isStateSource<AttributeValueSelection>(value)) {
-		return value;
+		return value as unknown as State<AttributeValueSelection>;
 	}
 
-	return {
-		subscribe: () => noop,
-		value,
-	};
+	return State.Readonly(value);
 }
 
 /**
@@ -234,7 +210,7 @@ export class AttributeManipulator {
 	 * @param attributes Attribute names to bind.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction }, ...attributes: AttributeNameInput[]): Component;
+	bind (state: State<boolean>, ...attributes: AttributeNameInput[]): Component;
 	/**
 	 * Binds attribute entries to a boolean state, setting/removing them based on state value.
 	 * When state is true, attributes are set; when false, they are removed.
@@ -242,9 +218,9 @@ export class AttributeManipulator {
 	 * @param entries Objects with `name` and `value` properties.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction }, ...entries: AttributeEntry[]): Component;
+	bind (state: State<boolean>, ...entries: AttributeEntry[]): Component;
 	bind (
-		state: { readonly value: boolean; subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction },
+		state: State<boolean>,
 		...inputs: Array<AttributeNameInput | AttributeEntry>
 	): Component {
 		this.ensureActive();
@@ -350,7 +326,7 @@ export class AttributeManipulator {
 	}
 
 	private installAttributeSelection (
-		nameSource: AttributeNameSource,
+		nameSource: State<AttributeNameSelection>,
 		getValue: () => string | null,
 		options: {
 			logDynamicReplacement?: boolean;

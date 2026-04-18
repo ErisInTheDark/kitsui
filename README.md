@@ -138,8 +138,20 @@ The mapping extension is central to succinct code:
 - `state.map(owner, fn)` creates a derived state owned by `owner`.
 - `state.truthy` and `state.falsy` provide memoized boolean states.
 - `state.or(getValue)` replaces `null` and `undefined` with a lazily computed fallback.
+- `State.Group(owner, states)` creates a grouped state that snapshots multiple states and emits one next-tick update per tick.
 
 Prefer these over ad hoc listeners when the result is still state.
+
+```js
+const owner = Component("section")
+const count = State(owner, 0)
+const label = State(owner, "zero")
+const grouped = State.Group(owner, { count, label })
+
+count.set(1)
+label.set("one")
+// grouped updates next tick with { count: 1, label: "one" }
+```
 
 ## Key API Surface
 
@@ -153,6 +165,7 @@ Prefer these over ad hoc listeners when the result is still state.
 `State` and `Owner`
 
 - `State(owner, initialValue, options?)`, `State.extend()`
+- `State.Group(owner, states)`
 - State methods: `set`, `update`, `setEquality`, `subscribeImmediate`, `subscribe`, `subscribeImmediateUnbound`, `subscribeUnbound`
 - Derived-state helpers: `map`, `truthy`, `falsy`, `or`
 - Lifecycle from `Owner`: `onCleanup`, `dispose`, `disposed`

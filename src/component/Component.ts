@@ -1,10 +1,10 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
-import { Class } from "../utility/types";
 import { AriaManipulator } from "./AriaManipulator";
 import { AttributeManipulator } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
 import { ClassManipulator } from "./ClassManipulator";
 import { EventManipulator } from "./EventManipulator";
+import { Marker } from "./Marker";
 import { TextManipulator } from "./TextManipulator";
 
 declare global {
@@ -64,6 +64,18 @@ export interface ComponentSelectionState {
  */
 export interface ComponentExtensions { }
 
+/**
+ * A marker interface for module-level Component static extensions.
+ * Extend this interface to add static methods to the Component constructor function.
+ */
+export interface ComponentStaticExtensions { }
+
+/**
+ * Constructor type for extending the Component class with custom methods.
+ * Used with {@link Component.extend} to access and modify the Component prototype.
+ */
+export type ExtendableComponentClass = ComponentConstructor & ComponentStaticExtensions;
+
 /** @group Component */
 type ComponentConstructor = {
 	/**
@@ -105,7 +117,7 @@ type ComponentConstructor = {
 	 * const ComponentClass = Component.extend();
 	 * ComponentClass.prototype.custom = function() { return "custom"; };
 	 */
-	extend (): Class<Component>;
+	extend (): ExtendableComponentClass;
 };
 
 const noop: CleanupFunction = () => {
@@ -113,6 +125,7 @@ const noop: CleanupFunction = () => {
 };
 
 const orphanedComponentErrorMessage = "Components must be connected to the document or have a managed owner before the next tick.";
+const recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
 const elementComponents = new WeakMap<HTMLElement, WeakRef<ComponentClass>>();
 const componentOwnerResolvers = new Set<ComponentOwnerResolver>();
 let componentAccessorInstalled = false;
@@ -126,13 +139,32 @@ function isMoveParent (value: ParentNode | null): value is MoveParent {
 	return value !== null && typeof (value as Partial<MoveParent>).insertBefore === "function";
 }
 
-function moveNode (parent: MoveParent, node: Node, beforeNode: Node | null): void {
-	if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
-		parent.moveBefore(node, beforeNode);
-		return;
+function wouldCreateRecursiveTree (parent: MoveParent, node: Node): boolean {
+	return node === parent || node.contains(parent);
+}
+
+function moveNode (parent: MoveParent, node: Node, beforeNode: Node | null): boolean {
+	if (wouldCreateRecursiveTree(parent, node)) {
+		console.error(recursiveTreeErrorMessage);
+		return false;
 	}
 
-	parent.insertBefore(node, beforeNode);
+	try {
+		if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
+			parent.moveBefore(node, beforeNode);
+			return true;
+		}
+
+		parent.insertBefore(node, beforeNode);
+		return true;
+	} catch (error) {
+		if (error instanceof DOMException && error.name === "HierarchyRequestError") {
+			console.error(recursiveTreeErrorMessage);
+			return false;
+		}
+
+		throw error;
+	}
 }
 
 function createStorageElement (documentRef: Document): HTMLElement {
@@ -170,7 +202,16 @@ function installNodeComponentAccessor (): void {
 }
 
 function isComponentSelectionState (value: unknown): value is ComponentSelectionState {
-	return value instanceof State;
+	if (typeof value !== "object" || value === null) {
+		return false;
+	}
+
+	if (value instanceof Node || value instanceof ComponentClass) {
+		return false;
+	}
+
+	const maybeSelectionState = value as Partial<ComponentSelectionState>;
+	return "value" in maybeSelectionState && typeof maybeSelectionState.subscribe === "function";
 }
 
 function isChildIterable (value: unknown): value is Iterable<ComponentChild> {
@@ -330,7 +371,7 @@ class ComponentClass extends Owner {
 	get event (): EventManipulator<this> {
 		this.ensureActive();
 
-		const manipulator = new EventManipulator(this, this.element);
+		const manipulator = new EventManipulator<this, "component", HTMLElementEventMap>(this, this.element);
 		Object.defineProperty(this, "event", {
 			configurable: true,
 			enumerable: true,
@@ -360,8 +401,8 @@ class ComponentClass extends Owner {
 				continue;
 			}
 
-			this.element.append(this.resolveNode(child));
-			if (child instanceof ComponentClass) {
+			const moved = moveNode(this.element, this.resolveNode(child), null);
+			if (moved && child instanceof ComponentClass) {
 				child.refreshOrphanCheck();
 				child.dispatchMount();
 			}
@@ -390,8 +431,8 @@ class ComponentClass extends Owner {
 				continue;
 			}
 
-			this.element.insertBefore(this.resolveNode(child), referenceNode);
-			if (child instanceof ComponentClass) {
+			const moved = moveNode(this.element, this.resolveNode(child), referenceNode);
+			if (moved && child instanceof ComponentClass) {
 				child.refreshOrphanCheck();
 				child.dispatchMount();
 			}
@@ -436,8 +477,8 @@ class ComponentClass extends Owner {
 				continue;
 			}
 
-			moveNode(parentNode, this.resolveNode(node), where === "before" ? this.element : this.element.nextSibling);
-			if (node instanceof ComponentClass) {
+			const moved = moveNode(parentNode, this.resolveNode(node), where === "before" ? this.element : this.element.nextSibling);
+			if (moved && node instanceof ComponentClass) {
 				node.refreshOrphanCheck();
 				node.dispatchMount();
 			}
@@ -447,33 +488,60 @@ class ComponentClass extends Owner {
 	}
 
 	/**
-	 * Appends a child conditionally based on state.
-	 * When the state becomes true, the child is inserted. When false, it's stored but stays in the DOM as a placeholder.
+	 * Appends children conditionally based on state.
+	 * When the state becomes true, children are inserted. When false, they are parked in storage and placeholders remain in-flow.
 	 * @param state - A State<boolean> that controls visibility.
-	 * @param child - The child to append conditionally.
-	 * @returns A cleanup function that removes the conditional binding and the child.
+	 * @param nodes - Nodes or iterables of nodes to append conditionally.
+	 * @returns This component for chaining.
 	 */
-	appendWhen (state: State<boolean>, child: ComponentChild): CleanupFunction {
+	appendWhen (state: State<boolean>, ...nodes: ComponentChildren[]): this {
 		this.ensureActive();
-		return this.attachConditionalNode(state, child, {
-			getContainer: () => this.element,
-			getReferenceNode: () => null,
-		});
+
+		for (const node of this.expandChildren(nodes)) {
+			if (isComponentSelectionState(node)) {
+				this.attachConditionalSelectionState(state, node, {
+					getContainer: () => this.element,
+					getReferenceNode: () => null,
+				});
+				continue;
+			}
+
+			this.attachConditionalNode(state, node, {
+				getContainer: () => this.element,
+				getReferenceNode: () => null,
+			});
+		}
+
+		return this;
 	}
 
 	/**
-	 * Prepends a child conditionally based on state.
-	 * When the state becomes true, the child is inserted before existing content.
+	 * Prepends children conditionally based on state.
+	 * When the state becomes true, children are inserted before the current first child.
 	 * @param state - A State<boolean> that controls visibility.
-	 * @param child - The child to prepend conditionally.
-	 * @returns A cleanup function that removes the conditional binding and the child.
+	 * @param nodes - Nodes or iterables of nodes to prepend conditionally.
+	 * @returns This component for chaining.
 	 */
-	prependWhen (state: State<boolean>, child: ComponentChild): CleanupFunction {
+	prependWhen (state: State<boolean>, ...nodes: ComponentChildren[]): this {
 		this.ensureActive();
-		return this.attachConditionalNode(state, child, {
-			getContainer: () => this.element,
-			getReferenceNode: () => this.element.firstChild,
-		});
+		const referenceNode = this.element.firstChild;
+
+		for (const node of this.expandChildren(nodes)) {
+			if (isComponentSelectionState(node)) {
+				this.attachConditionalSelectionState(state, node, {
+					getContainer: () => this.element,
+					getReferenceNode: () => referenceNode,
+				});
+				continue;
+			}
+
+			this.attachConditionalNode(state, node, {
+				getContainer: () => this.element,
+				getReferenceNode: () => referenceNode,
+			});
+		}
+
+		return this;
 	}
 
 	/**
@@ -482,32 +550,171 @@ class ComponentClass extends Owner {
 	 * @param state - A State<boolean> that controls visibility.
 	 * @param where - "before" to insert before this component, or "after" to insert after.
 	 * @param nodes - Nodes or iterables of nodes to insert conditionally.
-	 * @returns A cleanup function that removes all conditional bindings and children.
+	 * @returns This component for chaining.
 	 */
-	insertWhen (state: State<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): CleanupFunction {
+	insertWhen (state: State<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): this {
 		this.ensureActive();
 		const insertables = this.expandChildren(nodes);
 		const orderedInsertables = where === "before"
 			? insertables
 			: [...insertables].reverse();
-		const cleanups = orderedInsertables.map((node) => {
+
+		for (const node of orderedInsertables) {
 			if (isComponentSelectionState(node)) {
-				return noop;
+				this.attachConditionalSelectionState(state, node, {
+					getContainer: () => this.element.parentNode,
+					getReferenceNode: () => where === "before" ? this.element : this.element.nextSibling,
+				});
+				continue;
 			}
 
-			return this.attachConditionalNode(state, node, {
+			this.attachConditionalNode(state, node, {
 				getContainer: () => this.element.parentNode,
 				getReferenceNode: () => where === "before" ? this.element : this.element.nextSibling,
 			});
-		});
+		}
 
-		return () => {
-			for (const cleanup of cleanups) {
-				cleanup();
-			}
-		};
+		return this;
 	}
 
+	private attachConditionalSelectionState (
+		visibleState: State<boolean>,
+		selectionState: ComponentSelectionState,
+		options: {
+			getContainer: () => ParentNode | null;
+			getReferenceNode: () => Node | null;
+		},
+	): CleanupFunction {
+		const marker = Marker("kitsui:conditional-stateful").setOwner(this);
+		const storage = createStorageElement(this.element.ownerDocument);
+		let active = true;
+		let markerWasInserted = false;
+		let renderedComponents: Component[] = [];
+		const retainedHiddenComponents = new Set<Component>();
+
+		const cleanupRenderedComponents = (
+			nextComponents: ReadonlySet<Component> = new Set(),
+			mode: "dispose" | "retain" = "dispose",
+		) => {
+			for (const component of renderedComponents) {
+				if (nextComponents.has(component)) {
+					retainedHiddenComponents.delete(component);
+					continue;
+				}
+
+				if (mode === "dispose") {
+					retainedHiddenComponents.delete(component);
+					component.remove();
+					continue;
+				}
+
+				retainedHiddenComponents.add(component);
+			}
+
+			renderedComponents = renderedComponents.filter(component => nextComponents.has(component));
+		};
+
+		const releaseRetainedHiddenComponents = (nextComponents: ReadonlySet<Component>) => {
+			for (const component of [...retainedHiddenComponents]) {
+				if (nextComponents.has(component)) {
+					continue;
+				}
+
+				retainedHiddenComponents.delete(component);
+				component.element.parentNode?.removeChild(component.element);
+				component.refreshOrphanCheck();
+			}
+		};
+
+		const render = () => {
+			if (!active) {
+				return;
+			}
+
+			const nextComponents = this.resolveComponentSelection(selectionState.value);
+			const nextComponentSet = new Set(nextComponents);
+			const container = options.getContainer();
+
+			if (!isMoveParent(container)) {
+				if (markerWasInserted) {
+					this.remove();
+					return;
+				}
+
+				cleanupRenderedComponents(nextComponentSet, visibleState.value ? "dispose" : "retain");
+				if (visibleState.value) {
+					releaseRetainedHiddenComponents(nextComponentSet);
+				}
+				for (const component of nextComponents) {
+					retainedHiddenComponents.delete(component);
+					component.ensureActive();
+					component.onBeforeMove?.();
+					moveNode(storage, component.element, null);
+				}
+				renderedComponents = nextComponents;
+				return;
+			}
+
+			if (markerWasInserted && marker.node.parentNode !== container) {
+				this.remove();
+				return;
+			}
+
+			if (marker.node.parentNode !== container) {
+				moveNode(container, marker.node, options.getReferenceNode());
+				markerWasInserted = true;
+			}
+
+			cleanupRenderedComponents(nextComponentSet, visibleState.value ? "dispose" : "retain");
+
+			if (visibleState.value) {
+				releaseRetainedHiddenComponents(nextComponentSet);
+				for (const component of nextComponents) {
+					retainedHiddenComponents.delete(component);
+					component.ensureActive();
+					component.onBeforeMove?.();
+					const moved = moveNode(container, component.element, marker.node);
+					if (moved) {
+						component.refreshOrphanCheck();
+						component.dispatchMount();
+					}
+				}
+			} else {
+				for (const component of nextComponents) {
+					retainedHiddenComponents.delete(component);
+					component.ensureActive();
+					component.onBeforeMove?.();
+					moveNode(storage, component.element, null);
+				}
+			}
+
+			renderedComponents = nextComponents;
+		};
+
+		const cleanup = this.trackStructuralCleanup(() => {
+			active = false;
+			releaseVisibleSubscription();
+			releaseSelectionSubscription();
+			cleanupRenderedComponents();
+			for (const component of retainedHiddenComponents) {
+				component.remove();
+			}
+			retainedHiddenComponents.clear();
+			marker.remove();
+			storage.remove();
+		});
+
+		const releaseVisibleSubscription = visibleState.subscribe(this, render);
+		const releaseSelectionSubscription = selectionState.subscribe(this, render);
+		render();
+
+		return cleanup;
+	}
+
+	/**
+	 * Clears all child nodes from this component.
+	 * @returns This component for chaining.
+	 */
 	clear (): this {
 		this.ensureActive();
 		this.releaseStructuralCleanups();
@@ -517,18 +724,6 @@ class ComponentClass extends Owner {
 		}
 
 		this.element.replaceChildren();
-		return this;
-	}
-
-	/**
-	 * Sets a single attribute on the element.
-	 * @param name - The attribute name.
-	 * @param value - The attribute value.
-	 * @returns This component for chaining.
-	 */
-	setAttribute (name: string, value: string): this {
-		this.ensureActive();
-		this.element.setAttribute(name, value);
 		return this;
 	}
 
@@ -826,12 +1021,21 @@ class ComponentClass extends Owner {
 		}
 
 		const resolvedNode = this.resolveNode(node);
-		const placeholder = this.element.ownerDocument.createComment("kitsui:conditional");
+		const placeholder = Marker("kitsui:conditional").setOwner(this);
 		const storage = createStorageElement(this.element.ownerDocument);
 		const childComponent = node instanceof ComponentClass ? node : null;
 		let active = true;
 		let releaseChildCleanup: CleanupFunction = noop;
 		let placeholderWasInserted = false;
+
+		const getSafeReferenceNode = (container: ParentNode): Node | null => {
+			const referenceNode = options.getReferenceNode();
+			if (!referenceNode) {
+				return null;
+			}
+
+			return referenceNode.parentNode === container ? referenceNode : null;
+		};
 
 		const removeOwnerForMissingMarker = () => {
 			if (!active) {
@@ -841,37 +1045,59 @@ class ComponentClass extends Owner {
 			this.remove();
 		};
 
-		const placeVisible = () => {
-			if (!active) {
-				return;
-			}
-
+		const ensurePlaceholder = (): MoveParent | null => {
 			const container = options.getContainer();
 
 			if (!isMoveParent(container)) {
 				if (placeholderWasInserted) {
 					removeOwnerForMissingMarker();
-					return;
 				}
 
+				return null;
+			}
+
+			if (!placeholderWasInserted) {
+				moveNode(container, placeholder.node, getSafeReferenceNode(container));
+				placeholderWasInserted = true;
+				return container;
+			}
+
+			if (placeholder.node.parentNode !== container) {
+				removeOwnerForMissingMarker();
+				return null;
+			}
+
+			return container;
+		};
+
+		const placeVisible = () => {
+			if (!active) {
+				return;
+			}
+
+			const initialContainer = options.getContainer();
+			if (isMoveParent(initialContainer) && wouldCreateRecursiveTree(initialContainer, resolvedNode)) {
+				console.error(recursiveTreeErrorMessage);
+				return;
+			}
+
+			const container = ensurePlaceholder();
+
+			if (!active) {
+				return;
+			}
+
+			if (!container) {
 				moveNode(storage, resolvedNode, null);
 				return;
 			}
 
-			if (placeholderWasInserted && resolvedNode.parentNode === storage && placeholder.parentNode !== container) {
-				removeOwnerForMissingMarker();
-				return;
-			}
+			const moved = moveNode(container, resolvedNode, placeholder.node);
 
-			if (placeholder.parentNode === container) {
-				moveNode(container, resolvedNode, placeholder);
-				placeholder.remove();
-			} else {
-				moveNode(container, resolvedNode, options.getReferenceNode());
+			if (moved) {
+				childComponent?.refreshOrphanCheck();
+				childComponent?.dispatchMount();
 			}
-
-			childComponent?.refreshOrphanCheck();
-			childComponent?.dispatchMount();
 		};
 
 		const placeHidden = () => {
@@ -879,23 +1105,23 @@ class ComponentClass extends Owner {
 				return;
 			}
 
-			const container = options.getContainer();
+			const initialContainer = options.getContainer();
+			if (isMoveParent(initialContainer) && wouldCreateRecursiveTree(initialContainer, resolvedNode)) {
+				console.error(recursiveTreeErrorMessage);
+				return;
+			}
 
-			if (!isMoveParent(container)) {
-				if (placeholderWasInserted) {
-					removeOwnerForMissingMarker();
-					return;
-				}
+			const container = ensurePlaceholder();
 
+			if (!active) {
+				return;
+			}
+
+			if (!container) {
 				if (resolvedNode.parentNode !== storage) {
 					moveNode(storage, resolvedNode, null);
 				}
 				return;
-			}
-
-			if (placeholder.parentNode !== container) {
-				moveNode(container, placeholder, options.getReferenceNode());
-				placeholderWasInserted = true;
 			}
 
 			if (resolvedNode.parentNode !== storage) {
@@ -911,6 +1137,13 @@ class ComponentClass extends Owner {
 			storage.remove();
 
 			if (childComponent) {
+				const explicitOwner = childComponent.getOwner();
+				if (explicitOwner && explicitOwner !== this) {
+					childComponent.element.parentNode?.removeChild(childComponent.element);
+					childComponent.refreshOrphanCheck();
+					return;
+				}
+
 				childComponent.remove();
 				return;
 			}
@@ -947,7 +1180,7 @@ class ComponentClass extends Owner {
 			getReferenceNode: () => Node | null;
 		},
 	): CleanupFunction {
-		const marker = this.element.ownerDocument.createComment("kitsui:stateful-child");
+		const marker = Marker("kitsui:stateful-child").setOwner(this);
 		const storage = createStorageElement(this.element.ownerDocument);
 		let active = true;
 		let renderedComponents: Component[] = [];
@@ -984,13 +1217,13 @@ class ComponentClass extends Owner {
 				return;
 			}
 
-			if (markerWasInserted && marker.parentNode !== container) {
+			if (markerWasInserted && marker.node.parentNode !== container) {
 				this.remove();
 				return;
 			}
 
-			if (marker.parentNode !== container) {
-				moveNode(container, marker, options.getReferenceNode());
+			if (marker.node.parentNode !== container) {
+				moveNode(container, marker.node, options.getReferenceNode());
 				markerWasInserted = true;
 			}
 
@@ -999,9 +1232,11 @@ class ComponentClass extends Owner {
 			for (const component of nextComponents) {
 				component.ensureActive();
 				component.onBeforeMove?.();
-				moveNode(container, component.element, marker);
-				component.refreshOrphanCheck();
-				component.dispatchMount();
+				const moved = moveNode(container, component.element, marker.node);
+				if (moved) {
+					component.refreshOrphanCheck();
+					component.dispatchMount();
+				}
 			}
 
 			renderedComponents = nextComponents;
@@ -1081,7 +1316,7 @@ export const Component = function Component (
 	tagNameOrElement: string | HTMLElement = "span",
 ): Component {
 	return new ComponentClass(tagNameOrElement);
-} as ComponentConstructor;
+} as ComponentConstructor & ComponentStaticExtensions;
 
 Component.prototype = ComponentClass.prototype;
 
@@ -1131,6 +1366,6 @@ Component.fromHTML = function fromHTML (html: string): Component {
  * const ComponentClass = Component.extend();
  * ComponentClass.prototype.custom = function() { return "custom"; };
  */
-Component.extend = function extend (): Class<Component> {
-	return ComponentClass as Class<Component>;
+Component.extend = function extend (): ExtendableComponentClass {
+	return ComponentClass as ExtendableComponentClass;
 };

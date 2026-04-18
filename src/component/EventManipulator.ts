@@ -1,33 +1,42 @@
-import { Owner, type CleanupFunction } from "../state/State";
+import { Owner, State, type CleanupFunction } from "../state/State";
 import type { Component } from "./Component";
 
-export type ComponentEvent<TEvent extends Event, THost extends Component = Component> = TEvent & {
-	readonly component: THost;
+type HostedEvent<TEvent extends Event, THost extends Owner, THostKey extends string> = TEvent & {
+	readonly [KEY in THostKey]: THost;
 };
 
-export type ComponentEventListener<THost extends Component, TEvent extends Event> = (event: ComponentEvent<TEvent, THost>) => unknown;
+type EventListenerFor<THost extends Owner, THostKey extends string, TEvent extends Event> = (event: HostedEvent<TEvent, THost, THostKey>) => unknown;
 
-export interface EventListenerSource<THost extends Component, TEvent extends Event> {
-	readonly value: ComponentEventListener<THost, TEvent> | null | undefined;
-	subscribe (owner: Owner, listener: (value: ComponentEventListener<THost, TEvent> | null | undefined) => void): CleanupFunction;
-}
+type EventListenerInputFor<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | State<EventListenerFor<THost, THostKey, TEvent> | null | undefined> | null | undefined;
 
-export type EventListenerInput<THost extends Component, TEvent extends Event> = ComponentEventListener<THost, TEvent> | EventListenerSource<THost, TEvent> | null | undefined;
+type EventMapValue<TEventMap, TEventName extends keyof TEventMap & string> = TEventMap[TEventName] extends Event ? TEventMap[TEventName] : Event;
+
+type EventOnProxyFor<THost extends Owner, THostKey extends string, TEventMap> = {
+	[KEventName in keyof TEventMap & string]: (owner: Owner, listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
+};
+
+type EventOffProxyFor<THost extends Owner, THostKey extends string, TEventMap> = {
+	[KEventName in keyof TEventMap & string]: (listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
+};
+
+type OwnedEventOnProxyFor<THost extends Owner, THostKey extends string, TEventMap> = {
+	[KEventName in keyof TEventMap & string]: (listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
+};
+
+export type ComponentEvent<TEvent extends Event, THost extends Component = Component> = HostedEvent<TEvent, THost, "component">;
+
+export type ComponentEventListener<THost extends Component, TEvent extends Event> = EventListenerFor<THost, "component", TEvent>;
+
+export type EventListenerInput<THost extends Component, TEvent extends Event> = EventListenerInputFor<THost, "component", TEvent>;
 
 type ListenerKey = object;
-type EventListenerValue<THost extends Component, TEvent extends Event> = ComponentEventListener<THost, TEvent> | null | undefined;
+type EventListenerValue<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | null | undefined;
 
-export type EventOnProxy<THost extends Component> = {
-	[KEventName in keyof HTMLElementEventMap]: (owner: Owner, listener: EventListenerInput<THost, HTMLElementEventMap[KEventName]>) => THost;
-};
+export type EventOnProxy<THost extends Component> = EventOnProxyFor<THost, "component", HTMLElementEventMap>;
 
-export type EventOffProxy<THost extends Component> = {
-	[KEventName in keyof HTMLElementEventMap]: (listener: EventListenerInput<THost, HTMLElementEventMap[KEventName]>) => THost;
-};
+export type EventOffProxy<THost extends Component> = EventOffProxyFor<THost, "component", HTMLElementEventMap>;
 
-export type OwnedEventOnProxy<THost extends Component> = {
-	[KEventName in keyof HTMLElementEventMap]: (listener: EventListenerInput<THost, HTMLElementEventMap[KEventName]>) => THost;
-};
+export type OwnedEventOnProxy<THost extends Component> = OwnedEventOnProxyFor<THost, "component", HTMLElementEventMap>;
 
 export interface OwnedEventManipulator<THost extends Component> {
 	readonly on: OwnedEventOnProxy<THost>;
@@ -42,44 +51,63 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
-function isListenerSource<THost extends Component, TEvent extends Event> (
-	value: EventListenerInput<THost, TEvent>,
-): value is EventListenerSource<THost, TEvent> {
-	return typeof value === "object"
-		&& value !== null
-		&& "value" in value
-		&& "subscribe" in value
-		&& typeof value.subscribe === "function";
+function isListenerSource<THost extends Owner, THostKey extends string, TEvent extends Event> (
+	value: EventListenerInputFor<THost, THostKey, TEvent>,
+): value is State<EventListenerFor<THost, THostKey, TEvent> | null> {
+
+	return value instanceof State;
+}
+
+function resolveListenerValue<THost extends Owner, THostKey extends string, TEvent extends Event> (
+	value: unknown,
+): EventListenerFor<THost, THostKey, TEvent> | null | undefined {
+	if (value === null || value === undefined) {
+		return value;
+	}
+
+	if (typeof value === "function") {
+		return value as EventListenerFor<THost, THostKey, TEvent>;
+	}
+
+	throw new TypeError("Unsupported listener source value.");
 }
 
 
-function isListenerKey<THost extends Component, TEvent extends Event> (
-	value: EventListenerInput<THost, TEvent>,
+function isListenerKey<THost extends Owner, THostKey extends string, TEvent extends Event> (
+	value: EventListenerInputFor<THost, THostKey, TEvent>,
 ): boolean {
 	return typeof value === "function" || isListenerSource(value);
 }
 
-function defineComponentEvent<THost extends Component, TEvent extends Event> (event: TEvent, component: THost): ComponentEvent<TEvent, THost> {
-	Object.defineProperty(event, "component", {
+function defineHostedEvent<THost extends Owner, THostKey extends string, TEvent extends Event> (
+	event: TEvent,
+	host: THost,
+	hostPropertyName: THostKey,
+): HostedEvent<TEvent, THost, THostKey> {
+	Object.defineProperty(event, hostPropertyName, {
 		configurable: true,
 		enumerable: false,
-		value: component,
+		value: host,
 		writable: false,
 	});
 
-	return event as ComponentEvent<TEvent, THost>;
+	return event as HostedEvent<TEvent, THost, THostKey>;
 }
 
-export class EventManipulator<THost extends Component = Component> {
-	readonly on: EventOnProxy<THost>;
-	readonly off: EventOffProxy<THost>;
-	readonly owned: OwnedEventManipulator<THost>;
+export class EventManipulator<THost extends Owner = Component, THostKey extends string = "component", TEventMap = HTMLElementEventMap> {
+	readonly on: EventOnProxyFor<THost, THostKey, TEventMap>;
+	readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
+	readonly owned: {
+		readonly on: OwnedEventOnProxyFor<THost, THostKey, TEventMap>;
+		readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
+	};
  
-	private readonly listenerRecords = new Map<keyof HTMLElementEventMap, Map<ListenerKey, ListenerRecord>>();
+	private readonly listenerRecords = new Map<keyof TEventMap & string, Map<ListenerKey, ListenerRecord>>();
 
 	constructor (
 		private readonly owner: THost,
-		private readonly element: HTMLElement,
+		private readonly target: EventTarget,
+		private readonly hostPropertyName: THostKey = "component" as THostKey,
 	) {
 		this.on = this.createOnProxy(false);
 		this.off = this.createOffProxy();
@@ -106,57 +134,57 @@ export class EventManipulator<THost extends Component = Component> {
 		}
 	}
 
-	private createOnProxy (useOwnedOwner: boolean): EventOnProxy<THost> {
+	private createOnProxy (useOwnedOwner: boolean): EventOnProxyFor<THost, THostKey, TEventMap> {
 		return new Proxy({}, {
 			get: (_, eventName) => {
 				if (typeof eventName !== "string") {
 					return undefined;
 				}
 
-				return (ownerOrListener: Owner | EventListenerInput<THost, Event>, maybeListener?: EventListenerInput<THost, Event>) => {
+				return (ownerOrListener: Owner | EventListenerInputFor<THost, THostKey, Event>, maybeListener?: EventListenerInputFor<THost, THostKey, Event>) => {
 					const resolvedOwner = useOwnedOwner ? this.owner : ownerOrListener as Owner;
-					const listener = (useOwnedOwner ? ownerOrListener : maybeListener) as EventListenerInput<THost, Event>;
-					this.installListener(eventName as keyof HTMLElementEventMap, resolvedOwner, listener);
+					const listener = (useOwnedOwner ? ownerOrListener : maybeListener) as EventListenerInputFor<THost, THostKey, Event>;
+					this.installListener(eventName as keyof TEventMap & string, resolvedOwner, listener);
 					return this.owner;
 				};
 			},
-		}) as EventOnProxy<THost>;
+		}) as EventOnProxyFor<THost, THostKey, TEventMap>;
 	}
 
-	private createOwnedOnProxy (): OwnedEventOnProxy<THost> {
+	private createOwnedOnProxy (): OwnedEventOnProxyFor<THost, THostKey, TEventMap> {
 		return new Proxy({}, {
 			get: (_, eventName) => {
 				if (typeof eventName !== "string") {
 					return undefined;
 				}
 
-				return (listener: EventListenerInput<THost, Event>) => {
-					this.installListener(eventName as keyof HTMLElementEventMap, this.owner, listener);
+				return (listener: EventListenerInputFor<THost, THostKey, Event>) => {
+					this.installListener(eventName as keyof TEventMap & string, this.owner, listener);
 					return this.owner;
 				};
 			},
-		}) as OwnedEventOnProxy<THost>;
+		}) as OwnedEventOnProxyFor<THost, THostKey, TEventMap>;
 	}
 
-	private createOffProxy (): EventOffProxy<THost> {
+	private createOffProxy (): EventOffProxyFor<THost, THostKey, TEventMap> {
 		return new Proxy({}, {
 			get: (_, eventName) => {
 				if (typeof eventName !== "string") {
 					return undefined;
 				}
 
-				return (listener: EventListenerInput<THost, Event>) => {
-					this.removeListener(eventName as keyof HTMLElementEventMap, listener);
+				return (listener: EventListenerInputFor<THost, THostKey, Event>) => {
+					this.removeListener(eventName as keyof TEventMap & string, listener);
 					return this.owner;
 				};
 			},
-		}) as EventOffProxy<THost>;
+		}) as EventOffProxyFor<THost, THostKey, TEventMap>;
 	}
 
-	private installListener<TEventName extends keyof HTMLElementEventMap> (
+	private installListener<TEventName extends keyof TEventMap & string> (
 		eventName: TEventName,
 		owner: Owner,
-		listener: EventListenerInput<THost, HTMLElementEventMap[TEventName]>,
+		listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, TEventName>>,
 	): void {
 		this.ensureActive();
 
@@ -168,11 +196,11 @@ export class EventManipulator<THost extends Component = Component> {
 		this.replaceListener(eventName, key, owner, listener);
 	}
 
-	private replaceListener<TEventName extends keyof HTMLElementEventMap> (
+	private replaceListener<TEventName extends keyof TEventMap & string> (
 		eventName: TEventName,
 		key: ListenerKey,
 		owner: Owner,
-		listener: EventListenerInput<THost, HTMLElementEventMap[TEventName]>,
+		listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, TEventName>>,
 	): void {
 		const eventRecords = this.listenerRecords.get(eventName) ?? new Map<ListenerKey, ListenerRecord>();
 		this.listenerRecords.set(eventName, eventRecords);
@@ -200,7 +228,7 @@ export class EventManipulator<THost extends Component = Component> {
 			cleanup();
 		};
 
-		const applyResolvedListener = (nextListener: EventListenerValue<THost, HTMLElementEventMap[TEventName]>) => {
+		const applyResolvedListener = (nextListener: EventListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>) => {
 			releaseOwner();
 			releaseDom();
 
@@ -210,13 +238,13 @@ export class EventManipulator<THost extends Component = Component> {
 				return;
 			}
 
-			const handleEvent = (event: HTMLElementEventMap[TEventName]) => {
-				nextListener(defineComponentEvent(event, this.owner));
+			const handleEvent = (event: EventMapValue<TEventMap, TEventName>) => {
+				nextListener(defineHostedEvent(event, this.owner, this.hostPropertyName));
 			};
 
-			this.element.addEventListener(eventName, handleEvent as EventListener);
+			this.target.addEventListener(eventName, handleEvent as EventListener);
 			releaseDom = () => {
-				this.element.removeEventListener(eventName, handleEvent as EventListener);
+				this.target.removeEventListener(eventName, handleEvent as EventListener);
 			};
 			releaseOwner = owner.onCleanup(trackedCleanup);
 		};
@@ -224,17 +252,19 @@ export class EventManipulator<THost extends Component = Component> {
 		eventRecords.set(key, { cleanup: trackedCleanup });
 
 		if (isListenerSource(listener)) {
-			releaseSource = listener.subscribe(owner, applyResolvedListener);
-			applyResolvedListener(listener.value);
+			releaseSource = listener.subscribe(owner, (nextValue) => {
+				applyResolvedListener(resolveListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>(nextValue));
+			});
+			applyResolvedListener(resolveListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>(listener.value));
 			return;
 		}
 
-		applyResolvedListener(listener);
+		applyResolvedListener(resolveListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>(listener));
 	}
 
-	private removeListener<TEventName extends keyof HTMLElementEventMap> (
+	private removeListener<TEventName extends keyof TEventMap & string> (
 		eventName: TEventName,
-		listener: EventListenerInput<THost, HTMLElementEventMap[TEventName]>,
+		listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, TEventName>>,
 	): void {
 		if (!isListenerKey(listener)) {
 			return;
@@ -245,7 +275,7 @@ export class EventManipulator<THost extends Component = Component> {
 
 	private ensureActive (): void {
 		if (this.owner.disposed) {
-			throw new Error("Disposed components cannot be modified.");
+			throw new Error("Disposed owners cannot be modified.");
 		}
 	}
 }

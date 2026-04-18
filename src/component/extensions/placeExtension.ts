@@ -7,22 +7,13 @@ import {
     registerComponentOwnerResolver,
     type InsertWhere,
 } from "../Component";
+import { Marker } from "../Marker";
 
 /** A placement target: a DOM node, Component, Place marker, or null/falsy. */
-export type PlacementTarget = Node | Component | Place | Falsy;
+export type PlacementTarget = Node | Component | Marker | Place | Falsy;
 
 /** A DOM parent node that can host appended or prepended placements. */
 export type PlacementParent = ParentNode & Node;
-
-/**
- * A reactive source for placement that emits Place or null.
- * @property value The current place or null.
- * @property subscribe Subscribes to placement changes.
- */
-export interface PlaceSource {
-	readonly value: Place | null;
-	subscribe (owner: Owner, listener: (value: Place | null) => void): CleanupFunction;
-}
 
 /** @group Place */
 type PlaceConstructor = {
@@ -31,8 +22,8 @@ type PlaceConstructor = {
 	prototype: Place;
 };
 
-/** A function that receives a Place constructor and returns a PlaceSource for reactive placement. */
-export type PlacerFunction = (Place: PlaceConstructor) => PlaceSource;
+/** A function that receives a Place constructor and returns State<Place | null> for reactive placement. */
+export type PlacerFunction = (Place: PlaceConstructor) => State<Place | null>;
 
 declare module "../Component" {
 	interface ComponentExtensions {
@@ -94,13 +85,21 @@ declare module "../Component" {
 
 		/**
 		 * Manually controls component placement with a reactive placer function.
-		 * The placer receives a Place constructor and returns a PlaceSource that controls where the component is inserted.
+		 * The placer receives a Place constructor and returns State<Place | null> that controls where the component is inserted.
 		 * @param owner The owner who manages the placement lifecycle.
-		 * @param placer A function that produces a PlaceSource determining the component's location.
+		 * @param placer A function that produces State<Place | null> determining the component's location.
 		 * @returns This component for chaining.
 		 * @throws If this component is disposed.
 		 */
 		place (owner: Owner, placer: PlacerFunction): this;
+	}
+}
+
+declare module "../Marker" {
+	interface MarkerExtensions {
+		appendTo (target: PlacementContainer): this;
+		prependTo (target: PlacementContainer): this;
+		insertTo (where: InsertWhere, target: PlacementTarget): this;
 	}
 }
 
@@ -122,6 +121,7 @@ type PlacementContainer = Component | PlacementParent;
 const placementControllers = new WeakMap<Component, CleanupFunction>();
 const placementOwners = new WeakMap<Component, Owner>();
 const placementLifecycleOwners = new WeakMap<Component, Owner>();
+const recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
 
 let componentClass: Class<Component> | null = null;
 let patched = false;
@@ -135,13 +135,32 @@ function isMoveParent (value: ParentNode | null): value is MoveParent {
 	return value !== null && typeof (value as Partial<MoveParent>).insertBefore === "function";
 }
 
-function moveNode (parent: MoveParent, node: Node, beforeNode: Node | null): void {
-	if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
-		parent.moveBefore(node, beforeNode);
-		return;
+function wouldCreateRecursiveTree (parent: MoveParent, node: Node): boolean {
+	return node === parent || node.contains(parent);
+}
+
+function moveNode (parent: MoveParent, node: Node, beforeNode: Node | null): boolean {
+	if (wouldCreateRecursiveTree(parent, node)) {
+		console.error(recursiveTreeErrorMessage);
+		return false;
 	}
 
-	parent.insertBefore(node, beforeNode);
+	try {
+		if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
+			parent.moveBefore(node, beforeNode);
+			return true;
+		}
+
+		parent.insertBefore(node, beforeNode);
+		return true;
+	} catch (error) {
+		if (error instanceof DOMException && error.name === "HierarchyRequestError") {
+			console.error(recursiveTreeErrorMessage);
+			return false;
+		}
+
+		throw error;
+	}
 }
 
 function createStorageElement (documentRef: Document): HTMLElement {
@@ -212,11 +231,11 @@ function setPlacementController (component: Component, cleanup: CleanupFunction)
  * @group Place
  */
 class PlaceClass {
-	readonly marker: Comment;
+	readonly marker: Marker;
 
 	constructor (
 		readonly owner: Owner,
-		marker: Comment,
+		marker: Marker,
 	) {
 		this.marker = marker;
 	}
@@ -227,7 +246,7 @@ class PlaceClass {
 	 * @returns This place for chaining.
 	 */
 	appendTo (target: PlacementContainer): this {
-		moveNode(resolvePlacementContainer(target), this.marker, null);
+		this.marker.appendTo(target);
 		return this;
 	}
 
@@ -237,8 +256,7 @@ class PlaceClass {
 	 * @returns This place for chaining.
 	 */
 	prependTo (target: PlacementContainer): this {
-		const container = resolvePlacementContainer(target);
-		moveNode(container, this.marker, container.firstChild);
+		this.marker.prependTo(target);
 		return this;
 	}
 
@@ -250,19 +268,7 @@ class PlaceClass {
 	 * @throws If the target's parent is not a valid insert location.
 	 */
 	insertTo (where: InsertWhere, target: PlacementTarget): this {
-		const referenceNode = resolvePlacementReferenceNode(target);
-
-		if (!referenceNode) {
-			return this;
-		}
-
-		const parentNode = referenceNode.parentNode;
-
-		if (!isMoveParent(parentNode)) {
-			throw new Error("Insert target was not found.");
-		}
-
-		moveNode(parentNode, this.marker, where === "before" ? referenceNode : referenceNode.nextSibling);
+		this.marker.insertTo(where, target);
 		return this;
 	}
 
@@ -289,8 +295,12 @@ function resolvePlacementReferenceNode (target: PlacementTarget): Node | null {
 		return target.element;
 	}
 
+	if (target instanceof Marker) {
+		return target.node;
+	}
+
 	if (target instanceof PlaceClass) {
-		return target.marker;
+		return target.marker.node;
 	}
 
 	return target;
@@ -346,6 +356,10 @@ function resolvePlacementOwner (target: PlacementTarget | PlacementParent, compo
 			: resolveOwnPlacementOwner(target);
 	}
 
+	if (target instanceof Marker) {
+		return target.getOwner() ?? resolveNearestWrappedAncestor(target.node) ?? null;
+	}
+
 	if (target instanceof PlaceClass) {
 		return target.owner;
 	}
@@ -369,25 +383,36 @@ function resolvePlacementContainerOwner (target: PlacementContainer, component?:
 	return resolvePlacementOwner(target, component);
 }
 
-function toPlaceSource (state: State<boolean>, place: Place): PlaceSource {
-	return {
-		get value () {
-			return state.value ? place : null;
-		},
-		subscribe (owner: Owner, listener: (value: Place | null) => void): CleanupFunction {
-			return state.subscribe(owner, (value) => {
-				listener(value ? place : null);
-			});
-		},
-	};
+function toPlaceSource (state: State<boolean>, place: Place): State<Place | null> {
+	const placeState = State<Place | null>(place.owner, state.value ? place : null);
+
+	state.subscribe(place.marker, (value) => {
+		placeState.set(value ? place : null);
+	});
+
+	return placeState;
 }
 
 function placeComponent (component: Component, parent: MoveParent, beforeNode: Node | null): void {
 	component["onBeforeMove"]?.();
 	clearPlacement(component);
-	moveNode(parent, component.element, beforeNode);
+	const moved = moveNode(parent, component.element, beforeNode);
+	if (!moved) {
+		return;
+	}
+
 	component["refreshOrphanCheck"]();
 	component["dispatchMount"]();
+}
+
+function placeMarker (marker: Marker, parent: MoveParent, beforeNode: Node | null): void {
+	const moved = moveNode(parent, marker.node, beforeNode);
+	if (!moved) {
+		return;
+	}
+
+	marker["refreshOrphanCheck"]();
+	marker["dispatchMount"]();
 }
 
 /**
@@ -406,13 +431,49 @@ export default function placeExtension (): void {
 	});
 
 	const ComponentClass = getComponentClass();
+	const MarkerClass = Marker.extend();
 	type ComponentPrototype = Component & {
 		insert (where: InsertWhere, ...nodes: Array<ComponentChild | Iterable<ComponentChild>>): Component;
 	};
 	const prototype = ComponentClass.prototype as ComponentPrototype;
+	const markerPrototype = MarkerClass.prototype as Marker;
+
+	markerPrototype.appendTo = function appendTo (target) {
+		this.setOwner(resolvePlacementContainerOwner(target));
+		const container = resolvePlacementContainer(target);
+		placeMarker(this, container, null);
+		return this;
+	};
+
+	markerPrototype.prependTo = function prependTo (target) {
+		this.setOwner(resolvePlacementContainerOwner(target));
+		const container = resolvePlacementContainer(target);
+		placeMarker(this, container, container.firstChild);
+		return this;
+	};
+
+	markerPrototype.insertTo = function insertTo (where, target) {
+		this.setOwner(resolvePlacementOwner(target));
+
+		const referenceNode = resolvePlacementReferenceNode(target);
+
+		if (!referenceNode) {
+			return this;
+		}
+
+		const parentNode = referenceNode.parentNode;
+
+		if (!isMoveParent(parentNode)) {
+			throw new Error("Insert target was not found.");
+		}
+
+		placeMarker(this, parentNode, where === "before" ? referenceNode : referenceNode.nextSibling);
+		return this;
+	};
 
 	prototype.appendTo = function appendTo (target) {
 		ensureActive(this);
+		this.setOwner(resolvePlacementContainerOwner(target, this));
 		const container = resolvePlacementContainer(target);
 		placeComponent(this, container, null);
 		return this;
@@ -429,6 +490,7 @@ export default function placeExtension (): void {
 
 	prototype.prependTo = function prependTo (target) {
 		ensureActive(this);
+		this.setOwner(resolvePlacementContainerOwner(target, this));
 		const container = resolvePlacementContainer(target);
 		placeComponent(this, container, container.firstChild);
 		return this;
@@ -445,6 +507,7 @@ export default function placeExtension (): void {
 
 	prototype.insertTo = function insertTo (where, target) {
 		ensureActive(this);
+		this.setOwner(resolvePlacementOwner(target, this));
 
 		const referenceNode = resolvePlacementReferenceNode(target);
 
@@ -481,7 +544,7 @@ export default function placeExtension (): void {
 		const storage = createStorageElement(documentRef);
 		const places = new Set<Place>();
 		const Place = function Place (): Place {
-			const place = new PlaceClass(placementOwner, documentRef.createComment("kitsui:place"));
+			const place = new PlaceClass(placementOwner, Marker("kitsui:place").setOwner(placementOwner));
 			places.add(place);
 			return place;
 		} as PlaceConstructor;
@@ -491,6 +554,7 @@ export default function placeExtension (): void {
 		const placeState = placer(Place);
 		let releaseOwnerCleanup: CleanupFunction = noop;
 		let releaseStateCleanup: CleanupFunction = noop;
+		let blockedByRecursivePlacement = false;
 
 		const cleanup = setPlacementController(this, () => {
 			releaseOwnerCleanup();
@@ -512,11 +576,15 @@ export default function placeExtension (): void {
 
 		const syncPlace = (place: Place | null) => {
 			if (!place) {
+				if (blockedByRecursivePlacement) {
+					return;
+				}
+
 				moveNode(storage, this.element, null);
 				return;
 			}
 
-			const parentNode = place.marker.parentNode;
+			const parentNode = place.marker.node.parentNode;
 
 			if (!isMoveParent(parentNode)) {
 				console.error("Placement marker was removed. Treating placement as null.");
@@ -524,7 +592,18 @@ export default function placeExtension (): void {
 				return;
 			}
 
-			moveNode(parentNode, this.element, place.marker);
+			if (wouldCreateRecursiveTree(parentNode, this.element)) {
+				console.error(recursiveTreeErrorMessage);
+				blockedByRecursivePlacement = true;
+				return;
+			}
+
+			blockedByRecursivePlacement = false;
+			const moved = moveNode(parentNode, this.element, place.marker.node);
+			if (!moved) {
+				return;
+			}
+
 			this["refreshOrphanCheck"]();
 			this["dispatchMount"]();
 		};

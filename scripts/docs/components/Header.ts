@@ -1,9 +1,12 @@
-import { Component, Style } from "../../../src";
+import { Component, Style, whenHover } from "../../../src";
 import { containerCenter, monoFont } from "../styles";
+
+const PLAYGROUND_PATH = "playground.html";
 
 const headerStyle = Style.Class("docs-header", {
 	borderBottom: "1px solid $borderSubtle",
 	padding: "14px 20px",
+	viewTransitionName: "docs-header",
 });
 
 const headerChildrenStyle = Style({
@@ -26,6 +29,26 @@ const rightStyle = Style.Class("docs-header-right", {
 	...headerChildrenStyle,
 });
 
+const headerLinkStyle = Style.Class("docs-header-link", {
+	...monoFont,
+	borderRadius: "999px",
+	color: "$textMuted",
+	fontSize: "13px",
+	fontWeight: 600,
+	padding: "6px 10px",
+	textDecoration: "none",
+	transition: "background 0.15s, color 0.15s",
+	...whenHover({
+		background: "$bgSurface",
+		color: "$textPrimary",
+	}),
+});
+
+const activeHeaderLinkStyle = Style.Class("docs-header-link-active", {
+	background: "$bgSurface",
+	color: "$accentPrimary",
+});
+
 const brandStyle = Style.Class("docs-header-brand", {
 	...monoFont,
 	color: "$textPrimary",
@@ -43,7 +66,17 @@ const noteStyle = Style.Class("docs-header-note", {
 	textTransform: "uppercase",
 });
 
-export default function Header (): Component {
+
+export default function Header (currentPath: string = ""): Component {
+	const playgroundLink = Component("a")
+		.class.add(headerLinkStyle)
+		.text.set("Playground")
+		.attribute.set("href", PLAYGROUND_PATH);
+
+	if (currentPath === PLAYGROUND_PATH) {
+		playgroundLink.class.add(activeHeaderLinkStyle);
+	}
+
 	return Component("header")
 		.class.add(headerStyle)
 		.append(
@@ -62,7 +95,8 @@ export default function Header (): Component {
 								.text.set("docs"),
 					),
 					Component("div")
-						.class.add(rightStyle),
+						.class.add(rightStyle)
+						.append(playgroundLink),
 				),
 		);
 }

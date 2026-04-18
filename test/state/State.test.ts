@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { State } from "../../src/state/State";
+import groupExtension from "../../src/state/extensions/groupExtension";
 import mappingExtension from "../../src/state/extensions/mappingExtension";
 
 placeExtension();
@@ -14,6 +15,7 @@ declare module "../../src/state/State" {
 }
 
 mappingExtension();
+groupExtension();
 
 function mountedOwner (tagName: string = "div"): Component {
 	return Component(tagName).appendTo(document.body);
@@ -201,6 +203,98 @@ describe("State", () => {
 
 		source.set(5);
 		expect(mapped.value).toBe("value:4");
+	});
+
+	it("groups state values with both call and constructor forms", () => {
+		const owner = mountedOwner();
+		const count = State(owner, 1);
+		const label = State(owner, "one");
+		const groupedFromCall = State.Group(owner, {
+			count,
+			label,
+		});
+		const groupedFromNew = new State.Group(owner, {
+			count,
+			label,
+		});
+
+		expect(groupedFromCall.value).toEqual({
+			count: 1,
+			label: "one",
+		});
+		expect(groupedFromNew.value).toEqual({
+			count: 1,
+			label: "one",
+		});
+	});
+
+	it("updates grouped states on the next tick, not synchronously", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 0);
+		const grouped = State.Group(owner, { count });
+
+		count.set(1);
+		expect(grouped.value.count).toBe(0);
+
+		await flushEffects();
+		expect(grouped.value.count).toBe(1);
+	});
+
+	it("coalesces multiple source updates into one grouped update per tick", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 0);
+		const label = State(owner, "zero");
+		const grouped = State.Group(owner, { count, label });
+		const calls: Array<[{ count: number; label: string }, { count: number; label: string }]> = [];
+
+		grouped.subscribeImmediateUnbound((value, previousValue) => {
+			calls.push([previousValue, value]);
+		});
+
+		count.set(1);
+		label.set("one");
+		count.set(2);
+
+		await flushEffects();
+
+		expect(calls).toEqual([
+			[
+				{ count: 0, label: "zero" },
+				{ count: 2, label: "one" },
+			],
+		]);
+	});
+
+	it("supports empty grouped state objects", async () => {
+		const owner = mountedOwner();
+		const grouped = State.Group(owner, {});
+
+		expect(grouped.value).toEqual({});
+
+		await flushEffects();
+		expect(grouped.value).toEqual({});
+	});
+
+	it("disposes grouped states when their owner is disposed", () => {
+		const owner = mountedOwner();
+		const count = State(owner, 1);
+		const grouped = State.Group(owner, { count });
+
+		owner.remove();
+
+		expect(grouped.disposed).toBe(true);
+	});
+
+	it("stops responding to source changes after grouped state disposal", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 1);
+		const grouped = State.Group(owner, { count });
+
+		grouped.dispose();
+		count.set(2);
+		await flushEffects();
+
+		expect(grouped.value.count).toBe(1);
 	});
 
 	it("exposes memoized truthy and falsy derived states", () => {

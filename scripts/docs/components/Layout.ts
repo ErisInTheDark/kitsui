@@ -1,23 +1,16 @@
 import { Component, Style } from "../../../src";
-import { containerCenter, theme } from "../styles";
+import type { SidebarPage, SidebarSection } from "../navigation";
+import { containerCenter, pageLayoutStyle, stackColumn, theme } from "../styles";
 import Footer from "./Footer";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
-
-const pageStyle = Style.Class("docs-layout-page", {
-	background: "$bgPage",
-	color: "$textPrimary",
-	fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-	fontSize: "17px",
-	lineHeight: 1.6,
-	minHeight: "100vh",
-});
 
 const shellStyle = Style.Class("docs-layout-shell", {
 	...containerCenter,
 	display: "flex",
 	gap: "24px",
 	padding: "24px 20px 0",
+	flexGrow: 1,
 });
 
 const sidebarWrapStyle = Style.Class("docs-layout-sidebar-wrap", {
@@ -29,16 +22,21 @@ const mainStyle = Style.Class("docs-layout-main", {
 	display: "flex",
 	flex: "1 1 0",
 	minWidth: 0,
+	viewTransitionName: "docs-main",
 });
 
 const contentStyle = Style.Class("docs-layout-content", {
-	display: "flex",
-	flexDirection: "column",
+	...stackColumn,
 	gap: "20px",
 	width: "100%",
 });
 
-export default function Layout (renderContent: (content: Component) => unknown, currentPath?: string): Component {
+export default function Layout (
+	renderContent: (content: Component) => unknown,
+	currentPath: string = "",
+	pages: SidebarPage[] = [],
+	sections: SidebarSection[] = [],
+): Component {
 	const content = Component("div").class.add(contentStyle);
 	const main = Component("main")
 		.class.add(mainStyle)
@@ -47,15 +45,15 @@ export default function Layout (renderContent: (content: Component) => unknown, 
 	main.append(content);
 
 	return Component("div")
-		.class.add(theme, pageStyle)
+		.class.add(theme, pageLayoutStyle)
 		.append(
-			Header(),
+			Header(currentPath),
 			Component("div")
 				.class.add(shellStyle)
 				.append(
 					Component("div")
 						.class.add(sidebarWrapStyle)
-						.append(Sidebar(currentPath ?? "")),
+						.append(Sidebar(currentPath, pages, sections)),
 					main,
 				),
 			Footer(),

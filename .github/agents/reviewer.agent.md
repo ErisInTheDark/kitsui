@@ -2,7 +2,7 @@
 name: Reviewer
 description: Fast read-only codebase exploration and reviewer subagent. Should be used to review new code changes to make sure they follow best practices and are high quality.
 argument-hint: Give an overview of the code changes that have been made and need to be reviewed. Use exact file references and symbol names — the reviewer cannot see diffs, so it does not know what code was there before and cannot look for regressions. It can only search the current codebase & read files.
-model: ['Auto (copilot)', 'Claude Haiku 4.5 (copilot)', 'GPT-5.4 mini (copilot)']
+model: ['Claude Haiku 4.5 (copilot)', 'GPT-5.4 mini (copilot)', 'Auto (copilot)']
 target: vscode
 user-invocable: false
 tools: [read/getTaskOutput, read/readFile, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, web]

@@ -1,4 +1,4 @@
-import { Owner, type CleanupFunction } from "../state/State";
+import { State, type CleanupFunction } from "../state/State";
 import type { Component } from "./Component";
 
 /** Serializable values accepted by the text manipulator. */
@@ -7,19 +7,8 @@ export type TextValue = string | number | bigint | boolean;
 /** Text content selections, including nullish values that clear the text content. */
 export type TextSelection = TextValue | null | undefined;
 
-/** A subscribable source of text content. */
-export interface TextSource {
-	readonly value: TextSelection;
-	subscribe (owner: Owner, listener: (value: TextSelection) => void): CleanupFunction;
-}
-
 /** A direct or subscribable text input. */
-export type TextInput = TextSelection | TextSource;
-
-type PresenceSource = {
-	readonly value: boolean;
-	subscribe (owner: Owner, listener: (value: boolean) => void): CleanupFunction;
-};
+export type TextInput = TextSelection | State<TextSelection>;
 
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
@@ -30,23 +19,12 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
-function isTextSource (value: TextInput): value is TextSource {
-	return typeof value === "object"
-		&& value !== null
-		&& "value" in value
-		&& "subscribe" in value
-		&& typeof value.subscribe === "function";
-}
-
-function toTextSource (value: TextInput): TextSource {
-	if (isTextSource(value)) {
+function toTextSource (value: TextInput): State<TextSelection> {
+	if (value instanceof State) {
 		return value;
 	}
 
-	return {
-		subscribe: () => noop,
-		value,
-	};
+	return State.Readonly(value);
 }
 
 function serializeTextSelection (value: TextSelection): string {
@@ -96,7 +74,7 @@ export class TextManipulator {
 	 * @param value Direct or reactive text input.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (visible: PresenceSource, value: TextInput): Component {
+	bind (visible: State<boolean>, value: TextInput): Component {
 		this.ensureActive();
 		const textSource = toTextSource(value);
 

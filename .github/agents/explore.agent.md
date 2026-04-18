@@ -2,7 +2,7 @@
 name: Explore
 description: Fast read-only codebase exploration and Q&A subagent. Prefer over manually chaining multiple search and file-reading operations to avoid cluttering the main conversation. Safe to call in parallel. Specify thoroughness: quick, medium, or thorough.
 argument-hint: Describe WHAT you're looking for and desired thoroughness (quick/medium/thorough)
-model: ['Auto (copilot)', 'Claude Haiku 4.5 (copilot)', 'GPT-5.4 mini (copilot)']
+model: ['Claude Haiku 4.5 (copilot)', 'GPT-5.4 mini (copilot)', 'Auto (copilot)']
 target: vscode
 user-invocable: false
 tools: [read/getTaskOutput, read/readFile, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, web]

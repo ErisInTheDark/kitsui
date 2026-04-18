@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { Marker } from "../../src/component/Marker";
 import { Style, StyleFontFace, StyleImport, StyleReset, darkScheme, elements, lightScheme, pseudoAfter, pseudoBefore, whenAfterSelf, whenFirst, whenHover, whenStuck } from "../../src/component/Style";
 import placeExtension from "../../src/component/extensions/placeExtension";
 
@@ -185,7 +186,9 @@ describe("Style", () => {
 
 	/** Verifies reset rules are emitted with the universal selector ahead of regular styles. */
 	it("renders reset rules before regular styles", () => {
-		StyleReset({ boxSizing: "border-box" }).appendTo(document.head);
+		const reset = StyleReset({ boxSizing: "border-box" });
+		expect(reset).toBeInstanceOf(Marker);
+		reset.appendTo(document.head);
 		Style.Class("style-reset-basic-regular", { color: "red" });
 
 		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
@@ -265,7 +268,9 @@ describe("Style", () => {
 	});
 
 	it("registers @import rules at the very start of the stylesheet", () => {
-		StyleImport("https://fonts.example.com/inter.css").appendTo(document.head);
+		const styleImport = StyleImport("https://fonts.example.com/inter.css");
+		expect(styleImport).toBeInstanceOf(Marker);
+		styleImport.appendTo(document.head);
 		StyleReset({ margin: "0" }).appendTo(document.head);
 		Style.Class("style-import-order-class", { color: "blue" });
 

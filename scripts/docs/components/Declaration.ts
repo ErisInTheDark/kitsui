@@ -1,14 +1,36 @@
 import { JSONOutput, ReflectionKind } from "typedoc";
-import { Component, Style, whenClosed, whenHover, whenStuck } from "../../../src";
+import { Component, pseudoBefore, Style, whenClosed, whenFirst, whenHover, whenNotFirst, whenStuck } from "../../../src";
 import { monoFont } from "../styles";
 import Comment from "./Comment";
 import Flags from "./Flags";
-import Signature from "./Signature";
+import Signature, { fancyAccentBlock } from "./Signature";
 import SourceLink from "./SourceLink";
-import Type from "./Type";
+import Type, { resolveTypeDeclarationLinkById } from "./Type";
 
 function summarizeText (summary: JSONOutput.CommentDisplayPart[]): string {
 	return summary.map(p => p.text).join("").trim();
+}
+
+function summarizeComment (comment: JSONOutput.Comment | undefined): string {
+	if (!comment)
+		return "";
+
+	const summary = summarizeText(comment.summary);
+	const tags = (comment.blockTags ?? [])
+		.map(tag => `${tag.tag}:${tag.name ?? ""}:${summarizeText(tag.content)}`)
+		.join("|");
+
+	return `${summary}||${tags}`;
+}
+
+function hasRenderableComment (comment: JSONOutput.Comment | undefined): comment is JSONOutput.Comment {
+	if (!comment) {
+		return false;
+	}
+
+	const hasSummary = summarizeText(comment.summary).length > 0;
+	const hasRenderableBlockTag = comment.blockTags?.some(tag => tag.tag !== "@group" && tag.tag !== "@category") ?? false;
+	return hasSummary || hasRenderableBlockTag;
 }
 
 const CALL_CONSTRUCT_KINDS = new Set([ReflectionKind.CallSignature, ReflectionKind.ConstructorSignature]);
@@ -29,27 +51,53 @@ function findPairedSignature (
 		? ReflectionKind.ConstructorSignature
 		: ReflectionKind.CallSignature;
 
-	const sigSummary = sig.comment ? summarizeText(sig.comment.summary) : "";
+	const sigSummary = summarizeComment(sig.comment);
 
 	for (let j = 0; j < signatures.length; j++) {
 		if (j === index || rendered.has(j)) continue;
 		const other = signatures[j];
 		if (other.kind !== pairKind) continue;
 
-		const otherSummary = other.comment ? summarizeText(other.comment.summary) : "";
+		const otherSummary = summarizeComment(other.comment);
 		if (sigSummary === otherSummary) return j;
 	}
 
 	return undefined;
 }
 
+function renderedSignatureGroupCount (signatures: JSONOutput.SignatureReflection[]): number {
+	const rendered = new Set<number>();
+	let groups = 0;
+
+	for (let i = 0; i < signatures.length; i++) {
+		if (rendered.has(i)) continue;
+
+		rendered.add(i);
+		const paired = findPairedSignature(signatures, i, rendered);
+		if (paired !== undefined) {
+			rendered.add(paired);
+		}
+
+		groups++;
+	}
+
+	return groups;
+}
+
 const declarationStyle = Style.Class("docs-declaration", {
 	borderTop: "1px solid $borderSubtle",
-	padding: "16px 0",
+	paddingBlock: "16px",
 	paddingLeft: "26px",
+	scrollMarginTop: "$docsDeclarationStickyTop",
 	...whenClosed({
 		$declarationTitleFontStyle: "italic",
 	})
+});
+
+const declarationCollapsed = Style.after(declarationStyle).Class("docs-declaration-collapsed", {
+	paddingBlock: "4px",
+	...whenFirst({ paddingTop: "8px" }),
+	...whenNotFirst({ borderTop: "none" }),
 });
 
 const declarationContentsStyle = Style.Class("docs-declaration-contents", {
@@ -57,6 +105,34 @@ const declarationContentsStyle = Style.Class("docs-declaration-contents", {
 	flexDirection: "column",
 	gap: "10px",
 	paddingTop: "10px",
+});
+
+const declarationRelationshipsStyle = Style.Class("docs-declaration-relationships", {
+	alignItems: "center",
+	display: "flex",
+	flexWrap: "wrap",
+	gap: "8px",
+	marginLeft: "-2px",
+	minHeight: "24px",
+});
+
+const declarationRelationshipLabelStyle = Style.Class("docs-declaration-relationship-label", {
+	...monoFont,
+	color: "$syntaxKeyword",
+	fontSize: "13px",
+	fontWeight: 700,
+	textTransform: "lowercase",
+});
+
+const declarationRelationshipListStyle = Style.Class("docs-declaration-relationship-list", {
+	alignItems: "center",
+	display: "inline-flex",
+	flexWrap: "wrap",
+	gap: "6px",
+});
+
+const declarationRelationshipSeparatorStyle = Style.Class("docs-declaration-relationship-separator", {
+	color: "$syntaxPunctuation",
 });
 
 const declarationHeaderStyle = Style.Class("docs-declaration-header", {
@@ -87,6 +163,44 @@ const declarationHeaderOverlayStyle = Style.Class("docs-declaration-header-overl
 		borderBottom: "1px solid $borderSubtle",
 		opacity: 1,
 	}),
+});
+
+const declarationCollapsedLinkStyle = Style.Class("docs-declaration-collapsed-link", {
+	marginBottom: "0",
+	position: "relative",
+	top: "auto",
+	zIndex: 1,
+	background: "transparent",
+	fontStyle: "normal",
+	cursor: "pointer",
+	textDecoration: "none",
+	width: "fit-content",
+	$declarationCollapsedArrowX: "0px",
+	...pseudoBefore({
+		content: '""',
+		display: "block",
+		position: "absolute",
+		insetBlock: "0",
+		insetInline: "-12px",
+		borderRadius: "6px",
+		background: "$bgSurface",
+		opacity: 0,
+		transition: "opacity 0.15s",
+		zIndex: -1,
+	}),
+	...whenHover({
+		$declarationCollapsedArrowX: "2px",
+		...pseudoBefore({ opacity: 1 }),
+	}),
+});
+
+const declarationCollapsedArrowStyle = Style.Class("docs-declaration-collapsed-arrow", {
+	color: "$textDim",
+	display: "inline-flex",
+	paddingRight: "6px",
+	transform: "translateX($declarationCollapsedArrowX)",
+	transition: "transform 0.12s, color 0.12s",
+	height: "24px",
 });
 
 const declarationNameStyle = Style.Class("docs-declaration-name", {
@@ -166,6 +280,35 @@ const declarationSignaturesContainerStyle = Style.Class("docs-declaration-signat
 	display: "flex",
 	flexDirection: "column",
 	gap: "12px",
+});
+
+const declarationFancyStyle = Style.Class("docs-declaration-fancy", {
+	...fancyAccentBlock,
+	$docsAccent: "$syntaxMethod",
+});
+
+const declarationFancyAccentMethodStyle = Style.Class("docs-declaration-fancy-accent-method", {
+	$docsAccent: "$syntaxMethod",
+});
+
+const declarationFancyAccentTypeStyle = Style.Class("docs-declaration-fancy-accent-type", {
+	$docsAccent: "$syntaxType",
+});
+
+const declarationFancyAccentReferenceStyle = Style.Class("docs-declaration-fancy-accent-reference", {
+	$docsAccent: "$syntaxReference",
+});
+
+const declarationFancyAccentLiteralStyle = Style.Class("docs-declaration-fancy-accent-literal", {
+	$docsAccent: "$syntaxLiteral",
+});
+
+const declarationFancyAccentKeywordStyle = Style.Class("docs-declaration-fancy-accent-keyword", {
+	$docsAccent: "$syntaxKeyword",
+});
+
+const declarationFancyAccentPropertyStyle = Style.Class("docs-declaration-fancy-accent-property", {
+	$docsAccent: "$textPrimary",
 });
 
 interface KindInfo {
@@ -262,49 +405,160 @@ function typeAssignmentOperator (kind: number): string {
 	}
 }
 
+type AccentVariant = "method" | "type" | "reference" | "literal" | "keyword" | "property";
+
+function accentVariantForKind (kind: number): AccentVariant {
+	switch (kind) {
+		case ReflectionKind.Variable:
+			return "type";
+		case ReflectionKind.TypeAlias:
+		case ReflectionKind.Class:
+		case ReflectionKind.Interface:
+		case ReflectionKind.Namespace:
+		case ReflectionKind.Module:
+			return "reference";
+		case ReflectionKind.Enum:
+		case ReflectionKind.EnumMember:
+			return "literal";
+		case ReflectionKind.GetSignature:
+		case ReflectionKind.SetSignature:
+			return "keyword";
+		case ReflectionKind.Property:
+			return "property";
+		default:
+			return "method";
+	}
+}
+
+function fancyAccentClass (variant: AccentVariant): Style.Class {
+	switch (variant) {
+		case "type": return declarationFancyAccentTypeStyle;
+		case "reference": return declarationFancyAccentReferenceStyle;
+		case "literal": return declarationFancyAccentLiteralStyle;
+		case "keyword": return declarationFancyAccentKeywordStyle;
+		case "property": return declarationFancyAccentPropertyStyle;
+		default: return declarationFancyAccentMethodStyle;
+	}
+}
+
 export interface DeclarationOptions {
 	parentKind?: number;
 	depth?: number;
 	anchorScope?: string;
 }
 
+interface RenderableDeclaration extends JSONOutput.DeclarationReflection {
+	anchorName?: string;
+	children?: RenderableDeclaration[];
+	collapseToTargetId?: number;
+	extendsReferences?: JSONOutput.ReferenceType[];
+}
+
 function sanitizeAnchorScope (scope: string): string {
 	return scope.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
-export function declarationAnchorId (decl: JSONOutput.DeclarationReflection, anchorScope?: string): string {
+function variableFunctionTypeSignatures (decl: RenderableDeclaration): JSONOutput.SignatureReflection[] | undefined {
+	if (decl.kind !== ReflectionKind.Variable || !decl.type) {
+		return undefined;
+	}
+
+	const type = decl.type;
+	if (type.type !== "reflection") {
+		return undefined;
+	}
+
+	const signatures = type.declaration?.signatures;
+	if (!signatures || signatures.length === 0) {
+		return undefined;
+	}
+
+	return signatures;
+}
+
+export function declarationAnchorId (decl: JSONOutput.DeclarationReflection & { anchorName?: string }, anchorScope?: string): string {
+	if (decl.anchorName)
+		return decl.anchorName;
+
 	if (!anchorScope)
 		return `decl-${decl.id}`;
 
 	return `decl-${sanitizeAnchorScope(anchorScope)}-${decl.id}`;
 }
 
-export default function Declaration (decl: JSONOutput.DeclarationReflection, options?: DeclarationOptions): Component {
+export default function Declaration (decl: RenderableDeclaration, options?: DeclarationOptions): Component {
 	const anchorId = declarationAnchorId(decl, options?.anchorScope);
+	const typeFunctionSignatures = variableFunctionTypeSignatures(decl);
+	const signatureList = (decl.signatures && decl.signatures.length > 0)
+		? decl.signatures
+		: typeFunctionSignatures;
+	const hasConstructorSignature = signatureList?.some(signature => signature.kind === ReflectionKind.ConstructorSignature) ?? false;
+	const visualKind = hasConstructorSignature
+		? ReflectionKind.Class
+		: typeFunctionSignatures
+			? ReflectionKind.Function
+			: decl.kind;
+
+	if (decl.collapseToTargetId !== undefined) {
+		const targetLink = resolveTypeDeclarationLinkById(decl.collapseToTargetId);
+		if (targetLink) {
+			const container = Component("div")
+				.class.add(declarationStyle, declarationCollapsed)
+				.attribute.set("id", anchorId);
+
+			const link = Component("a")
+				.class.add(declarationHeaderStyle, declarationCollapsedLinkStyle)
+				.attribute.set("href", targetLink)
+				.append(Component("div").class.add(declarationHeaderOverlayStyle))
+				.appendTo(container);
+
+			const info = kindIcon(visualKind);
+			if (info) {
+				const icon = Component("span").class.add(kindIconStyle, info.colorClass);
+				icon.element.innerHTML = info.svg;
+				icon.appendTo(link);
+			}
+
+			Component("span")
+				.class.add(declarationNameStyle)
+				.text.set(decl.name)
+				.appendTo(link);
+
+			if (decl.flags && Object.values(decl.flags).some(Boolean))
+				Flags(decl.flags).appendTo(link);
+
+			const arrow = Component("span").class.add(declarationCollapsedArrowStyle);
+			arrow.element.innerHTML = `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8H11M11 8L8 5M11 8L8 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+			arrow.appendTo(link);
+
+			return container;
+		}
+	}
+		
+	const depth = options?.depth ?? 0;
+
 	const container = Component("details")
 		.class.add(declarationStyle)
+		.class.add(Style.Class(`docs-declaration-depth-${depth}`, {
+			$docsDeclarationStickyTop: `${depth * 42}px`,
+			$docsDeclarationStickyZ: 200 - depth,
+		}))
 		.attribute.set("id", anchorId)
 		.attribute.add("open");
 
 	const contents = Component("div")
 		.class.add(declarationContentsStyle)
 		.appendTo(container);
-		
-	const depth = options?.depth ?? 0;
 
 	// Header row: kind icon, name, flags
 	const header = Component("summary")
 		.class.add(declarationHeaderStyle)
-		.class.add(Style.Class(`docs-declaration-header-sticky-depth-${depth}`, {
-			$docsDeclarationStickyTop: `${depth * 42}px`,
-			$docsDeclarationStickyZ: 200 - depth,
-		}))
 		.append(Component("div")
 			.class.add(declarationHeaderOverlayStyle)
 		)
 		.appendTo(container);
 
-	const info = kindIcon(decl.kind);
+	const info = kindIcon(visualKind);
 	if (info) {
 		const icon = Component("span").class.add(kindIconStyle, info.colorClass);
 		icon.element.innerHTML = info.svg;
@@ -327,25 +581,62 @@ export default function Declaration (decl: JSONOutput.DeclarationReflection, opt
 		Flags(decl.flags).appendTo(header);
 	}
 
+	if (decl.extendsReferences && decl.extendsReferences.length > 0) {
+		const relationships = Component("div")
+			.class.add(declarationRelationshipsStyle)
+			.appendTo(contents);
+
+		Component("span")
+			.class.add(declarationRelationshipLabelStyle)
+			.text.set("extends")
+			.appendTo(relationships);
+
+		const list = Component("div")
+			.class.add(declarationRelationshipListStyle)
+			.appendTo(relationships);
+
+		for (let i = 0; i < decl.extendsReferences.length; i++) {
+			if (i > 0) {
+				Component("span")
+					.class.add(declarationRelationshipSeparatorStyle)
+					.text.set(",")
+					.appendTo(list);
+			}
+
+			list.append(Type(decl.extendsReferences[i]));
+		}
+	}
+
 	// Comment — with virtual signature extraction for non-function declarations
-	const hasSignatures = (decl.signatures && decl.signatures.length > 0) || decl.getSignature || decl.setSignature;
-	const sigLikeTags = decl.comment?.blockTags?.filter(
+	const hasSignatures = (signatureList && signatureList.length > 0) || decl.getSignature || decl.setSignature;
+	const declarationComment = hasRenderableComment(decl.comment) ? decl.comment : undefined;
+	const hasFancyContent = !!declarationComment || !!decl.type;
+	const shouldUseFancyDeclarationBox = !hasSignatures && hasFancyContent;
+	const contentTarget = shouldUseFancyDeclarationBox
+		? Component("div").class.add(declarationFancyStyle, fancyAccentClass(accentVariantForKind(visualKind))).appendTo(contents)
+		: contents;
+	const shouldInjectDeclarationCommentIntoSignatures = !!declarationComment
+		&& !!signatureList
+		&& signatureList.length > 0
+		&& signatureList.every(signature => summarizeText(signature.comment?.summary ?? []) === "")
+		&& renderedSignatureGroupCount(signatureList) === 1;
+	const sigLikeTags = declarationComment?.blockTags?.filter(
 		t => t.tag === "@param" || t.tag === "@returns" || t.tag === "@throws",
 	);
 
 	let hasVirtualSignature = false;
 
-	if (decl.comment && sigLikeTags && sigLikeTags.length > 0 && !hasSignatures) {
+	if (declarationComment && sigLikeTags && sigLikeTags.length > 0 && !hasSignatures) {
 		hasVirtualSignature = true;
 		const paramTags = sigLikeTags.filter(t => t.tag === "@param");
 		const otherSigTags = sigLikeTags.filter(t => t.tag !== "@param");
-		const nonSigTags = decl.comment.blockTags?.filter(
+		const nonSigTags = declarationComment.blockTags?.filter(
 			t => t.tag !== "@param" && t.tag !== "@returns" && t.tag !== "@throws",
 		);
 
 		// Render summary + non-sig block tags via Comment
-		if (decl.comment.summary.length > 0 || (nonSigTags && nonSigTags.length > 0)) {
-			Comment({ summary: decl.comment.summary, blockTags: nonSigTags }).appendTo(contents);
+		if (declarationComment.summary.length > 0 || (nonSigTags && nonSigTags.length > 0)) {
+			Comment({ summary: declarationComment.summary, blockTags: nonSigTags }).appendTo(contentTarget);
 		}
 
 		// Build virtual signature from @param, @returns, @throws
@@ -366,69 +657,83 @@ export default function Declaration (decl: JSONOutput.DeclarationReflection, opt
 				: undefined,
 		} as unknown as JSONOutput.SignatureReflection;
 
-		Signature(virtualSig, { name: decl.name }).appendTo(contents);
-	} else if (decl.comment) {
-		Comment(decl.comment).appendTo(contents);
+		Signature(virtualSig, { accent: "method", name: decl.name }).appendTo(contentTarget);
+	} else if (declarationComment && !shouldInjectDeclarationCommentIntoSignatures) {
+		Comment(declarationComment).appendTo(contentTarget);
 	}
 
 	// Type (for variables, properties, type aliases) — skip if virtual signature replaces it
-	if (decl.type && !hasVirtualSignature) {
+	if (decl.type && !hasVirtualSignature && !typeFunctionSignatures && !(signatureList && signatureList.length > 0)) {
 		const typeRow = Component("div")
 			.class.add(declarationTypeStyle)
-			.appendTo(contents);
+			.appendTo(contentTarget);
 
-		const kw = keywordForKind(decl.kind);
+		const kw = keywordForKind(visualKind);
 		if (kw) {
 			Component("span").class.add(declarationKeywordStyle).text.set(kw).appendTo(typeRow);
 		}
 
-		Component("span").class.add(nameStyleForKind(decl.kind)).text.set(decl.name).appendTo(typeRow);
+		Component("span").class.add(nameStyleForKind(visualKind)).text.set(decl.name).appendTo(typeRow);
 
-		const op = typeAssignmentOperator(decl.kind);
+		const op = typeAssignmentOperator(visualKind);
 		Component("span").class.add(declarationTypePunctuationStyle).text.set(op).appendTo(typeRow);
 
 		typeRow.append(Type(decl.type as JSONOutput.SomeType));
 	}
 
 	// Signatures (for functions, methods) — dedup identical summaries
-	if (decl.signatures && decl.signatures.length > 0) {
-		const declSummary = decl.comment ? summarizeText(decl.comment.summary) : "";
+	if (signatureList && signatureList.length > 0) {
+		const declSummary = declarationComment ? summarizeText(declarationComment.summary) : "";
 
 		const signaturesContainer = Component("div")
 			.class.add(declarationSignaturesContainerStyle)
-			.appendTo(contents);
+			.appendTo(contentTarget);
 
 		// Group call/construct signature pairs with identical docs
 		const rendered = new Set<number>();
-		for (let i = 0; i < decl.signatures.length; i++) {
+		let pendingLeadingComment = shouldInjectDeclarationCommentIntoSignatures ? declarationComment : undefined;
+		for (let i = 0; i < signatureList.length; i++) {
 			if (rendered.has(i)) continue;
 
-			const sig = decl.signatures[i];
+			const sig = signatureList[i];
 			const sigSummary = sig.comment ? summarizeText(sig.comment.summary) : "";
 			const skipSummary = !!declSummary && sigSummary === declSummary;
 
 			// Find a matching paired signature (call ↔ construct) with identical docs
-			const paired = findPairedSignature(decl.signatures, i, rendered);
+			const paired = findPairedSignature(signatureList, i, rendered);
 			if (paired !== undefined) {
 				rendered.add(i);
 				rendered.add(paired);
 				// Render both code blocks back-to-back with shared documentation
-				const callSig = sig.kind === ReflectionKind.CallSignature ? sig : decl.signatures[paired];
-				const constructSig = sig.kind === ReflectionKind.ConstructorSignature ? sig : decl.signatures[paired];
-				Signature(callSig, { ...(skipSummary ? { skipSummary } : {}), name: decl.name, pairedSignature: constructSig }).appendTo(signaturesContainer);
+				const callSig = sig.kind === ReflectionKind.CallSignature ? sig : signatureList[paired];
+				const constructSig = sig.kind === ReflectionKind.ConstructorSignature ? sig : signatureList[paired];
+				Signature(callSig, {
+					...(skipSummary ? { skipSummary } : {}),
+					...(pendingLeadingComment ? { leadingComment: pendingLeadingComment } : {}),
+					accent: "method",
+					name: decl.name,
+					pairedSignature: constructSig,
+				}).appendTo(signaturesContainer);
+				pendingLeadingComment = undefined;
 			} else {
 				rendered.add(i);
-				Signature(sig, { ...(skipSummary ? { skipSummary } : {}), name: decl.name }).appendTo(signaturesContainer);
+				Signature(sig, {
+					...(skipSummary ? { skipSummary } : {}),
+					...(pendingLeadingComment ? { leadingComment: pendingLeadingComment } : {}),
+					accent: "method",
+					name: decl.name,
+				}).appendTo(signaturesContainer);
+				pendingLeadingComment = undefined;
 			}
 		}
 	}
 
 	// Get/Set signatures (for accessors)
 	if (decl.getSignature) {
-		Signature(decl.getSignature, { name: `get ${decl.name}` }).appendTo(contents);
+		Signature(decl.getSignature, { accent: "method", name: `get ${decl.name}` }).appendTo(contentTarget);
 	}
 	if (decl.setSignature) {
-		Signature(decl.setSignature, { name: `set ${decl.name}` }).appendTo(contents);
+		Signature(decl.setSignature, { accent: "method", name: `set ${decl.name}` }).appendTo(contentTarget);
 	}
 
 	// Source link (at the very end) — skip for undocumented interface members

@@ -1,52 +1,61 @@
 import { Component, Style } from "../../../src";
+import { PreparedModuleSection } from "../modulePage/reflection";
+import type { SidebarPage, SidebarSection } from "../navigation";
+import { pageHeroBase, pageSummaryBase, pageTitleBase, sectionTitleBase, stackColumn } from "../styles";
 import Declaration from "./Declaration";
 import Layout from "./Layout";
-import { PreparedModuleSection } from "../modulePage/reflection";
 
 const sectionStyle = Style.Class("docs-component-section", {
-	display: "flex",
-	flexDirection: "column",
+	...stackColumn,
 	gap: "4px",
 });
 
 const sectionTitleStyle = Style.Class("docs-component-section-title", {
-	color: "$textBright",
-	fontSize: "22px",
-	fontWeight: 700,
-	letterSpacing: "-0.01em",
-	marginTop: "16px",
+	...sectionTitleBase,
 });
 
 const heroStyle = Style.Class("docs-component-hero", {
-	borderBottom: "1px solid $borderSubtle",
-	display: "flex",
-	flexDirection: "column",
-	gap: "8px",
-	paddingBottom: "20px",
+	...pageHeroBase,
 });
 
 const titleStyle = Style.Class("docs-component-title", {
-	color: "$textBright",
-	fontSize: "31px",
-	fontWeight: 700,
-	letterSpacing: "-0.02em",
-	lineHeight: 1.2,
+	...pageTitleBase,
 });
 
 const summaryStyle = Style.Class("docs-component-summary", {
-	color: "$textSubtle",
-	fontSize: "15px",
-	lineHeight: 1.5,
+	...pageSummaryBase,
 });
+
+export function createSectionAnchorId (title: string, seen: Map<string, number>): string {
+	const base = title
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/gu, "-")
+		.replace(/^-+|-+$/gu, "") || "section";
+	const count = (seen.get(base) ?? 0) + 1;
+	seen.set(base, count);
+	return count === 1 ? `section-${base}` : `section-${base}-${count}`;
+}
 
 export interface ApiModulePageOptions {
 	heading: string;
 	path: string;
+	pages: SidebarPage[];
 	sections: PreparedModuleSection[];
 	summary: string;
 }
 
 export default function ApiModulePage (options: ApiModulePageOptions): Component {
+	const seenAnchors = new Map<string, number>();
+	const sectionsWithAnchors = options.sections.map(section => ({
+		...section,
+		anchorId: createSectionAnchorId(section.sectionTitle, seenAnchors),
+	}));
+	const sidebarSections: SidebarSection[] = sectionsWithAnchors.map(section => ({
+		href: `#${section.anchorId}`,
+		label: section.sectionTitle,
+	}));
+
 	return Layout((content) => {
 		content.append(
 			Component("section")
@@ -61,18 +70,19 @@ export default function ApiModulePage (options: ApiModulePageOptions): Component
 				),
 		);
 
-		for (const sectionData of options.sections) {
+		for (const sectionData of sectionsWithAnchors) {
 			const section = Component("section")
 				.class.add(sectionStyle)
 				.appendTo(content);
 
 			Component("h2")
 				.class.add(sectionTitleStyle)
+				.attribute.set("id", sectionData.anchorId)
 				.text.set(sectionData.sectionTitle)
 				.appendTo(section);
 
 			for (const child of sectionData.children)
 				Declaration(child, { anchorScope: sectionData.anchorScope }).appendTo(section);
 		}
-	}, options.path);
+	}, options.path, options.pages, sidebarSections);
 }

@@ -49,12 +49,16 @@ export interface StateOptions<T> {
 export interface StateExtensions<T> { }
 
 /**
+ * A marker interface for module-level State static extensions.
+ * Extend this interface to add static methods to the State constructor function.
+ */
+export interface StateStaticExtensions { }
+
+/**
  * Constructor type for extending the State class with custom methods.
  * Used with {@link State.extend} to access and modify the State prototype.
  */
-export type ExtendableStateClass<T = unknown> = (abstract new (...args: never[]) => State<T>) & {
-	prototype: State<T>;
-};
+export type ExtendableStateClass = StateConstructor & StateStaticExtensions;
 
 interface StateGraph {
 	pendingListeners: Set<QueuedStateListenerRecord<unknown>>;
@@ -84,6 +88,8 @@ type StateInternalOptions<T> = StateOptions<T> & {
 const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
+
+const ident = <T>(value: T): T => value;
 
 function createStateGraph (): StateGraph {
 	return {
@@ -231,6 +237,18 @@ export abstract class Owner {
 
 const orphanedStateErrorMessage = "States must have an owner before the next tick.";
 
+function getEqualityFunction<T> (state: State<T>): StateEqualityFunction<T> {
+	return state["equalityFunction"] as StateEqualityFunction<T>;
+}
+
+function getImmediateListeners<T> (state: State<T>): Set<ImmediateStateListenerRecord<T>> {
+	return state["immediateListeners"] as Set<ImmediateStateListenerRecord<T>>;
+}
+
+function getQueuedListeners<T> (state: State<T>): Set<QueuedStateListenerRecord<T>> {
+	return state["queuedListeners"] as Set<QueuedStateListenerRecord<T>>;
+}
+
 /** @group State */
 class StateClass<T> extends Owner {
 	private owner: Owner | null;
@@ -239,10 +257,13 @@ class StateClass<T> extends Owner {
 	private requiresExplicitOwner = false;
 	private orphanCheckId: ReturnType<typeof setTimeout> | null = null;
 	private currentValue: T;
-	private equalityFunction: StateEqualityFunction<T>;
+	/** @deprecated Use getEqualityFunction(this) */
+	private equalityFunction: StateEqualityFunction<any>;
 	private readonly graph: StateGraph;
-	private readonly immediateListeners = new Set<ImmediateStateListenerRecord<T>>();
-	private readonly queuedListeners = new Set<QueuedStateListenerRecord<T>>();
+	/** @deprecated Use getImmediateListeners(this) */
+	private readonly immediateListeners = new Set<ImmediateStateListenerRecord<any>>();
+	/** @deprecated Use getQueuedListeners(this) */
+	private readonly queuedListeners = new Set<QueuedStateListenerRecord<any>>();
 
 	constructor (owner: Owner | null, initialValue: T, options: StateInternalOptions<T> = {}) {
 		super();
@@ -296,14 +317,14 @@ class StateClass<T> extends Owner {
 	set (nextValue: T): T {
 		this.ensureActive();
 
-		if (this.equalityFunction(this.currentValue, nextValue)) {
+		if (getEqualityFunction(this)(this.currentValue, nextValue)) {
 			return this.currentValue;
 		}
 
 		const previousValue = this.currentValue;
 		this.currentValue = nextValue;
 
-		for (const listenerRecord of [...this.immediateListeners]) {
+		for (const listenerRecord of [...getImmediateListeners(this)]) {
 			if (!listenerRecord.active) {
 				continue;
 			}
@@ -311,7 +332,7 @@ class StateClass<T> extends Owner {
 			listenerRecord.listener(this.currentValue, previousValue);
 		}
 
-		for (const listenerRecord of this.queuedListeners) {
+		for (const listenerRecord of getQueuedListeners(this)) {
 			if (!listenerRecord.active) {
 				continue;
 			}
@@ -320,7 +341,7 @@ class StateClass<T> extends Owner {
 				listenerRecord.pending = true;
 				listenerRecord.pendingOriginalValue = previousValue;
 				listenerRecord.pendingFinalValue = this.currentValue;
-				listenerRecord.equals = this.equalityFunction;
+				listenerRecord.equals = getEqualityFunction(this);
 				listenerRecord.graph.pendingListeners.add(listenerRecord as QueuedStateListenerRecord<unknown>);
 				scheduleGraphFlush(listenerRecord.graph);
 				continue;
@@ -372,7 +393,7 @@ class StateClass<T> extends Owner {
 			active: true,
 			listener,
 		};
-		this.immediateListeners.add(listenerRecord);
+		getImmediateListeners(this).add(listenerRecord);
 
 		return () => {
 			if (!listenerRecord.active) {
@@ -380,7 +401,7 @@ class StateClass<T> extends Owner {
 			}
 
 			listenerRecord.active = false;
-			this.immediateListeners.delete(listenerRecord);
+			getImmediateListeners(this).delete(listenerRecord);
 		};
 	}
 
@@ -399,14 +420,14 @@ class StateClass<T> extends Owner {
 
 		const listenerRecord: QueuedStateListenerRecord<T> = {
 			active: true,
-			equals: this.equalityFunction,
+			equals: getEqualityFunction(this),
 			graph: this.graph,
 			listener,
 			pending: false,
 			pendingFinalValue: this.currentValue,
 			pendingOriginalValue: this.currentValue,
 		};
-		this.queuedListeners.add(listenerRecord);
+		getQueuedListeners(this).add(listenerRecord);
 
 		return () => {
 			if (!listenerRecord.active) {
@@ -419,7 +440,7 @@ class StateClass<T> extends Owner {
 				this.graph.pendingListeners.delete(listenerRecord as QueuedStateListenerRecord<unknown>);
 			}
 
-			this.queuedListeners.delete(listenerRecord);
+			getQueuedListeners(this).delete(listenerRecord);
 		};
 	}
 
@@ -494,11 +515,11 @@ class StateClass<T> extends Owner {
 		this.releaseOwner();
 		this.releaseOwner = noop;
 
-		for (const listenerRecord of this.immediateListeners) {
+		for (const listenerRecord of getImmediateListeners(this)) {
 			listenerRecord.active = false;
 		}
 
-		for (const listenerRecord of this.queuedListeners) {
+		for (const listenerRecord of getQueuedListeners(this)) {
 			listenerRecord.active = false;
 			if (listenerRecord.pending) {
 				listenerRecord.pending = false;
@@ -506,8 +527,8 @@ class StateClass<T> extends Owner {
 			}
 		}
 
-		this.immediateListeners.clear();
-		this.queuedListeners.clear();
+		getImmediateListeners(this).clear();
+		getQueuedListeners(this).clear();
 	}
 
 	private clearOrphanCheck (): void {
@@ -620,8 +641,33 @@ type StateConstructor = {
 	new <T>(initialValue: T, options?: StateOptions<T>): State<T>;
 	new <T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
 	prototype: State<unknown>;
-	extend<T = unknown> (): ExtendableStateClass<T>;
-};
+	/**
+	 * Returns the underlying State class for prototype extension.
+	 * This allows modules to add custom methods and properties to all State instances.
+	 *
+	 * @returns The ExtendableStateClass constructor, whose prototype can be modified.
+	 *
+	 * @example
+	 * ```
+	 * const StateClass = State.extend<number>();
+	 * StateClass.prototype.double = function() {
+	 *   return this.value * 2;
+	 * };
+	 *
+	 * const num = State(owner, 5);
+	 * num.double(); // 10
+	 * ```
+	 */
+	extend<T = unknown> (): ExtendableStateClass;
+	/**
+	 * Creates a new State instance that can never change.
+	 * The returned state has a fixed value and ignores all updates. 
+	 * It is not associated with any owner and does not require disposal.
+	 * @param value The fixed value for the readonly state.
+	 * @returns A new readonly state instance with the specified value.
+	 */
+	Readonly<T> (value: T): State<T>;
+}
 
 /**
  * Creates a reactive state container with an initial value.
@@ -662,7 +708,7 @@ export const State = function State<T> (ownerOrValue: Owner | T, valueOrOptions?
 	}
 
 	return new StateClass(null, ownerOrValue as T, ((arguments.length >= 2 ? valueOrOptions : undefined) ?? {}) as StateInternalOptions<T>);
-} as StateConstructor;
+} as StateConstructor & StateStaticExtensions;
 
 State.prototype = StateClass.prototype;
 
@@ -683,6 +729,21 @@ State.prototype = StateClass.prototype;
  * num.double(); // 10
  * ```
  */
-State.extend = function extend<T = unknown> (): ExtendableStateClass<T> {
-	return StateClass as ExtendableStateClass<T>;
+State.extend = function extend (): ExtendableStateClass {
+	return StateClass as ExtendableStateClass;
+};
+
+/**
+ * Creates a new State instance that can never change.
+ * The returned state has a fixed value and ignores all updates. 
+ * It is not associated with any owner and does not require disposal.
+ * @param value The fixed value for the readonly state.
+ * @returns A new readonly state instance with the specified value.
+ */
+State.Readonly = function Readonly<T> (value: T): State<T> {
+	const readonlyState = new StateClass(null, value);
+	readonlyState["clearOrphanCheck"]();
+	readonlyState.set = ident;
+	readonlyState.update = () => readonlyState.value;
+	return readonlyState;
 };

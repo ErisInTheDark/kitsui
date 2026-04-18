@@ -1,4 +1,4 @@
-import { JSONOutput } from "typedoc";
+import { JSONOutput, ReflectionKind } from "typedoc";
 import { Component, Style } from "../../../src";
 import { monoFont } from "../styles";
 
@@ -50,6 +50,9 @@ const FUNCTION_PATTERN = /Function|Method|Constructor|Listener|Handler|Callback|
  */
 let typeNameAliases = new Map<string, string>();
 let typeDeclarationLinks = new Map<string, string>();
+let typeDeclarationLinksById = new Map<number, string>();
+let typeDeclarationLinksExtra = new Map<string, string>();
+let typeDeclarationLinksByIdExtra = new Map<number, string>();
 
 export function setTypeNameAliases (aliases: Map<string, string>): void {
 	typeNameAliases = aliases;
@@ -59,12 +62,28 @@ export function resolveTypeName (name: string): string {
 	return typeNameAliases.get(name) ?? name;
 }
 
-export function setTypeDeclarationLinks (links: Map<string, string>): void {
+export function setTypeDeclarationLinks (links: Map<string, string>, linksById: Map<number, string> = new Map()): void {
 	typeDeclarationLinks = links;
+	typeDeclarationLinksById = linksById;
 }
 
-export function resolveTypeDeclarationLink (name: string): string | undefined {
-	return typeDeclarationLinks.get(name);
+export function setExtraTypeDeclarationLinks (links: Map<string, string>, linksById: Map<number, string>): void {
+	typeDeclarationLinksExtra = links;
+	typeDeclarationLinksByIdExtra = linksById;
+}
+
+export function resolveTypeDeclarationLink (name: string, target?: number): string | undefined {
+	if (target !== undefined) {
+		const targetLink = typeDeclarationLinksById.get(target) ?? typeDeclarationLinksByIdExtra.get(target);
+		if (targetLink)
+			return targetLink;
+	}
+
+	return typeDeclarationLinks.get(name) ?? typeDeclarationLinksExtra.get(name);
+}
+
+export function resolveTypeDeclarationLinkById (target: number): string | undefined {
+	return typeDeclarationLinksById.get(target) ?? typeDeclarationLinksByIdExtra.get(target);
 }
 
 export function referenceStyle (name: string): ReturnType<typeof Style.Class> {
@@ -156,6 +175,7 @@ const handlers: { [K in keyof JSONOutput.TypeKindMap]: TypeHandler<K> } = {
 
 	reference (type, container) {
 		const name = resolveTypeName(type.name);
+		const declarationLink = resolveTypeDeclarationLink(name, typeof type.target === "number" ? type.target : undefined);
 		const ref = Component("span").class.add(referenceStyle(name)).text.set(name);
 		if (type.externalUrl) {
 			const link = Component("a")
@@ -163,10 +183,10 @@ const handlers: { [K in keyof JSONOutput.TypeKindMap]: TypeHandler<K> } = {
 				.attribute.set("href", type.externalUrl)
 				.append(ref);
 			container.append(link);
-		} else if (resolveTypeDeclarationLink(name)) {
+		} else if (declarationLink) {
 			const link = Component("a")
 				.class.add(typeReferenceLinkStyle)
-				.attribute.set("href", resolveTypeDeclarationLink(name)!)
+				.attribute.set("href", declarationLink)
 				.append(ref);
 			container.append(link);
 		} else {
@@ -282,24 +302,34 @@ const handlers: { [K in keyof JSONOutput.TypeKindMap]: TypeHandler<K> } = {
 	reflection (type, container) {
 		if (type.declaration) {
 			if (type.declaration.signatures && type.declaration.signatures.length > 0) {
-				const sig = type.declaration.signatures[0];
-				container.append(punctuation("("));
-				if (sig.parameters) {
-					for (let i = 0; i < sig.parameters.length; i++) {
-						if (i > 0) container.append(punctuation(", "));
-						const param = sig.parameters[i];
-						container.append(
-							Component("span").class.add(typeParamNameStyle).text.set(param.name),
-							punctuation(": "),
-						);
-						if (param.type) container.append(Type(param.type));
+				for (let signatureIndex = 0; signatureIndex < type.declaration.signatures.length; signatureIndex++) {
+					if (signatureIndex > 0) {
+						container.append(punctuation("; "));
 					}
-				}
-				container.append(punctuation(") => "));
-				if (sig.type) {
-					container.append(Type(sig.type));
-				} else {
-					container.append(keyword("void"));
+
+					const sig = type.declaration.signatures[signatureIndex];
+					if (sig.kind === ReflectionKind.ConstructorSignature) {
+						container.append(keyword("new "));
+					}
+
+					container.append(punctuation("("));
+					if (sig.parameters) {
+						for (let i = 0; i < sig.parameters.length; i++) {
+							if (i > 0) container.append(punctuation(", "));
+							const param = sig.parameters[i];
+							container.append(
+								Component("span").class.add(typeParamNameStyle).text.set(param.name),
+								punctuation(": "),
+							);
+							if (param.type) container.append(Type(param.type));
+						}
+					}
+					container.append(punctuation(") => "));
+					if (sig.type) {
+						container.append(Type(sig.type));
+					} else {
+						container.append(keyword("void"));
+					}
 				}
 			} else if (type.declaration.children && type.declaration.children.length > 0) {
 				container.append(punctuation("{ "));

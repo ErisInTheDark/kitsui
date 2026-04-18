@@ -1,4 +1,4 @@
-import { Owner, type CleanupFunction } from "../state/State";
+import { State, type CleanupFunction } from "../state/State";
 import type { AttributeManipulator, AttributeValueInput } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
 import type { Component } from "./Component";
@@ -91,58 +91,42 @@ export type AriaRole =
 	| "treegrid"
 	| "treeitem";
 
-/**
- * Source for a reactive ARIA value. Use this interface to provide dynamic/reactive ARIA attributes
- * that update in response to state changes.
- * 
- * @template TValue The type of the reactive value.
- * @property value The current value.
- * @property subscribe Register a reactive listener that runs when the value changes. Must return a cleanup function.
- */
-export interface AriaValueSource<TValue> {
-	readonly value: TValue;
-	subscribe (owner: Owner, listener: (value: TValue) => void): CleanupFunction;
-}
-
 /** ARIA text value: a string or falsy value. */
 export type AriaText = string | null | undefined;
-/** ARIA text input: static text or a reactive source. */
-export type AriaTextInput = AriaText | AriaValueSource<AriaText>;
-/** ARIA role input: static role or a reactive source. */
-export type AriaRoleInput = AriaRole | null | undefined | AriaValueSource<AriaRole | null | undefined>;
-/** ARIA boolean input: static boolean or a reactive source. */
-export type AriaBooleanInput = boolean | null | undefined | AriaValueSource<boolean | null | undefined>;
+/** ARIA text input: static text or a reactive State. */
+export type AriaTextInput = AriaText | State<AriaText>;
+/** ARIA role input: static role or a reactive State. */
+export type AriaRoleInput = AriaRole | null | undefined | State<AriaRole | null | undefined>;
+/** ARIA boolean input: static boolean or a reactive State. */
+export type AriaBooleanInput = boolean | null | undefined | State<boolean | null | undefined>;
 /** ARIA mixed boolean value: true, false, "mixed", or falsy. */
 export type AriaBooleanMixed = boolean | "mixed" | null | undefined;
-/** ARIA mixed boolean input: static value or a reactive source. */
-export type AriaBooleanMixedInput = AriaBooleanMixed | AriaValueSource<AriaBooleanMixed>;
+/** ARIA mixed boolean input: static value or a reactive State. */
+export type AriaBooleanMixedInput = AriaBooleanMixed | State<AriaBooleanMixed>;
 /** ARIA current value: true, or a specific page location type. */
 export type AriaCurrent = boolean | "page" | "step" | "location" | "date" | "time" | null | undefined;
-/** ARIA current input: static value or a reactive source. */
-export type AriaCurrentInput = AriaCurrent | AriaValueSource<AriaCurrent>;
+/** ARIA current input: static value or a reactive State. */
+export type AriaCurrentInput = AriaCurrent | State<AriaCurrent>;
 /** ARIA live region politeness level. */
 export type AriaLive = "off" | "polite" | "assertive" | null | undefined;
-/** ARIA live input: static value or a reactive source. */
-export type AriaLiveInput = AriaLive | AriaValueSource<AriaLive>;
+/** ARIA live input: static value or a reactive State. */
+export type AriaLiveInput = AriaLive | State<AriaLive>;
 /** ARIA reference: an element ID string, HTMLElement, component with element, or falsy. */
 export type AriaReference = string | HTMLElement | { readonly element: HTMLElement } | Falsy;
 /** ARIA reference selection: a single reference or iterable of references. */
 export type AriaReferenceSelection = AriaReference | Iterable<AriaReference>;
-/** ARIA reference input: static selection or a reactive source. */
-export type AriaReferenceInput = AriaReferenceSelection | AriaValueSource<AriaReferenceSelection>;
+/** ARIA reference input: static selection or a reactive State. */
+export type AriaReferenceInput = AriaReferenceSelection | State<AriaReferenceSelection>;
 
 const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
 let generatedAriaReferenceId = 0;
+const mappedReferenceStatesByOwner = new WeakMap<Component, WeakMap<State<AriaReferenceSelection>, State<string | null>>>();
 
-function isValueSource<TValue> (value: unknown): value is AriaValueSource<TValue> {
-	return typeof value === "object"
-		&& value !== null
-		&& "value" in value
-		&& "subscribe" in value
-		&& typeof value.subscribe === "function";
+function isValueSource<TValue> (value: unknown): value is State<TValue> {
+	return value instanceof State;
 }
 
 function isComponentReference (value: unknown): value is { readonly element: HTMLElement } {
@@ -224,30 +208,46 @@ function resolveReferenceSelection (value: AriaReferenceSelection): string | nul
 
 /**
  * Helper to convert AriaReferenceInput (which may be raw references) into AttributeValueInput
- * (which may be reactive sources). Handles resolving and normalizing element references to ID tokens.
+ * (which may be reactive States). Handles resolving and normalizing element references to ID tokens.
  * @internal
  */
-function toReferenceValueInput (value: AriaReferenceInput): AttributeValueInput {
-	if (!isValueSource<AriaReferenceSelection>(value)) {
-		return resolveReferenceSelection(value);
+function toReferenceValueInput (owner: Component, value: AriaReferenceInput): AttributeValueInput {
+	if (owner.disposed) {
+		throw new Error("Disposed components cannot be modified.");
 	}
 
-	return {
-		get value () {
-			return resolveReferenceSelection(value.value);
-		},
-		subscribe (owner: Owner, listener: (value: string | null) => void): CleanupFunction {
-			return value.subscribe(owner, (nextValue) => {
-				listener(resolveReferenceSelection(nextValue));
-			});
-		},
-	};
+	if (!(value instanceof State)) {
+		return resolveReferenceSelection(value as AriaReferenceSelection);
+	}
+
+	const cachedBySource = mappedReferenceStatesByOwner.get(owner);
+	const cachedMapped = cachedBySource?.get(value as State<AriaReferenceSelection>);
+	if (cachedMapped) {
+		return cachedMapped;
+	}
+
+	const mappedValue = State(owner, resolveReferenceSelection(value.value as AriaReferenceSelection));
+	const bySource = cachedBySource ?? new WeakMap<State<AriaReferenceSelection>, State<string | null>>();
+	if (!cachedBySource) {
+		mappedReferenceStatesByOwner.set(owner, bySource);
+		owner.onCleanup(() => {
+			mappedReferenceStatesByOwner.delete(owner);
+		});
+	}
+
+	bySource.set(value as State<AriaReferenceSelection>, mappedValue);
+
+	value.subscribe(mappedValue, (nextValue) => {
+		mappedValue.set(resolveReferenceSelection(nextValue as AriaReferenceSelection));
+	});
+
+	return mappedValue;
 }
 
 /**
  * Fluent builder for setting ARIA attributes on an element.
  * 
- * All methods accept static values or reactive sources (AriaValueSource).
+ * All methods accept static values or reactive States (State).
  * Methods return the owning Component to enable fluent chaining.
  * Internally uses an AttributeManipulator to apply changes.
  */
@@ -259,7 +259,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set the ARIA role.
-	 * @param value The role value or reactive source.
+	 * @param value The role value or reactive State.
 	 */
 	role (value: AriaRoleInput): Component {
 		return this.set("role", value);
@@ -267,7 +267,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set the ARIA label.
-	 * @param value The label text or reactive source.
+	 * @param value The label text or reactive State.
 	 */
 	label (value: AriaTextInput): Component {
 		return this.set("aria-label", value);
@@ -275,7 +275,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set the ARIA description.
-	 * @param value The description text or reactive source.
+	 * @param value The description text or reactive State.
 	 */
 	description (value: AriaTextInput): Component {
 		return this.set("aria-description", value);
@@ -283,7 +283,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set the ARIA role description.
-	 * @param value The role description text or reactive source.
+	 * @param value The role description text or reactive State.
 	 */
 	roleDescription (value: AriaTextInput): Component {
 		return this.set("aria-roledescription", value);
@@ -291,55 +291,55 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-labelledby: elements that label this element.
-	 * @param value Element reference(s) or reactive source.
+	 * @param value Element reference(s) or reactive State.
 	 */
 	labelledBy (value: AriaReferenceInput): Component {
-		return this.set("aria-labelledby", toReferenceValueInput(value));
+		return this.set("aria-labelledby", toReferenceValueInput(this.owner, value));
 	}
 
 	/**
 	 * Set aria-describedby: elements that describe this element.
-	 * @param value Element reference(s) or reactive source.
+	 * @param value Element reference(s) or reactive State.
 	 */
 	describedBy (value: AriaReferenceInput): Component {
-		return this.set("aria-describedby", toReferenceValueInput(value));
+		return this.set("aria-describedby", toReferenceValueInput(this.owner, value));
 	}
 
 	/**
 	 * Set aria-controls: elements controlled by this element.
-	 * @param value Element reference(s) or reactive source.
+	 * @param value Element reference(s) or reactive State.
 	 */
 	controls (value: AriaReferenceInput): Component {
-		return this.set("aria-controls", toReferenceValueInput(value));
+		return this.set("aria-controls", toReferenceValueInput(this.owner, value));
 	}
 
 	/**
 	 * Set aria-details: elements that provide details for this element.
-	 * @param value Element reference(s) or reactive source.
+	 * @param value Element reference(s) or reactive State.
 	 */
 	details (value: AriaReferenceInput): Component {
-		return this.set("aria-details", toReferenceValueInput(value));
+		return this.set("aria-details", toReferenceValueInput(this.owner, value));
 	}
 
 	/**
 	 * Set aria-owns: elements owned by this element.
-	 * @param value Element reference(s) or reactive source.
+	 * @param value Element reference(s) or reactive State.
 	 */
 	owns (value: AriaReferenceInput): Component {
-		return this.set("aria-owns", toReferenceValueInput(value));
+		return this.set("aria-owns", toReferenceValueInput(this.owner, value));
 	}
 
 	/**
 	 * Set aria-flowto: elements that follow this element.
-	 * @param value Element reference(s) or reactive source.
+	 * @param value Element reference(s) or reactive State.
 	 */
 	flowTo (value: AriaReferenceInput): Component {
-		return this.set("aria-flowto", toReferenceValueInput(value));
+		return this.set("aria-flowto", toReferenceValueInput(this.owner, value));
 	}
 
 	/**
 	 * Set aria-hidden: whether this element is hidden from assistive technology.
-	 * @param value The boolean value or reactive source.
+	 * @param value The boolean value or reactive State.
 	 */
 	hidden (value: AriaBooleanInput): Component {
 		return this.set("aria-hidden", value);
@@ -347,7 +347,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-disabled: whether this element is disabled.
-	 * @param value The boolean value or reactive source.
+	 * @param value The boolean value or reactive State.
 	 */
 	disabled (value: AriaBooleanInput): Component {
 		return this.set("aria-disabled", value);
@@ -355,7 +355,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-expanded: whether this element is expanded.
-	 * @param value The boolean value or reactive source.
+	 * @param value The boolean value or reactive State.
 	 */
 	expanded (value: AriaBooleanInput): Component {
 		return this.set("aria-expanded", value);
@@ -363,7 +363,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-busy: whether this element is busy/loading.
-	 * @param value The boolean value or reactive source.
+	 * @param value The boolean value or reactive State.
 	 */
 	busy (value: AriaBooleanInput): Component {
 		return this.set("aria-busy", value);
@@ -371,7 +371,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-selected: whether this element is selected.
-	 * @param value The boolean value or reactive source.
+	 * @param value The boolean value or reactive State.
 	 */
 	selected (value: AriaBooleanInput): Component {
 		return this.set("aria-selected", value);
@@ -379,7 +379,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-checked: whether this element is checked (true, false, or "mixed").
-	 * @param value The boolean/mixed value or reactive source.
+	 * @param value The boolean/mixed value or reactive State.
 	 */
 	checked (value: AriaBooleanMixedInput): Component {
 		return this.set("aria-checked", value);
@@ -387,7 +387,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-pressed: whether this element is pressed (true, false, or "mixed").
-	 * @param value The boolean/mixed value or reactive source.
+	 * @param value The boolean/mixed value or reactive State.
 	 */
 	pressed (value: AriaBooleanMixedInput): Component {
 		return this.set("aria-pressed", value);
@@ -395,7 +395,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-current: mark this element or one of its descendants as the current page/step/location.
-	 * @param value The current value (true, false, or a location type) or reactive source.
+	 * @param value The current value (true, false, or a location type) or reactive State.
 	 */
 	current (value: AriaCurrentInput): Component {
 		return this.set("aria-current", value);
@@ -403,7 +403,7 @@ export class AriaManipulator {
 
 	/**
 	 * Set aria-live: announce dynamic content updates (off, polite, or assertive).
-	 * @param value The politeness level or reactive source.
+	 * @param value The politeness level or reactive State.
 	 */
 	live (value: AriaLiveInput): Component {
 		return this.set("aria-live", value);

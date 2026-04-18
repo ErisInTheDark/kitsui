@@ -1,4 +1,6 @@
-import { Component } from "./Component";
+import { Marker } from "../component/Marker";
+import { Owner } from "../state/State";
+import Arrays from "../utility/Arrays";
 
 /**
  * A CSS property value that can be a string or number.
@@ -6,24 +8,24 @@ import { Component } from "./Component";
  */
 export type StyleValue = string | number;
 
+export interface AnimationMarker extends Marker {
+	readonly name: string;
+}
+
+export type KeyframesDefinition = Record<string, StyleDefinition | null | undefined>;
+
 /**
  * CSS style property definition. Supports:
  * - Standard CSS properties (camelCase, e.g., `backgroundColor`)
  * - Custom CSS variables (prefixed with `$`, e.g., `$cardGap` becomes `--card-gap`)
  * - Variable shorthand in values (e.g., `gap: "$cardGap"` or `gap: "${varName: fallback}"`)
- * - Descendant element selectors (prefixed with `~`, e.g., `~h1` becomes `.parent h1`)
- * - CSS at-rules (prefixed with `@`, e.g., `@media (prefers-color-scheme: light)` wraps rules in the at-rule)
- * - Pseudo-class state selectors (prefixed with `:`, e.g., `:hover` becomes `.parent:hover`)
- * - Pseudo-element selectors (prefixed with `::`, e.g., `::before` becomes `.parent::before`)
  * 
  * Properties with `null` or `undefined` values are filtered during serialization.
  */
 export type StyleDefinition = (
-	& { [KEY in keyof CSSStyleDeclaration as CSSStyleDeclaration[KEY] extends string ? KEY : never]?: StyleValue | null | undefined }
+	& { [KEY in keyof CSSStyleDeclaration as CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never]?: StyleValue | null | undefined }
 	& { [KEY in `$${string}`]?: StyleValue | null | undefined }
-	& { [KEY in `~${string}`]?: StyleDefinition }
-	& { [KEY in `@${string}`]?: StyleDefinition }
-	& { [KEY in `:${string}`]?: StyleDefinition }
+	& { animationName?: readonly AnimationMarker[] | AnimationMarker | "none" | null | undefined }
 );
 
 type StyleClassConstructor = {
@@ -35,9 +37,19 @@ type StyleClassConstructor = {
 const styleRegistry = new Map<string, Style.Class>();
 const styleOrder: Style.Class[] = [];
 const importRules: string[] = [];
-const resetRules: string[] = [];
 const fontFaceRules: string[] = [];
+const animationRules = new Map<string, string>();
+
+interface AnimationMarkerData {
+	keyframes: KeyframesDefinition;
+	name: string;
+}
+const animationMarkerData = new WeakMap<Marker, AnimationMarkerData>();
+
+const resetRules: string[] = [];
+const rootRules: string[] = [];
 let styleElement: HTMLStyleElement | null = null;
+const animationMarkerOwner = new class StyleAnimationOwner extends Owner { }();
 
 function toCssPropertyName (propertyName: string): string {
 	if (propertyName.startsWith("--")) {
@@ -55,9 +67,91 @@ function isNestedDefinition (key: string, value: unknown): value is StyleDefinit
 	return typeof value === "object" && value !== null && key.startsWith("{");
 }
 
+function isAnimationMarker (value: unknown): value is AnimationMarker {
+	return value instanceof Marker && animationMarkerData.has(value);
+}
+
+function isAnimationMarkers (value: unknown): value is readonly AnimationMarker[] {
+	return Array.isArray(value) && value.length > 0 && value.every(isAnimationMarker);
+}
+
+function toAnimationMarkersArray (value: unknown): readonly AnimationMarker[] | null {
+	if (isAnimationMarker(value)) return [value];
+	if (isAnimationMarkers(value)) return value;
+	return null;
+}
+
+function serializeStylePropertyValue (propertyName: string, value: StyleValue | readonly AnimationMarker[]): string {
+	if (propertyName === "animationName") {
+		const markers = toAnimationMarkersArray(value);
+		if (markers) return markers.map(marker => animationMarkerData.get(marker)!.name).join(", ");
+	}
+
+	return String(expandVariableAccessShorthand(value as StyleValue));
+}
+
+function serializeDeclarationBody (definition: StyleDefinition): string {
+	return Object.entries(definition)
+		.filter((entry): entry is [string, StyleValue | readonly AnimationMarker[]] => entry[1] !== undefined && entry[1] !== null && !isNestedDefinition(entry[0], entry[1]))
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`)
+		.join("; ");
+}
+
+function serializeKeyframesRule (name: string, definition: KeyframesDefinition): string {
+	const keyframes = Object.entries(definition)
+		.filter((entry): entry is [string, StyleDefinition] => entry[1] !== undefined && entry[1] !== null)
+		.map(([keyframeName, keyframeDefinition]) => `${keyframeName} { ${serializeDeclarationBody(keyframeDefinition)} }`)
+		.join("\n");
+
+	return `@keyframes ${name} {\n${keyframes}\n}`;
+}
+
+function ensureAnimationMarkerMounted (marker: AnimationMarker): void {
+	if (typeof document === "undefined") {
+		return;
+	}
+
+	const data = animationMarkerData.get(marker)!;
+	// Always re-register keyframes if missing (handles post-unmount scenarios where the
+	// Marker mounted-flag prevents the build callback from re-firing).
+	if (!animationRules.has(data.name)) {
+		animationRules.set(data.name, serializeKeyframesRule(data.name, data.keyframes));
+	}
+
+	if (marker.node.isConnected) {
+		return;
+	}
+
+	marker.appendTo(document.head ?? document.documentElement);
+}
+
+function autoMountAnimationMarkers (definition: StyleDefinition): void {
+	for (const [key, value] of Object.entries(definition)) {
+		if (value === undefined || value === null) {
+			continue;
+		}
+
+		if (isNestedDefinition(key, value)) {
+			autoMountAnimationMarkers(value);
+			continue;
+		}
+
+		if (key === "animationName") {
+			const markers = toAnimationMarkersArray(value);
+			if (markers) {
+				for (const marker of markers) {
+					ensureAnimationMarkerMounted(marker);
+				}
+			}
+		}
+	}
+}
+
 function serializeRules (selector: string, definition: StyleDefinition): string[] {
+	autoMountAnimationMarkers(definition);
 	const rules: string[] = [];
-	const ownProperties: [string, StyleValue][] = [];
+	const ownProperties: [string, StyleValue | readonly AnimationMarker[]][] = [];
 
 	for (const [key, value] of Object.entries(definition)) {
 		if (value === undefined || value === null) {
@@ -78,13 +172,13 @@ function serializeRules (selector: string, definition: StyleDefinition): string[
 			continue;
 		}
 
-		ownProperties.push([key, value as StyleValue]);
+		ownProperties.push([key, value as StyleValue | readonly AnimationMarker[]]);
 	}
 
 	if (ownProperties.length > 0) {
 		const body = ownProperties
 			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`)
+			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`)
 			.join("; ");
 		rules.unshift(`${selector} { ${body} }`);
 	}
@@ -235,6 +329,7 @@ function getStyleElement (): HTMLStyleElement | null {
 	return styleElement;
 }
 
+/** @group Style.Class */
 class StyleClass {
 	readonly className: string;
 	readonly afterClassNames: readonly string[];
@@ -262,27 +357,28 @@ function renderStyleSheet (): void {
 
 	const parts: string[] = [];
 
-	if (importRules.length > 0) {
+	if (importRules.length > 0)
 		parts.push(importRules.join("\n"));
-	}
 
-	if (resetRules.length > 0) {
+	if (resetRules.length > 0)
 		parts.push(resetRules.join("\n"));
-	}
 
-	if (fontFaceRules.length > 0) {
+	if (fontFaceRules.length > 0)
 		parts.push(fontFaceRules.join("\n"));
-	}
 
-	for (const style of styleOrder) {
+	if (animationRules.size > 0)
+		parts.push([...animationRules.values()].join("\n"));
+
+	if (rootRules.length > 0)
+		parts.push(rootRules.join("\n"));
+
+	for (const style of styleOrder)
 		parts.push(style.cssText);
-	}
 
 	styleElement.textContent = parts.join("\n");
 
-	if (parts.length > 0) {
+	if (parts.length > 0)
 		styleElement.append(document.createTextNode("\n"));
-	}
 }
 
 export function mountStylesheet (): void {
@@ -291,8 +387,10 @@ export function mountStylesheet (): void {
 
 export function unmountStylesheet (): void {
 	styleElement = null;
+	animationRules.clear();
 	importRules.length = 0;
 	resetRules.length = 0;
+	rootRules.length = 0;
 	fontFaceRules.length = 0;
 }
 
@@ -360,22 +458,8 @@ export function Style (definition: StyleDefinition): StyleDefinition {
 	return definition;
 }
 
-/**
- * Namespace for creating CSS class styles and managing style ordering.
- *
- * Use `Style.Class` to create or retrieve a CSS stylesheet entry.
- * Use `Style.after` to create styles that depend on other styles for ordering.
- *
- * @example
- * const cardStyle = Style.Class("card", { backgroundColor: "#fff", borderRadius: "8px" });
- * // className: "card", renders: .card { background-color: #fff; border-radius: 8px }
- *
- * @example Creating ordered styles:
- * const base = Style.Class("base", { color: "black" });
- * const accent = Style.after(base).Class("accent", { color: "red" });
- * // In the stylesheet, .base appears before .accent
- */
 export namespace Style {
+	/** @group Style.Class */
 	export type Class = StyleClass;
 	/**
 	 * Creates or retrieves a CSS stylesheet entry with the given class name and style definition.
@@ -393,6 +477,7 @@ export namespace Style {
 	 * @example
 	 * const cardStyle = Style.Class("card", { backgroundColor: "#fff", borderRadius: "8px" });
 	 * // className: "card", renders: .card { background-color: #fff; border-radius: 8px }
+	 * @group Style.Class
 	 */
 	export const Class = Object.assign(
 		function Class (className: string, definition: StyleDefinition): Style.Class {
@@ -422,9 +507,40 @@ export namespace Style {
 	}
 }
 
+let markerIdCounter = 0;
+let animationIdCounter = 0;
+
+const styleAnimationBuilder = Marker.builder<[definition: AnimationMarkerData]>({
+	id (definition) {
+		return `kitsui:style-animation-${definition.name}`;
+	},
+	build (marker, definition) {
+		const rule = serializeKeyframesRule(definition.name, definition.keyframes);
+		animationRules.set(definition.name, rule);
+		renderStyleSheet();
+
+		return () => {
+			animationRules.delete(definition.name);
+			renderStyleSheet();
+		};
+	},
+});
+
+export function StyleAnimation (name: string, keyframes: KeyframesDefinition): AnimationMarker {
+	const suffixedName = `${name}-${++animationIdCounter}`;
+	const marker = styleAnimationBuilder({ keyframes, name: suffixedName }) as AnimationMarker;
+	animationMarkerData.set(marker, { keyframes, name: suffixedName });
+	marker.setOwner(animationMarkerOwner);
+	Object.defineProperty(marker, "name", {
+		configurable: true,
+		enumerable: true,
+		get: () => suffixedName,
+	});
+	return marker;
+}
 /**
- * Registers global CSS reset rules that are placed before all other styles in the
- * generated stylesheet. The definition uses the `*` (universal) selector.
+ * Registers global CSS reset rules that, when mounted, are are placed before all other styles 
+ * in the generated stylesheet. The definition uses the `*` (universal) selector.
  * Supports nested selectors such as `pseudoBefore` and `pseudoAfter`
  * for targeting `*::before` and `*::after`.
  *
@@ -443,29 +559,85 @@ export namespace Style {
  * // *::before { box-sizing: border-box }
  * // *::after { box-sizing: border-box }
  */
-export function StyleReset (definition: StyleDefinition): Component {
-	const rules = serializeRules("*", definition);
-	const component = Component("template");
-
-	component.event.owned.on.Mount(() => {
+export const StyleReset = Marker.builder<[definition: StyleDefinition]>({
+	id (definition) { 
+		return `kitsui:style-reset-${markerIdCounter++}`;
+	},
+	build (marker, definition) {
+		const rules = serializeRules("*", definition);
 		resetRules.push(...rules);
 		renderStyleSheet();
-	});
-
-	component.event.owned.on.Dispose(() => {
-		for (const rule of rules) {
-			const index = resetRules.indexOf(rule);
-			if (index !== -1) resetRules.splice(index, 1);
+		return () => { 
+			Arrays.spliceBy(resetRules, rules);
+			renderStyleSheet();
 		}
-		renderStyleSheet();
-	});
-
-	return component;
-}
+	},
+})
 
 /**
- * Registers a CSS `@import` rule at the very start of the generated stylesheet.
- * Import rules are placed before reset rules, font-face declarations, and all other styles.
+ * Registers :root rules that, when mounted, are placed before all other styles 
+ * in the generated stylesheet. The definition uses the `:root` selector.
+ *
+ * @param definition - CSS properties for the :root selector.
+ *
+ * @example
+ * StyleRoot({
+ *  colorScheme: "light dark",
+ * }).appendTo(document.head);
+ * // When mounted, generates (at start of stylesheet):
+ * // :root { color-scheme: light dark }
+ */
+export const StyleRoot = Marker.builder<[definition: StyleDefinition]>({
+	id (definition) { 
+		return `kitsui:style-root-${markerIdCounter++}`;
+	},
+	build (marker, definition) {
+		const rules = serializeRules(":root", definition);
+		rootRules.push(...rules);
+		renderStyleSheet();
+		return () => { 
+			Arrays.spliceBy(rootRules, rules);
+			renderStyleSheet();
+		}
+	},
+})
+
+/**
+ * Registers rules by CSS selector that, when mounted, are are placed before all other styles 
+ * in the generated stylesheet. The definition uses the specified selector.
+ * 
+ * This is functionally an escape hatch and should be avoided where possible.
+ * It exists to allow styling things like view transitions.
+ *
+ * @param definition - CSS properties for the specified selector.
+ *
+ * @example
+ * StyleSelector({
+ *  "::view-transition-group(root)": {
+ *    animationDuration: "0.15s",
+ *  },
+ * }).appendTo(document.head);
+ * // When mounted, generates (at start of stylesheet):
+ * // ::view-transition-group(root) { animation-duration: 0.15s }
+ */
+export const StyleSelector = Marker.builder<[selector: string, definition: StyleDefinition]>({
+	id (definition) { 
+		return `kitsui:style-selector-${markerIdCounter++}`;
+	},
+	build (marker, selector, definition) {
+		const rules = serializeRules(selector, definition);
+		rootRules.push(...rules);
+		renderStyleSheet();
+		return () => { 
+			Arrays.spliceBy(rootRules, rules);
+			renderStyleSheet();
+		}
+	},
+})
+
+/**
+ * Registers a CSS `@import` rule that, when mounted, is placed at the very start of the generated stylesheet.
+ * Import rules are placed before reset rules, root rules, font-face declarations, and all other styles.
  * This is commonly used to load external stylesheets such as Google Fonts.
  *
  * @param url - The URL to import.
@@ -474,26 +646,25 @@ export function StyleReset (definition: StyleDefinition): Component {
  * StyleImport("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap").appendTo(document.head);
  * // When mounted, generates: @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
  */
-export function StyleImport (url: string): Component {
-	const rule = `@import url("${url}");`;
-	const component = Component("template");
+export const StyleImport = Marker.builder<[url: string]>({
+	id (url) {
+		return `kitsui:style-import-${markerIdCounter++}`;
+	},
+	build (marker, url) {
+		const rule = `@import url("${url}");`;
 
-	component.event.owned.on.Mount(() => {
 		importRules.push(rule);
 		renderStyleSheet();
-	});
 
-	component.event.owned.on.Dispose(() => {
-		const index = importRules.indexOf(rule);
-		if (index !== -1) importRules.splice(index, 1);
-		renderStyleSheet();
-	});
-
-	return component;
-}
+		return () => {
+			Arrays.spliceOut(importRules, rule);
+			renderStyleSheet();
+		}
+	}
+});
 
 /**
- * A CSS @font-face definition. Extends `StyleDefinition` with required
+ * A CSS `@font-face` definition. Extends `StyleDefinition` with required
  * `fontFamily` and `src` properties, plus @font-face-specific descriptors
  * that are not part of the standard CSSStyleDeclaration.
  */
@@ -505,7 +676,7 @@ export type FontFaceDefinition = StyleDefinition & {
 };
 
 /**
- * Registers a `@font-face` rule in the generated stylesheet.
+ * Registers a `@font-face` rule that, when mounted, is placed in the generated stylesheet.
  * Font-face rules are placed after reset rules and before regular class styles.
  *
  * @param definition - CSS properties for the @font-face rule. Must include `fontFamily` and `src`.
@@ -520,28 +691,27 @@ export type FontFaceDefinition = StyleDefinition & {
  * });
  * // Generates: @font-face { font-display: swap; font-family: 'Inter'; font-style: normal; font-weight: 400; src: url(...) format('woff2') }
  */
-export function StyleFontFace (definition: FontFaceDefinition): Component {
-	const properties = Object.entries(definition)
-		.filter((entry): entry is [string, StyleValue] => entry[1] !== undefined && entry[1] !== null)
-		.sort(([left], [right]) => left.localeCompare(right))
-		.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`)
-		.join("; ");
-	const rule = `@font-face { ${properties} }`;
-	const component = Component("template");
+export const StyleFontFace = Marker.builder<[definition: FontFaceDefinition]>({
+	id (definition) {
+		return `kitsui:font-face-${markerIdCounter++}`;
+	},
+	build (marker, definition) {
+		const properties = Object.entries(definition)
+			.filter((entry): entry is [string, StyleValue] => entry[1] !== undefined && entry[1] !== null)
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`)
+			.join("; ");
+		const rule = `@font-face { ${properties} }`;
 
-	component.event.owned.on.Mount(() => {
 		fontFaceRules.push(rule);
 		renderStyleSheet();
-	});
 
-	component.event.owned.on.Dispose(() => {
-		const index = fontFaceRules.indexOf(rule);
-		if (index !== -1) fontFaceRules.splice(index, 1);
-		renderStyleSheet();
-	});
-
-	return component;
-}
+		return () => {
+			Arrays.spliceOut(fontFaceRules, rule);
+			renderStyleSheet();
+		}
+	}
+});
 
 function spreadableSelector (selector: string, definition: StyleDefinition): StyleDefinition {
 	selector = selector.includes("&") ? selector : `&${selector}`;

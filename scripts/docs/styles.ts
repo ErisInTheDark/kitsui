@@ -10,6 +10,62 @@ export const containerCenter = Style({
 	width: "100%",
 });
 
+export const stackColumn = Style({
+	display: "flex",
+	flexDirection: "column",
+});
+
+export const pageLayoutStyle = Style.Class("docs-layout-page", {
+	background: "$bgPage",
+	color: "$textPrimary",
+	...stackColumn,
+	fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+	fontSize: "17px",
+	lineHeight: 1.6,
+	minHeight: "100vh",
+});
+
+export const pageHeroBase = Style({
+	...stackColumn,
+	borderBottom: "1px solid $borderSubtle",
+	gap: "8px",
+	paddingBottom: "20px",
+});
+
+export const pageTitleBase = Style({
+	color: "$textBright",
+	fontSize: "31px",
+	fontWeight: 700,
+	letterSpacing: "-0.02em",
+	lineHeight: 1.2,
+});
+
+export const pageSummaryBase = Style({
+	color: "$textSubtle",
+	fontSize: "15px",
+	lineHeight: 1.5,
+});
+
+export const sectionTitleBase = Style({
+	color: "$textBright",
+	fontSize: "22px",
+	fontWeight: 700,
+	letterSpacing: "-0.01em",
+	marginTop: "16px",
+});
+
+export const homeHeroClass = Style.Class("docs-home-hero", {
+	...pageHeroBase,
+});
+
+export const homeTitleClass = Style.Class("docs-home-title", {
+	...pageTitleBase,
+});
+
+export const homeSummaryClass = Style.Class("docs-home-summary", {
+	...pageSummaryBase,
+});
+
 export const theme = Style.Class("docs-theme", {
 	colorScheme: "light dark",
 

@@ -1,7 +1,7 @@
 ---
 name: Test Infra
 description: "Use when writing or updating tests."
-model: ['Auto (copilot)', 'GPT-5.4 mini (copilot)']
+model: ['GPT-5.4 mini (copilot)', 'Auto (copilot)']
 argument-hint: "Provide an exact, succinct, technical spec of the new tests or test changes required. Do not let Test Infra make architectural decisions."
 tools: ['execute/runTask', 'read/readFile', 'agent', 'edit/createDirectory', 'edit/createFile', 'edit/editFiles', 'search/codebase', 'search/fileSearch', 'search/listDirectory', 'search/searchResults', 'search/textSearch']
 user-invocable: false

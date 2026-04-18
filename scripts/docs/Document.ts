@@ -1,14 +1,20 @@
 import { Window } from "happy-dom";
 import { JSONOutput } from "typedoc";
-import { Component, pseudoAfter, pseudoBefore, Style, StyleImport, StyleReset } from "../../src";
+import { Component, pseudoAfter, pseudoBefore, Style, StyleImport, StyleReset, StyleSelector } from "../../src";
 import { mountStylesheet, unmountStylesheet } from "../../src/component/Style";
-import { setTypeDeclarationLinks, setTypeNameAliases } from "./components/Type";
+import { setExtraTypeDeclarationLinks, setTypeDeclarationLinks, setTypeNameAliases } from "./components/Type";
 
 export interface DocumentComponent extends Component {
 	setTitle (title: string): void;
 }
 
+export interface DocumentExtraLinks {
+	declarationLinks: Map<string, string>;
+	declarationLinksById: Map<number, string>;
+}
+
 export type DocumentBuilder<TData = unknown> = (path: string, data: TData) => Promise<string>;
+export type DocumentBuilderWithExtras<TData = unknown> = (path: string, data: TData, extraLinks?: DocumentExtraLinks, cacheBust?: boolean) => Promise<string>;
 
 function install (path: string): { document: Document; restore: () => void; clearPendingTimers: () => void } { 
 	const window = new Window({
@@ -93,13 +99,14 @@ function install (path: string): { document: Document; restore: () => void; clea
 	};
 }
 
-export default function Document (builder: (doc: DocumentComponent, project: JSONOutput.ProjectReflection, path: string) => unknown | Promise<unknown>): DocumentBuilder<JSONOutput.ProjectReflection> {
-	return async (path: string, project: JSONOutput.ProjectReflection) => { 
+export default function Document (builder: (doc: DocumentComponent, project: JSONOutput.ProjectReflection, path: string) => unknown | Promise<unknown>): DocumentBuilderWithExtras<JSONOutput.ProjectReflection> {
+	return async (path: string, project: JSONOutput.ProjectReflection, extraLinks?: DocumentExtraLinks, cacheBust = false) => { 
 		const { document, restore, clearPendingTimers } = install(path);
 
 		try {
 			setTypeNameAliases(new Map());
-			setTypeDeclarationLinks(new Map());
+			setTypeDeclarationLinks(new Map(), new Map());
+			setExtraTypeDeclarationLinks(extraLinks?.declarationLinks ?? new Map(), extraLinks?.declarationLinksById ?? new Map());
 
 			const bodyStyle = Style.Class("docs-body", { margin: "0" });
 
@@ -118,6 +125,40 @@ export default function Document (builder: (doc: DocumentComponent, project: JSO
 				...pseudoAfter({ boxSizing: "border-box" }),
 			}).appendTo(document.head);
 
+			StyleSelector("::view-transition-old(root)", {
+				animationName: "none",
+				opacity: 1,
+			}).appendTo(document.head);
+			StyleSelector("::view-transition-group(root)", {
+				animationName: "none",
+			}).appendTo(document.head);
+			StyleSelector("::view-transition-new(root)", {
+				animationName: "none",
+				opacity: 1,
+			}).appendTo(document.head);
+
+			StyleSelector("::view-transition-group(docs-header)", {
+				animationDuration: "0.2s",
+				animationTimingFunction: "ease-out",
+			}).appendTo(document.head);
+			StyleSelector("::view-transition-old(docs-header)", {
+				opacity: 0.9,
+			}).appendTo(document.head);
+			StyleSelector("::view-transition-new(docs-header)", {
+				opacity: 1,
+			}).appendTo(document.head);
+
+			StyleSelector("::view-transition-group(docs-main)", {
+				animationDuration: "0.24s",
+				animationTimingFunction: "ease-out",
+			}).appendTo(document.head);
+			StyleSelector("::view-transition-old(docs-main)", {
+				opacity: 0.85,
+			}).appendTo(document.head);
+			StyleSelector("::view-transition-new(docs-main)", {
+				opacity: 1,
+			}).appendTo(document.head);
+
 			Component(document.body).class.add(bodyStyle);
 
 			const root = Component(document.documentElement);
@@ -132,10 +173,16 @@ export default function Document (builder: (doc: DocumentComponent, project: JSO
 				output.appendTo(document.body);
 			}
 
+			const cacheBustParam = cacheBust ? `?cacheBust=${Date.now()}` : "";
+
 			// Add client-side JS bundle
 			Component("script")
 				.attribute.set("type", "module")
-				.attribute.set("src", "client.js")
+				.attribute.set("src", `kitsui.esm.js${cacheBustParam}`)
+				.appendTo(document.body);
+			Component("script")
+				.attribute.set("type", "module")
+				.attribute.set("src", `client.js${cacheBustParam}`)
 				.appendTo(document.body);
 
 			return `<!doctype html>\n${document.documentElement.outerHTML.replaceAll("data-kitsui-styles=\"true\"", "")}`;

@@ -273,12 +273,11 @@ async function leakProbe (
 			track("conditional host element", host.element);
 			track("conditional child element", child.element);
 
-			const cleanup = host.appendWhen(visible, child);
+			host.appendWhen(visible, child);
 			visible.set(true);
 			await settle();
 			visible.set(false);
 			await settle();
-			cleanup();
 			host.remove();
 
 			host = null as never;
