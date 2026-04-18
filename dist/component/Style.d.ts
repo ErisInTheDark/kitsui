@@ -1,37 +1,34 @@
-import { Component } from "./Component";
+import { Marker } from "../component/Marker";
 /**
  * A CSS property value that can be a string or number.
  * Numbers are serialized as plain numbers without any unit suffix.
  */
 export type StyleValue = string | number;
+export interface AnimationMarker extends Marker {
+    readonly name: string;
+}
+export type KeyframesDefinition = Record<string, StyleDefinition | null | undefined>;
 /**
  * CSS style property definition. Supports:
  * - Standard CSS properties (camelCase, e.g., `backgroundColor`)
  * - Custom CSS variables (prefixed with `$`, e.g., `$cardGap` becomes `--card-gap`)
  * - Variable shorthand in values (e.g., `gap: "$cardGap"` or `gap: "${varName: fallback}"`)
- * - Descendant element selectors (prefixed with `~`, e.g., `~h1` becomes `.parent h1`)
- * - CSS at-rules (prefixed with `@`, e.g., `@media (prefers-color-scheme: light)` wraps rules in the at-rule)
- * - Pseudo-class state selectors (prefixed with `:`, e.g., `:hover` becomes `.parent:hover`)
- * - Pseudo-element selectors (prefixed with `::`, e.g., `::before` becomes `.parent::before`)
  *
  * Properties with `null` or `undefined` values are filtered during serialization.
  */
 export type StyleDefinition = ({
-    [KEY in keyof CSSStyleDeclaration as CSSStyleDeclaration[KEY] extends string ? KEY : never]?: StyleValue | null | undefined;
+    [KEY in keyof CSSStyleDeclaration as CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never]?: StyleValue | null | undefined;
 } & {
     [KEY in `$${string}`]?: StyleValue | null | undefined;
 } & {
-    [KEY in `~${string}`]?: StyleDefinition;
-} & {
-    [KEY in `@${string}`]?: StyleDefinition;
-} & {
-    [KEY in `:${string}`]?: StyleDefinition;
+    animationName?: readonly AnimationMarker[] | AnimationMarker | "none" | null | undefined;
 });
 type StyleClassConstructor = {
     (className: string, definition: StyleDefinition): Style.Class;
     new (className: string, definition: StyleDefinition): Style.Class;
     prototype: Style.Class;
 };
+/** @group Style.Class */
 declare class StyleClass {
     readonly className: string;
     readonly afterClassNames: readonly string[];
@@ -55,22 +52,8 @@ export declare function unmountStylesheet(): void;
  * const sidebar = Style.Class("sidebar", { ...flexColumn, width: "200px" });
  */
 export declare function Style(definition: StyleDefinition): StyleDefinition;
-/**
- * Namespace for creating CSS class styles and managing style ordering.
- *
- * Use `Style.Class` to create or retrieve a CSS stylesheet entry.
- * Use `Style.after` to create styles that depend on other styles for ordering.
- *
- * @example
- * const cardStyle = Style.Class("card", { backgroundColor: "#fff", borderRadius: "8px" });
- * // className: "card", renders: .card { background-color: #fff; border-radius: 8px }
- *
- * @example Creating ordered styles:
- * const base = Style.Class("base", { color: "black" });
- * const accent = Style.after(base).Class("accent", { color: "red" });
- * // In the stylesheet, .base appears before .accent
- */
 export declare namespace Style {
+    /** @group Style.Class */
     type Class = StyleClass;
     /**
      * Creates or retrieves a CSS stylesheet entry with the given class name and style definition.
@@ -88,6 +71,7 @@ export declare namespace Style {
      * @example
      * const cardStyle = Style.Class("card", { backgroundColor: "#fff", borderRadius: "8px" });
      * // className: "card", renders: .card { background-color: #fff; border-radius: 8px }
+     * @group Style.Class
      */
     const Class: StyleClassConstructor & {
         prototype: StyleClass;
@@ -108,9 +92,10 @@ export declare namespace Style {
         Class(className: string, definition: StyleDefinition): Style.Class;
     };
 }
+export declare function StyleAnimation(name: string, keyframes: KeyframesDefinition): AnimationMarker;
 /**
- * Registers global CSS reset rules that are placed before all other styles in the
- * generated stylesheet. The definition uses the `*` (universal) selector.
+ * Registers global CSS reset rules that, when mounted, are are placed before all other styles
+ * in the generated stylesheet. The definition uses the `*` (universal) selector.
  * Supports nested selectors such as `pseudoBefore` and `pseudoAfter`
  * for targeting `*::before` and `*::after`.
  *
@@ -129,10 +114,43 @@ export declare namespace Style {
  * // *::before { box-sizing: border-box }
  * // *::after { box-sizing: border-box }
  */
-export declare function StyleReset(definition: StyleDefinition): Component;
+export declare const StyleReset: (definition: StyleDefinition) => Marker;
 /**
- * Registers a CSS `@import` rule at the very start of the generated stylesheet.
- * Import rules are placed before reset rules, font-face declarations, and all other styles.
+ * Registers :root rules that, when mounted, are placed before all other styles
+ * in the generated stylesheet. The definition uses the `:root` selector.
+ *
+ * @param definition - CSS properties for the :root selector.
+ *
+ * @example
+ * StyleRoot({
+ *  colorScheme: "light dark",
+ * }).appendTo(document.head);
+ * // When mounted, generates (at start of stylesheet):
+ * // :root { color-scheme: light dark }
+ */
+export declare const StyleRoot: (definition: StyleDefinition) => Marker;
+/**
+ * Registers rules by CSS selector that, when mounted, are are placed before all other styles
+ * in the generated stylesheet. The definition uses the specified selector.
+ *
+ * This is functionally an escape hatch and should be avoided where possible.
+ * It exists to allow styling things like view transitions.
+ *
+ * @param definition - CSS properties for the specified selector.
+ *
+ * @example
+ * StyleSelector({
+ *  "::view-transition-group(root)": {
+ *    animationDuration: "0.15s",
+ *  },
+ * }).appendTo(document.head);
+ * // When mounted, generates (at start of stylesheet):
+ * // ::view-transition-group(root) { animation-duration: 0.15s }
+ */
+export declare const StyleSelector: (selector: string, definition: StyleDefinition) => Marker;
+/**
+ * Registers a CSS `@import` rule that, when mounted, is placed at the very start of the generated stylesheet.
+ * Import rules are placed before reset rules, root rules, font-face declarations, and all other styles.
  * This is commonly used to load external stylesheets such as Google Fonts.
  *
  * @param url - The URL to import.
@@ -141,9 +159,9 @@ export declare function StyleReset(definition: StyleDefinition): Component;
  * StyleImport("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap").appendTo(document.head);
  * // When mounted, generates: @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
  */
-export declare function StyleImport(url: string): Component;
+export declare const StyleImport: (url: string) => Marker;
 /**
- * A CSS @font-face definition. Extends `StyleDefinition` with required
+ * A CSS `@font-face` definition. Extends `StyleDefinition` with required
  * `fontFamily` and `src` properties, plus @font-face-specific descriptors
  * that are not part of the standard CSSStyleDeclaration.
  */
@@ -154,7 +172,7 @@ export type FontFaceDefinition = StyleDefinition & {
     unicodeRange?: string;
 };
 /**
- * Registers a `@font-face` rule in the generated stylesheet.
+ * Registers a `@font-face` rule that, when mounted, is placed in the generated stylesheet.
  * Font-face rules are placed after reset rules and before regular class styles.
  *
  * @param definition - CSS properties for the @font-face rule. Must include `fontFamily` and `src`.
@@ -169,7 +187,7 @@ export type FontFaceDefinition = StyleDefinition & {
  * });
  * // Generates: @font-face { font-display: swap; font-family: 'Inter'; font-style: normal; font-weight: 400; src: url(...) format('woff2') }
  */
-export declare function StyleFontFace(definition: FontFaceDefinition): Component;
+export declare const StyleFontFace: (definition: FontFaceDefinition) => Marker;
 /**
  * Creates a spreadable descendant element-type selector for use inside a `StyleDefinition`.
  * The returned object has a single key prefixed with `~` that the Style serializer

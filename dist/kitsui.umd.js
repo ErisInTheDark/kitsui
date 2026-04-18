@@ -39,12 +39,16 @@ var __kitsui_factory__ = (() => {
     ClassManipulator: () => ClassManipulator,
     Component: () => Component,
     EventManipulator: () => EventManipulator,
+    Marker: () => Marker,
     Owner: () => Owner,
     State: () => State,
     Style: () => Style,
+    StyleAnimation: () => StyleAnimation,
     StyleFontFace: () => StyleFontFace,
     StyleImport: () => StyleImport,
     StyleReset: () => StyleReset,
+    StyleRoot: () => StyleRoot,
+    StyleSelector: () => StyleSelector,
     TextManipulator: () => TextManipulator,
     darkScheme: () => darkScheme,
     elements: () => elements,
@@ -76,6 +80,7 @@ var __kitsui_factory__ = (() => {
   // src/state/State.ts
   var noop = () => {
   };
+  var ident = (value) => value;
   function createStateGraph() {
     return {
       pendingListeners: /* @__PURE__ */ new Set(),
@@ -185,6 +190,15 @@ var __kitsui_factory__ = (() => {
     }
   };
   var orphanedStateErrorMessage = "States must have an owner before the next tick.";
+  function getEqualityFunction(state2) {
+    return state2["equalityFunction"];
+  }
+  function getImmediateListeners(state2) {
+    return state2["immediateListeners"];
+  }
+  function getQueuedListeners(state2) {
+    return state2["queuedListeners"];
+  }
   var StateClass = class _StateClass extends Owner {
     constructor(owner, initialValue, options = {}) {
       super();
@@ -194,9 +208,12 @@ var __kitsui_factory__ = (() => {
       __publicField(this, "requiresExplicitOwner", false);
       __publicField(this, "orphanCheckId", null);
       __publicField(this, "currentValue");
+      /** @deprecated Use getEqualityFunction(this) */
       __publicField(this, "equalityFunction");
       __publicField(this, "graph");
+      /** @deprecated Use getImmediateListeners(this) */
       __publicField(this, "immediateListeners", /* @__PURE__ */ new Set());
+      /** @deprecated Use getQueuedListeners(this) */
       __publicField(this, "queuedListeners", /* @__PURE__ */ new Set());
       this.owner = owner;
       this.currentValue = initialValue;
@@ -241,18 +258,18 @@ var __kitsui_factory__ = (() => {
      */
     set(nextValue) {
       this.ensureActive();
-      if (this.equalityFunction(this.currentValue, nextValue)) {
+      if (getEqualityFunction(this)(this.currentValue, nextValue)) {
         return this.currentValue;
       }
       const previousValue = this.currentValue;
       this.currentValue = nextValue;
-      for (const listenerRecord of [...this.immediateListeners]) {
+      for (const listenerRecord of [...getImmediateListeners(this)]) {
         if (!listenerRecord.active) {
           continue;
         }
         listenerRecord.listener(this.currentValue, previousValue);
       }
-      for (const listenerRecord of this.queuedListeners) {
+      for (const listenerRecord of getQueuedListeners(this)) {
         if (!listenerRecord.active) {
           continue;
         }
@@ -260,7 +277,7 @@ var __kitsui_factory__ = (() => {
           listenerRecord.pending = true;
           listenerRecord.pendingOriginalValue = previousValue;
           listenerRecord.pendingFinalValue = this.currentValue;
-          listenerRecord.equals = this.equalityFunction;
+          listenerRecord.equals = getEqualityFunction(this);
           listenerRecord.graph.pendingListeners.add(listenerRecord);
           scheduleGraphFlush(listenerRecord.graph);
           continue;
@@ -306,13 +323,13 @@ var __kitsui_factory__ = (() => {
         active: true,
         listener
       };
-      this.immediateListeners.add(listenerRecord);
+      getImmediateListeners(this).add(listenerRecord);
       return () => {
         if (!listenerRecord.active) {
           return;
         }
         listenerRecord.active = false;
-        this.immediateListeners.delete(listenerRecord);
+        getImmediateListeners(this).delete(listenerRecord);
       };
     }
     /**
@@ -329,14 +346,14 @@ var __kitsui_factory__ = (() => {
       }
       const listenerRecord = {
         active: true,
-        equals: this.equalityFunction,
+        equals: getEqualityFunction(this),
         graph: this.graph,
         listener,
         pending: false,
         pendingFinalValue: this.currentValue,
         pendingOriginalValue: this.currentValue
       };
-      this.queuedListeners.add(listenerRecord);
+      getQueuedListeners(this).add(listenerRecord);
       return () => {
         if (!listenerRecord.active) {
           return;
@@ -346,7 +363,7 @@ var __kitsui_factory__ = (() => {
           listenerRecord.pending = false;
           this.graph.pendingListeners.delete(listenerRecord);
         }
-        this.queuedListeners.delete(listenerRecord);
+        getQueuedListeners(this).delete(listenerRecord);
       };
     }
     /**
@@ -409,18 +426,18 @@ var __kitsui_factory__ = (() => {
       this.clearOrphanCheck();
       this.releaseOwner();
       this.releaseOwner = noop;
-      for (const listenerRecord of this.immediateListeners) {
+      for (const listenerRecord of getImmediateListeners(this)) {
         listenerRecord.active = false;
       }
-      for (const listenerRecord of this.queuedListeners) {
+      for (const listenerRecord of getQueuedListeners(this)) {
         listenerRecord.active = false;
         if (listenerRecord.pending) {
           listenerRecord.pending = false;
           this.graph.pendingListeners.delete(listenerRecord);
         }
       }
-      this.immediateListeners.clear();
-      this.queuedListeners.clear();
+      getImmediateListeners(this).clear();
+      getQueuedListeners(this).clear();
     }
     clearOrphanCheck() {
       if (this.orphanCheckId === null) {
@@ -490,12 +507,17 @@ var __kitsui_factory__ = (() => {
   State.extend = function extend() {
     return StateClass;
   };
+  State.Readonly = function Readonly(value) {
+    const readonlyState = new StateClass(null, value);
+    readonlyState["clearOrphanCheck"]();
+    readonlyState.set = ident;
+    readonlyState.update = () => readonlyState.value;
+    return readonlyState;
+  };
 
   // src/component/AriaManipulator.ts
   var generatedAriaReferenceId = 0;
-  function isValueSource(value) {
-    return typeof value === "object" && value !== null && "value" in value && "subscribe" in value && typeof value.subscribe === "function";
-  }
+  var mappedReferenceStatesByOwner = /* @__PURE__ */ new WeakMap();
   function isComponentReference(value) {
     return typeof value === "object" && value !== null && "element" in value && value.element instanceof HTMLElement;
   }
@@ -547,20 +569,31 @@ var __kitsui_factory__ = (() => {
     }
     return [...references].join(" ");
   }
-  function toReferenceValueInput(value) {
-    if (!isValueSource(value)) {
+  function toReferenceValueInput(owner, value) {
+    if (owner.disposed) {
+      throw new Error("Disposed components cannot be modified.");
+    }
+    if (!(value instanceof State)) {
       return resolveReferenceSelection(value);
     }
-    return {
-      get value() {
-        return resolveReferenceSelection(value.value);
-      },
-      subscribe(owner, listener) {
-        return value.subscribe(owner, (nextValue) => {
-          listener(resolveReferenceSelection(nextValue));
-        });
-      }
-    };
+    const cachedBySource = mappedReferenceStatesByOwner.get(owner);
+    const cachedMapped = cachedBySource?.get(value);
+    if (cachedMapped) {
+      return cachedMapped;
+    }
+    const mappedValue = State(owner, resolveReferenceSelection(value.value));
+    const bySource = cachedBySource ?? /* @__PURE__ */ new WeakMap();
+    if (!cachedBySource) {
+      mappedReferenceStatesByOwner.set(owner, bySource);
+      owner.onCleanup(() => {
+        mappedReferenceStatesByOwner.delete(owner);
+      });
+    }
+    bySource.set(value, mappedValue);
+    value.subscribe(mappedValue, (nextValue) => {
+      mappedValue.set(resolveReferenceSelection(nextValue));
+    });
+    return mappedValue;
   }
   var AriaManipulator = class {
     constructor(owner, attribute) {
@@ -569,133 +602,133 @@ var __kitsui_factory__ = (() => {
     }
     /**
      * Set the ARIA role.
-     * @param value The role value or reactive source.
+     * @param value The role value or reactive State.
      */
     role(value) {
       return this.set("role", value);
     }
     /**
      * Set the ARIA label.
-     * @param value The label text or reactive source.
+     * @param value The label text or reactive State.
      */
     label(value) {
       return this.set("aria-label", value);
     }
     /**
      * Set the ARIA description.
-     * @param value The description text or reactive source.
+     * @param value The description text or reactive State.
      */
     description(value) {
       return this.set("aria-description", value);
     }
     /**
      * Set the ARIA role description.
-     * @param value The role description text or reactive source.
+     * @param value The role description text or reactive State.
      */
     roleDescription(value) {
       return this.set("aria-roledescription", value);
     }
     /**
      * Set aria-labelledby: elements that label this element.
-     * @param value Element reference(s) or reactive source.
+     * @param value Element reference(s) or reactive State.
      */
     labelledBy(value) {
-      return this.set("aria-labelledby", toReferenceValueInput(value));
+      return this.set("aria-labelledby", toReferenceValueInput(this.owner, value));
     }
     /**
      * Set aria-describedby: elements that describe this element.
-     * @param value Element reference(s) or reactive source.
+     * @param value Element reference(s) or reactive State.
      */
     describedBy(value) {
-      return this.set("aria-describedby", toReferenceValueInput(value));
+      return this.set("aria-describedby", toReferenceValueInput(this.owner, value));
     }
     /**
      * Set aria-controls: elements controlled by this element.
-     * @param value Element reference(s) or reactive source.
+     * @param value Element reference(s) or reactive State.
      */
     controls(value) {
-      return this.set("aria-controls", toReferenceValueInput(value));
+      return this.set("aria-controls", toReferenceValueInput(this.owner, value));
     }
     /**
      * Set aria-details: elements that provide details for this element.
-     * @param value Element reference(s) or reactive source.
+     * @param value Element reference(s) or reactive State.
      */
     details(value) {
-      return this.set("aria-details", toReferenceValueInput(value));
+      return this.set("aria-details", toReferenceValueInput(this.owner, value));
     }
     /**
      * Set aria-owns: elements owned by this element.
-     * @param value Element reference(s) or reactive source.
+     * @param value Element reference(s) or reactive State.
      */
     owns(value) {
-      return this.set("aria-owns", toReferenceValueInput(value));
+      return this.set("aria-owns", toReferenceValueInput(this.owner, value));
     }
     /**
      * Set aria-flowto: elements that follow this element.
-     * @param value Element reference(s) or reactive source.
+     * @param value Element reference(s) or reactive State.
      */
     flowTo(value) {
-      return this.set("aria-flowto", toReferenceValueInput(value));
+      return this.set("aria-flowto", toReferenceValueInput(this.owner, value));
     }
     /**
      * Set aria-hidden: whether this element is hidden from assistive technology.
-     * @param value The boolean value or reactive source.
+     * @param value The boolean value or reactive State.
      */
     hidden(value) {
       return this.set("aria-hidden", value);
     }
     /**
      * Set aria-disabled: whether this element is disabled.
-     * @param value The boolean value or reactive source.
+     * @param value The boolean value or reactive State.
      */
     disabled(value) {
       return this.set("aria-disabled", value);
     }
     /**
      * Set aria-expanded: whether this element is expanded.
-     * @param value The boolean value or reactive source.
+     * @param value The boolean value or reactive State.
      */
     expanded(value) {
       return this.set("aria-expanded", value);
     }
     /**
      * Set aria-busy: whether this element is busy/loading.
-     * @param value The boolean value or reactive source.
+     * @param value The boolean value or reactive State.
      */
     busy(value) {
       return this.set("aria-busy", value);
     }
     /**
      * Set aria-selected: whether this element is selected.
-     * @param value The boolean value or reactive source.
+     * @param value The boolean value or reactive State.
      */
     selected(value) {
       return this.set("aria-selected", value);
     }
     /**
      * Set aria-checked: whether this element is checked (true, false, or "mixed").
-     * @param value The boolean/mixed value or reactive source.
+     * @param value The boolean/mixed value or reactive State.
      */
     checked(value) {
       return this.set("aria-checked", value);
     }
     /**
      * Set aria-pressed: whether this element is pressed (true, false, or "mixed").
-     * @param value The boolean/mixed value or reactive source.
+     * @param value The boolean/mixed value or reactive State.
      */
     pressed(value) {
       return this.set("aria-pressed", value);
     }
     /**
      * Set aria-current: mark this element or one of its descendants as the current page/step/location.
-     * @param value The current value (true, false, or a location type) or reactive source.
+     * @param value The current value (true, false, or a location type) or reactive State.
      */
     current(value) {
       return this.set("aria-current", value);
     }
     /**
      * Set aria-live: announce dynamic content updates (off, polite, or assertive).
-     * @param value The politeness level or reactive source.
+     * @param value The politeness level or reactive State.
      */
     live(value) {
       return this.set("aria-live", value);
@@ -710,7 +743,7 @@ var __kitsui_factory__ = (() => {
   var noop2 = () => {
   };
   function isStateSource(value) {
-    return typeof value === "object" && value !== null && "value" in value && "subscribe" in value && typeof value.subscribe === "function";
+    return value instanceof State;
   }
   function isAttributeEntry(value) {
     return typeof value === "object" && value !== null && "name" in value && "value" in value && !("subscribe" in value);
@@ -751,19 +784,13 @@ var __kitsui_factory__ = (() => {
     if (isStateSource(value)) {
       return value;
     }
-    return {
-      subscribe: () => noop2,
-      value
-    };
+    return State.Readonly(value);
   }
   function toAttributeValueSource(value) {
     if (isStateSource(value)) {
       return value;
     }
-    return {
-      subscribe: () => noop2,
-      value
-    };
+    return State.Readonly(value);
   }
   var AttributeManipulator = class {
     /**
@@ -991,13 +1018,440 @@ var __kitsui_factory__ = (() => {
     }
   };
 
+  // src/component/EventManipulator.ts
+  var noop3 = () => {
+  };
+  function isListenerSource(value) {
+    return value instanceof State;
+  }
+  function resolveListenerValue(value) {
+    if (value === null || value === void 0) {
+      return value;
+    }
+    if (typeof value === "function") {
+      return value;
+    }
+    throw new TypeError("Unsupported listener source value.");
+  }
+  function isListenerKey(value) {
+    return typeof value === "function" || isListenerSource(value);
+  }
+  function defineHostedEvent(event, host, hostPropertyName) {
+    Object.defineProperty(event, hostPropertyName, {
+      configurable: true,
+      enumerable: false,
+      value: host,
+      writable: false
+    });
+    return event;
+  }
+  var EventManipulator = class {
+    constructor(owner, target, hostPropertyName = "component") {
+      this.owner = owner;
+      this.target = target;
+      this.hostPropertyName = hostPropertyName;
+      __publicField(this, "on");
+      __publicField(this, "off");
+      __publicField(this, "owned");
+      __publicField(this, "listenerRecords", /* @__PURE__ */ new Map());
+      this.on = this.createOnProxy(false);
+      this.off = this.createOffProxy();
+      this.owned = {
+        off: this.off,
+        on: this.createOwnedOnProxy()
+      };
+      this.owner.onCleanup(() => {
+        this.releaseAllListeners();
+      });
+    }
+    releaseAllListeners() {
+      const cleanups = [];
+      for (const eventRecords of this.listenerRecords.values()) {
+        for (const record of eventRecords.values()) {
+          cleanups.push(record.cleanup);
+        }
+      }
+      for (const cleanup of cleanups) {
+        cleanup();
+      }
+    }
+    createOnProxy(useOwnedOwner) {
+      return new Proxy({}, {
+        get: (_, eventName) => {
+          if (typeof eventName !== "string") {
+            return void 0;
+          }
+          return (ownerOrListener, maybeListener) => {
+            const resolvedOwner = useOwnedOwner ? this.owner : ownerOrListener;
+            const listener = useOwnedOwner ? ownerOrListener : maybeListener;
+            this.installListener(eventName, resolvedOwner, listener);
+            return this.owner;
+          };
+        }
+      });
+    }
+    createOwnedOnProxy() {
+      return new Proxy({}, {
+        get: (_, eventName) => {
+          if (typeof eventName !== "string") {
+            return void 0;
+          }
+          return (listener) => {
+            this.installListener(eventName, this.owner, listener);
+            return this.owner;
+          };
+        }
+      });
+    }
+    createOffProxy() {
+      return new Proxy({}, {
+        get: (_, eventName) => {
+          if (typeof eventName !== "string") {
+            return void 0;
+          }
+          return (listener) => {
+            this.removeListener(eventName, listener);
+            return this.owner;
+          };
+        }
+      });
+    }
+    installListener(eventName, owner, listener) {
+      this.ensureActive();
+      if (!isListenerKey(listener)) {
+        return;
+      }
+      const key = listener;
+      this.replaceListener(eventName, key, owner, listener);
+    }
+    replaceListener(eventName, key, owner, listener) {
+      const eventRecords = this.listenerRecords.get(eventName) ?? /* @__PURE__ */ new Map();
+      this.listenerRecords.set(eventName, eventRecords);
+      eventRecords.get(key)?.cleanup();
+      let cleanup = noop3;
+      let active = true;
+      let releaseDom = noop3;
+      let releaseOwner = noop3;
+      let releaseSource = noop3;
+      const trackedCleanup = () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        releaseSource();
+        releaseOwner();
+        releaseDom();
+        eventRecords.delete(key);
+        if (eventRecords.size === 0) {
+          this.listenerRecords.delete(eventName);
+        }
+        cleanup();
+      };
+      const applyResolvedListener = (nextListener) => {
+        releaseOwner();
+        releaseDom();
+        if (!nextListener) {
+          releaseOwner = noop3;
+          releaseDom = noop3;
+          return;
+        }
+        const handleEvent = (event) => {
+          nextListener(defineHostedEvent(event, this.owner, this.hostPropertyName));
+        };
+        this.target.addEventListener(eventName, handleEvent);
+        releaseDom = () => {
+          this.target.removeEventListener(eventName, handleEvent);
+        };
+        releaseOwner = owner.onCleanup(trackedCleanup);
+      };
+      eventRecords.set(key, { cleanup: trackedCleanup });
+      if (isListenerSource(listener)) {
+        releaseSource = listener.subscribe(owner, (nextValue) => {
+          applyResolvedListener(resolveListenerValue(nextValue));
+        });
+        applyResolvedListener(resolveListenerValue(listener.value));
+        return;
+      }
+      applyResolvedListener(resolveListenerValue(listener));
+    }
+    removeListener(eventName, listener) {
+      if (!isListenerKey(listener)) {
+        return;
+      }
+      this.listenerRecords.get(eventName)?.get(listener)?.cleanup();
+    }
+    ensureActive() {
+      if (this.owner.disposed) {
+        throw new Error("Disposed owners cannot be modified.");
+      }
+    }
+  };
+
+  // src/component/Marker.ts
+  var noop4 = () => {
+  };
+  var orphanedMarkerErrorMessage = "Markers must be connected to the document or have a managed owner before the next tick.";
+  var markers = /* @__PURE__ */ new WeakMap();
+  var markerAccessorInstalled = false;
+  function getLiveMarker(node) {
+    const marker = markers.get(node)?.deref();
+    if (!marker) {
+      markers.delete(node);
+      return void 0;
+    }
+    return marker;
+  }
+  function installNodeMarkerAccessor() {
+    if (markerAccessorInstalled) {
+      return;
+    }
+    markerAccessorInstalled = true;
+    Object.defineProperty(Node.prototype, "marker", {
+      configurable: true,
+      enumerable: false,
+      get() {
+        if (!(this instanceof Comment)) {
+          return void 0;
+        }
+        return getLiveMarker(this);
+      }
+    });
+  }
+  function getWrappedNodeOwner(node) {
+    const maybeMarker = node.marker;
+    if (maybeMarker) {
+      return maybeMarker;
+    }
+    const maybeComponent = node.component;
+    return maybeComponent ?? null;
+  }
+  function getOwnerNode(owner) {
+    const value = owner;
+    if (value.node instanceof Node) {
+      return value.node;
+    }
+    if (value.element instanceof Node) {
+      return value.element;
+    }
+    return null;
+  }
+  function getExplicitOwner(owner) {
+    const value = owner;
+    return typeof value.getOwner === "function" ? value.getOwner() : null;
+  }
+  function isManagedOwner(owner, visitedOwners) {
+    if (!owner || owner.disposed) {
+      return false;
+    }
+    if (visitedOwners.has(owner)) {
+      return false;
+    }
+    visitedOwners.add(owner);
+    const value = owner;
+    const ownerNode = getOwnerNode(owner);
+    if (ownerNode && isManagedNode(ownerNode, visitedOwners)) {
+      return true;
+    }
+    const explicitOwner = getExplicitOwner(owner);
+    if (explicitOwner) {
+      return isManagedOwner(explicitOwner, visitedOwners);
+    }
+    if (ownerNode && "element" in value && typeof value.isManaged === "function") {
+      return value.isManaged();
+    }
+    return ownerNode === null;
+  }
+  function isManagedNode(node, visitedOwners = /* @__PURE__ */ new Set()) {
+    if (node.isConnected) {
+      return true;
+    }
+    let current = node;
+    while (current) {
+      const wrappedOwner = getWrappedNodeOwner(current);
+      if (wrappedOwner && isManagedOwner(wrappedOwner, visitedOwners)) {
+        return true;
+      }
+      current = current.parentNode;
+    }
+    return false;
+  }
+  var MarkerClass = class extends Owner {
+    constructor(id) {
+      super();
+      __publicField(this, "node");
+      __publicField(this, "explicitOwner", null);
+      __publicField(this, "releaseExplicitOwner", noop4);
+      __publicField(this, "mounted", false);
+      __publicField(this, "orphanCheckId", null);
+      installNodeMarkerAccessor();
+      this.node = document.createComment(id);
+      markers.set(this.node, new WeakRef(this));
+      this.refreshOrphanCheck();
+    }
+    get event() {
+      this.ensureActive();
+      const manipulator = new EventManipulator(this, this.node, "marker");
+      Object.defineProperty(this, "event", {
+        configurable: true,
+        enumerable: true,
+        value: manipulator,
+        writable: false
+      });
+      return manipulator;
+    }
+    remove() {
+      super.dispose();
+    }
+    setOwner(owner) {
+      this.ensureActive();
+      if (this.explicitOwner === owner) {
+        return this;
+      }
+      this.releaseExplicitOwner();
+      this.releaseExplicitOwner = noop4;
+      this.explicitOwner = owner;
+      if (owner) {
+        this.releaseExplicitOwner = owner.onCleanup(() => {
+          this.remove();
+        });
+      }
+      this.refreshOrphanCheck();
+      return this;
+    }
+    getOwner() {
+      return this.explicitOwner;
+    }
+    use(onMount, onDispose) {
+      let disposeCleanup;
+      this.event.owned.on.Mount(() => {
+        disposeCleanup = onMount();
+      });
+      this.event.owned.on.Dispose(() => {
+        disposeCleanup?.();
+        onDispose?.();
+        disposeCleanup = void 0;
+        onDispose = void 0;
+      });
+      return this;
+    }
+    beforeDispose() {
+      this.node.dispatchEvent(new CustomEvent("Dispose"));
+      this.clearOrphanCheck();
+      this.releaseExplicitOwner();
+      this.releaseExplicitOwner = noop4;
+      this.explicitOwner = null;
+      if (getLiveMarker(this.node) === this) {
+        markers.delete(this.node);
+      }
+    }
+    afterDispose() {
+      this.node.remove();
+    }
+    /** @internal */
+    dispatchMount() {
+      if (this.mounted) {
+        return;
+      }
+      this.mounted = true;
+      this.node.dispatchEvent(new CustomEvent("Mount"));
+    }
+    ensureActive() {
+      if (this.disposed) {
+        throw new Error("Disposed markers cannot be modified.");
+      }
+    }
+    clearOrphanCheck() {
+      if (this.orphanCheckId === null) {
+        return;
+      }
+      clearTimeout(this.orphanCheckId);
+      this.orphanCheckId = null;
+    }
+    /** @internal */
+    refreshOrphanCheck() {
+      if (this.disposed || this.isManaged()) {
+        this.clearOrphanCheck();
+        return;
+      }
+      if (this.orphanCheckId !== null) {
+        return;
+      }
+      this.orphanCheckId = setTimeout(() => {
+        this.orphanCheckId = null;
+        if (this.disposed) {
+          return;
+        }
+        if (this.isManaged()) {
+          this.dispatchMount();
+          return;
+        }
+        throw new Error(orphanedMarkerErrorMessage);
+      }, 0);
+    }
+    isManaged() {
+      if (isManagedNode(this.node)) {
+        return true;
+      }
+      return isManagedOwner(this.explicitOwner, /* @__PURE__ */ new Set());
+    }
+  };
+  var Marker = function Marker2(id) {
+    return new MarkerClass(id);
+  };
+  Marker.prototype = MarkerClass.prototype;
+  Marker.extend = function extend2() {
+    return MarkerClass;
+  };
+  Marker.builder = function builder(definition) {
+    return (...args) => {
+      const id = definition.id(...args);
+      const marker = new MarkerClass(id);
+      marker.event.owned.on.Mount(() => {
+        const cleanup = definition.build(marker, ...args);
+        if (cleanup) marker.event.owned.on.Dispose(() => cleanup?.());
+      });
+      return marker;
+    };
+  };
+
+  // src/utility/Arrays.ts
+  var Arrays;
+  ((Arrays2) => {
+    function spliceOut(array, item) {
+      const index = array.indexOf(item);
+      if (index === -1)
+        return false;
+      array.splice(index, 1);
+      return true;
+    }
+    Arrays2.spliceOut = spliceOut;
+    function spliceBy(array, by) {
+      const removed = [];
+      for (const item of by) {
+        const index = array.indexOf(item);
+        if (index !== -1) {
+          array.splice(index, 1);
+          removed.push(item);
+        }
+      }
+      return removed;
+    }
+    Arrays2.spliceBy = spliceBy;
+  })(Arrays || (Arrays = {}));
+  var Arrays_default = Arrays;
+
   // src/component/Style.ts
   var styleRegistry = /* @__PURE__ */ new Map();
   var styleOrder = [];
   var importRules = [];
-  var resetRules = [];
   var fontFaceRules = [];
+  var animationRules = /* @__PURE__ */ new Map();
+  var animationMarkerData = /* @__PURE__ */ new WeakMap();
+  var resetRules = [];
+  var rootRules = [];
   var styleElement = null;
+  var animationMarkerOwner = new class StyleAnimationOwner extends Owner {
+  }();
   function toCssPropertyName(propertyName) {
     if (propertyName.startsWith("--")) {
       return propertyName;
@@ -1010,7 +1464,67 @@ var __kitsui_factory__ = (() => {
   function isNestedDefinition(key, value) {
     return typeof value === "object" && value !== null && key.startsWith("{");
   }
+  function isAnimationMarker(value) {
+    return value instanceof Marker && animationMarkerData.has(value);
+  }
+  function isAnimationMarkers(value) {
+    return Array.isArray(value) && value.length > 0 && value.every(isAnimationMarker);
+  }
+  function toAnimationMarkersArray(value) {
+    if (isAnimationMarker(value)) return [value];
+    if (isAnimationMarkers(value)) return value;
+    return null;
+  }
+  function serializeStylePropertyValue(propertyName, value) {
+    if (propertyName === "animationName") {
+      const markers2 = toAnimationMarkersArray(value);
+      if (markers2) return markers2.map((marker) => animationMarkerData.get(marker).name).join(", ");
+    }
+    return String(expandVariableAccessShorthand(value));
+  }
+  function serializeDeclarationBody(definition) {
+    return Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null && !isNestedDefinition(entry[0], entry[1])).sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`).join("; ");
+  }
+  function serializeKeyframesRule(name, definition) {
+    const keyframes = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).map(([keyframeName, keyframeDefinition]) => `${keyframeName} { ${serializeDeclarationBody(keyframeDefinition)} }`).join("\n");
+    return `@keyframes ${name} {
+${keyframes}
+}`;
+  }
+  function ensureAnimationMarkerMounted(marker) {
+    if (typeof document === "undefined") {
+      return;
+    }
+    const data = animationMarkerData.get(marker);
+    if (!animationRules.has(data.name)) {
+      animationRules.set(data.name, serializeKeyframesRule(data.name, data.keyframes));
+    }
+    if (marker.node.isConnected) {
+      return;
+    }
+    marker.appendTo(document.head ?? document.documentElement);
+  }
+  function autoMountAnimationMarkers(definition) {
+    for (const [key, value] of Object.entries(definition)) {
+      if (value === void 0 || value === null) {
+        continue;
+      }
+      if (isNestedDefinition(key, value)) {
+        autoMountAnimationMarkers(value);
+        continue;
+      }
+      if (key === "animationName") {
+        const markers2 = toAnimationMarkersArray(value);
+        if (markers2) {
+          for (const marker of markers2) {
+            ensureAnimationMarkerMounted(marker);
+          }
+        }
+      }
+    }
+  }
   function serializeRules(selector, definition) {
+    autoMountAnimationMarkers(definition);
     const rules = [];
     const ownProperties = [];
     for (const [key, value] of Object.entries(definition)) {
@@ -1031,7 +1545,7 @@ ${innerRules}
       ownProperties.push([key, value]);
     }
     if (ownProperties.length > 0) {
-      const body = ownProperties.sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`).join("; ");
+      const body = ownProperties.sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`).join("; ");
       rules.unshift(`${selector} { ${body} }`);
     }
     return rules;
@@ -1163,22 +1677,21 @@ ${innerRules}
       return;
     }
     const parts = [];
-    if (importRules.length > 0) {
+    if (importRules.length > 0)
       parts.push(importRules.join("\n"));
-    }
-    if (resetRules.length > 0) {
+    if (resetRules.length > 0)
       parts.push(resetRules.join("\n"));
-    }
-    if (fontFaceRules.length > 0) {
+    if (fontFaceRules.length > 0)
       parts.push(fontFaceRules.join("\n"));
-    }
-    for (const style of styleOrder) {
+    if (animationRules.size > 0)
+      parts.push([...animationRules.values()].join("\n"));
+    if (rootRules.length > 0)
+      parts.push(rootRules.join("\n"));
+    for (const style of styleOrder)
       parts.push(style.cssText);
-    }
     styleElement2.textContent = parts.join("\n");
-    if (parts.length > 0) {
+    if (parts.length > 0)
       styleElement2.append(document.createTextNode("\n"));
-    }
   }
   function insertStyleInOrder(style) {
     if (style.afterClassNames.length === 0) {
@@ -1231,51 +1744,105 @@ ${innerRules}
     }
     Style2.after = after;
   })(Style || (Style = {}));
-  function StyleReset(definition) {
-    const rules = serializeRules("*", definition);
-    const component = Component("template");
-    component.event.owned.on.Mount(() => {
+  var markerIdCounter = 0;
+  var animationIdCounter = 0;
+  var styleAnimationBuilder = Marker.builder({
+    id(definition) {
+      return `kitsui:style-animation-${definition.name}`;
+    },
+    build(marker, definition) {
+      const rule = serializeKeyframesRule(definition.name, definition.keyframes);
+      animationRules.set(definition.name, rule);
+      renderStyleSheet();
+      return () => {
+        animationRules.delete(definition.name);
+        renderStyleSheet();
+      };
+    }
+  });
+  function StyleAnimation(name, keyframes) {
+    const suffixedName = `${name}-${++animationIdCounter}`;
+    const marker = styleAnimationBuilder({ keyframes, name: suffixedName });
+    animationMarkerData.set(marker, { keyframes, name: suffixedName });
+    marker.setOwner(animationMarkerOwner);
+    Object.defineProperty(marker, "name", {
+      configurable: true,
+      enumerable: true,
+      get: () => suffixedName
+    });
+    return marker;
+  }
+  var StyleReset = Marker.builder({
+    id(definition) {
+      return `kitsui:style-reset-${markerIdCounter++}`;
+    },
+    build(marker, definition) {
+      const rules = serializeRules("*", definition);
       resetRules.push(...rules);
       renderStyleSheet();
-    });
-    component.event.owned.on.Dispose(() => {
-      for (const rule of rules) {
-        const index = resetRules.indexOf(rule);
-        if (index !== -1) resetRules.splice(index, 1);
-      }
+      return () => {
+        Arrays_default.spliceBy(resetRules, rules);
+        renderStyleSheet();
+      };
+    }
+  });
+  var StyleRoot = Marker.builder({
+    id(definition) {
+      return `kitsui:style-root-${markerIdCounter++}`;
+    },
+    build(marker, definition) {
+      const rules = serializeRules(":root", definition);
+      rootRules.push(...rules);
       renderStyleSheet();
-    });
-    return component;
-  }
-  function StyleImport(url) {
-    const rule = `@import url("${url}");`;
-    const component = Component("template");
-    component.event.owned.on.Mount(() => {
+      return () => {
+        Arrays_default.spliceBy(rootRules, rules);
+        renderStyleSheet();
+      };
+    }
+  });
+  var StyleSelector = Marker.builder({
+    id(definition) {
+      return `kitsui:style-selector-${markerIdCounter++}`;
+    },
+    build(marker, selector, definition) {
+      const rules = serializeRules(selector, definition);
+      rootRules.push(...rules);
+      renderStyleSheet();
+      return () => {
+        Arrays_default.spliceBy(rootRules, rules);
+        renderStyleSheet();
+      };
+    }
+  });
+  var StyleImport = Marker.builder({
+    id(url) {
+      return `kitsui:style-import-${markerIdCounter++}`;
+    },
+    build(marker, url) {
+      const rule = `@import url("${url}");`;
       importRules.push(rule);
       renderStyleSheet();
-    });
-    component.event.owned.on.Dispose(() => {
-      const index = importRules.indexOf(rule);
-      if (index !== -1) importRules.splice(index, 1);
-      renderStyleSheet();
-    });
-    return component;
-  }
-  function StyleFontFace(definition) {
-    const properties = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`).join("; ");
-    const rule = `@font-face { ${properties} }`;
-    const component = Component("template");
-    component.event.owned.on.Mount(() => {
+      return () => {
+        Arrays_default.spliceOut(importRules, rule);
+        renderStyleSheet();
+      };
+    }
+  });
+  var StyleFontFace = Marker.builder({
+    id(definition) {
+      return `kitsui:font-face-${markerIdCounter++}`;
+    },
+    build(marker, definition) {
+      const properties = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`).join("; ");
+      const rule = `@font-face { ${properties} }`;
       fontFaceRules.push(rule);
       renderStyleSheet();
-    });
-    component.event.owned.on.Dispose(() => {
-      const index = fontFaceRules.indexOf(rule);
-      if (index !== -1) fontFaceRules.splice(index, 1);
-      renderStyleSheet();
-    });
-    return component;
-  }
+      return () => {
+        Arrays_default.spliceOut(fontFaceRules, rule);
+        renderStyleSheet();
+      };
+    }
+  });
   function spreadableSelector(selector, definition) {
     selector = selector.includes("&") ? selector : `&${selector}`;
     return { [`{${selector}}`]: definition };
@@ -1340,7 +1907,7 @@ ${innerRules}
   }
 
   // src/component/ClassManipulator.ts
-  var noop3 = () => {
+  var noop5 = () => {
   };
   function isStyleInputState(value) {
     return value instanceof State;
@@ -1520,7 +2087,7 @@ ${innerRules}
       }
       this.replaceDeterminer(style, () => {
         this.element.classList.add(style.className);
-        return noop3;
+        return noop5;
       });
     }
     installRemoveInput(style) {
@@ -1535,7 +2102,7 @@ ${innerRules}
       }
       this.replaceDeterminer(style, () => {
         this.element.classList.remove(style.className);
-        return noop3;
+        return noop5;
       });
     }
     installStateDrivenStyles(selectionState, getPresent, options = {}) {
@@ -1566,8 +2133,8 @@ ${innerRules}
             continue;
           }
           const entry = {
-            apply: noop3,
-            cleanup: noop3
+            apply: noop5,
+            cleanup: noop5
           };
           const determinerCleanup = this.replaceDeterminer(style, (applyIfCurrent) => {
             entry.apply = () => {
@@ -1597,7 +2164,7 @@ ${innerRules}
         for (const entry of entries.values()) {
           entry.apply();
         }
-      }) ?? noop3;
+      }) ?? noop5;
       syncSelection(selectionState.value);
       return () => {
         if (!active) {
@@ -1641,177 +2208,14 @@ ${innerRules}
     }
   };
 
-  // src/component/EventManipulator.ts
-  var noop4 = () => {
-  };
-  function isListenerSource(value) {
-    return typeof value === "object" && value !== null && "value" in value && "subscribe" in value && typeof value.subscribe === "function";
-  }
-  function isListenerKey(value) {
-    return typeof value === "function" || isListenerSource(value);
-  }
-  function defineComponentEvent(event, component) {
-    Object.defineProperty(event, "component", {
-      configurable: true,
-      enumerable: false,
-      value: component,
-      writable: false
-    });
-    return event;
-  }
-  var EventManipulator = class {
-    constructor(owner, element) {
-      this.owner = owner;
-      this.element = element;
-      __publicField(this, "on");
-      __publicField(this, "off");
-      __publicField(this, "owned");
-      __publicField(this, "listenerRecords", /* @__PURE__ */ new Map());
-      this.on = this.createOnProxy(false);
-      this.off = this.createOffProxy();
-      this.owned = {
-        off: this.off,
-        on: this.createOwnedOnProxy()
-      };
-      this.owner.onCleanup(() => {
-        this.releaseAllListeners();
-      });
-    }
-    releaseAllListeners() {
-      const cleanups = [];
-      for (const eventRecords of this.listenerRecords.values()) {
-        for (const record of eventRecords.values()) {
-          cleanups.push(record.cleanup);
-        }
-      }
-      for (const cleanup of cleanups) {
-        cleanup();
-      }
-    }
-    createOnProxy(useOwnedOwner) {
-      return new Proxy({}, {
-        get: (_, eventName) => {
-          if (typeof eventName !== "string") {
-            return void 0;
-          }
-          return (ownerOrListener, maybeListener) => {
-            const resolvedOwner = useOwnedOwner ? this.owner : ownerOrListener;
-            const listener = useOwnedOwner ? ownerOrListener : maybeListener;
-            this.installListener(eventName, resolvedOwner, listener);
-            return this.owner;
-          };
-        }
-      });
-    }
-    createOwnedOnProxy() {
-      return new Proxy({}, {
-        get: (_, eventName) => {
-          if (typeof eventName !== "string") {
-            return void 0;
-          }
-          return (listener) => {
-            this.installListener(eventName, this.owner, listener);
-            return this.owner;
-          };
-        }
-      });
-    }
-    createOffProxy() {
-      return new Proxy({}, {
-        get: (_, eventName) => {
-          if (typeof eventName !== "string") {
-            return void 0;
-          }
-          return (listener) => {
-            this.removeListener(eventName, listener);
-            return this.owner;
-          };
-        }
-      });
-    }
-    installListener(eventName, owner, listener) {
-      this.ensureActive();
-      if (!isListenerKey(listener)) {
-        return;
-      }
-      const key = listener;
-      this.replaceListener(eventName, key, owner, listener);
-    }
-    replaceListener(eventName, key, owner, listener) {
-      const eventRecords = this.listenerRecords.get(eventName) ?? /* @__PURE__ */ new Map();
-      this.listenerRecords.set(eventName, eventRecords);
-      eventRecords.get(key)?.cleanup();
-      let cleanup = noop4;
-      let active = true;
-      let releaseDom = noop4;
-      let releaseOwner = noop4;
-      let releaseSource = noop4;
-      const trackedCleanup = () => {
-        if (!active) {
-          return;
-        }
-        active = false;
-        releaseSource();
-        releaseOwner();
-        releaseDom();
-        eventRecords.delete(key);
-        if (eventRecords.size === 0) {
-          this.listenerRecords.delete(eventName);
-        }
-        cleanup();
-      };
-      const applyResolvedListener = (nextListener) => {
-        releaseOwner();
-        releaseDom();
-        if (!nextListener) {
-          releaseOwner = noop4;
-          releaseDom = noop4;
-          return;
-        }
-        const handleEvent = (event) => {
-          nextListener(defineComponentEvent(event, this.owner));
-        };
-        this.element.addEventListener(eventName, handleEvent);
-        releaseDom = () => {
-          this.element.removeEventListener(eventName, handleEvent);
-        };
-        releaseOwner = owner.onCleanup(trackedCleanup);
-      };
-      eventRecords.set(key, { cleanup: trackedCleanup });
-      if (isListenerSource(listener)) {
-        releaseSource = listener.subscribe(owner, applyResolvedListener);
-        applyResolvedListener(listener.value);
-        return;
-      }
-      applyResolvedListener(listener);
-    }
-    removeListener(eventName, listener) {
-      if (!isListenerKey(listener)) {
-        return;
-      }
-      this.listenerRecords.get(eventName)?.get(listener)?.cleanup();
-    }
-    ensureActive() {
-      if (this.owner.disposed) {
-        throw new Error("Disposed components cannot be modified.");
-      }
-    }
-  };
-
   // src/component/TextManipulator.ts
-  var noop5 = () => {
+  var noop6 = () => {
   };
-  function isTextSource(value) {
-    return typeof value === "object" && value !== null && "value" in value && "subscribe" in value && typeof value.subscribe === "function";
-  }
   function toTextSource(value) {
-    if (isTextSource(value)) {
+    if (value instanceof State) {
       return value;
     }
-    return {
-      subscribe: () => noop5,
-      value
-    };
+    return State.Readonly(value);
   }
   function serializeTextSelection(value) {
     if (value === null || value === void 0) {
@@ -1870,7 +2274,7 @@ ${innerRules}
       this.determiner?.cleanup();
       const token = /* @__PURE__ */ Symbol("text");
       let active = true;
-      let cleanup = noop5;
+      let cleanup = noop6;
       const applyIfCurrent = (value) => {
         if (this.determiner?.token !== token) {
           return;
@@ -1900,21 +2304,38 @@ ${innerRules}
   };
 
   // src/component/Component.ts
-  var noop6 = () => {
+  var noop7 = () => {
   };
   var orphanedComponentErrorMessage = "Components must be connected to the document or have a managed owner before the next tick.";
+  var recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
   var elementComponents = /* @__PURE__ */ new WeakMap();
   var componentOwnerResolvers = /* @__PURE__ */ new Set();
   var componentAccessorInstalled = false;
   function isMoveParent(value) {
     return value !== null && typeof value.insertBefore === "function";
   }
+  function wouldCreateRecursiveTree(parent, node) {
+    return node === parent || node.contains(parent);
+  }
   function moveNode(parent, node, beforeNode) {
-    if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
-      parent.moveBefore(node, beforeNode);
-      return;
+    if (wouldCreateRecursiveTree(parent, node)) {
+      console.error(recursiveTreeErrorMessage);
+      return false;
     }
-    parent.insertBefore(node, beforeNode);
+    try {
+      if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
+        parent.moveBefore(node, beforeNode);
+        return true;
+      }
+      parent.insertBefore(node, beforeNode);
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "HierarchyRequestError") {
+        console.error(recursiveTreeErrorMessage);
+        return false;
+      }
+      throw error;
+    }
   }
   function createStorageElement(documentRef) {
     return documentRef.createElement("kitsui-storage");
@@ -1944,7 +2365,14 @@ ${innerRules}
     });
   }
   function isComponentSelectionState(value) {
-    return value instanceof State;
+    if (typeof value !== "object" || value === null) {
+      return false;
+    }
+    if (value instanceof Node || value instanceof ComponentClass) {
+      return false;
+    }
+    const maybeSelectionState = value;
+    return "value" in maybeSelectionState && typeof maybeSelectionState.subscribe === "function";
   }
   function isChildIterable(value) {
     return typeof value === "object" && value !== null && !(value instanceof Node) && !(value instanceof ComponentClass) && !(value instanceof State) && Symbol.iterator in value;
@@ -1975,7 +2403,7 @@ ${innerRules}
        */
       __publicField(this, "element");
       __publicField(this, "explicitOwner", null);
-      __publicField(this, "releaseExplicitOwner", noop6);
+      __publicField(this, "releaseExplicitOwner", noop7);
       __publicField(this, "structuralCleanups", /* @__PURE__ */ new Set());
       __publicField(this, "mounted", false);
       __publicField(this, "onBeforeMove", null);
@@ -2081,8 +2509,8 @@ ${innerRules}
           });
           continue;
         }
-        this.element.append(this.resolveNode(child));
-        if (child instanceof _ComponentClass) {
+        const moved = moveNode(this.element, this.resolveNode(child), null);
+        if (moved && child instanceof _ComponentClass) {
           child.refreshOrphanCheck();
           child.dispatchMount();
         }
@@ -2107,8 +2535,8 @@ ${innerRules}
           });
           continue;
         }
-        this.element.insertBefore(this.resolveNode(child), referenceNode);
-        if (child instanceof _ComponentClass) {
+        const moved = moveNode(this.element, this.resolveNode(child), referenceNode);
+        if (moved && child instanceof _ComponentClass) {
           child.refreshOrphanCheck();
           child.dispatchMount();
         }
@@ -2142,8 +2570,8 @@ ${innerRules}
           });
           continue;
         }
-        moveNode(parentNode, this.resolveNode(node), where === "before" ? this.element : this.element.nextSibling);
-        if (node instanceof _ComponentClass) {
+        const moved = moveNode(parentNode, this.resolveNode(node), where === "before" ? this.element : this.element.nextSibling);
+        if (moved && node instanceof _ComponentClass) {
           node.refreshOrphanCheck();
           node.dispatchMount();
         }
@@ -2151,32 +2579,53 @@ ${innerRules}
       return this;
     }
     /**
-     * Appends a child conditionally based on state.
-     * When the state becomes true, the child is inserted. When false, it's stored but stays in the DOM as a placeholder.
+     * Appends children conditionally based on state.
+     * When the state becomes true, children are inserted. When false, they are parked in storage and placeholders remain in-flow.
      * @param state - A State<boolean> that controls visibility.
-     * @param child - The child to append conditionally.
-     * @returns A cleanup function that removes the conditional binding and the child.
+     * @param nodes - Nodes or iterables of nodes to append conditionally.
+     * @returns This component for chaining.
      */
-    appendWhen(state2, child) {
+    appendWhen(state2, ...nodes) {
       this.ensureActive();
-      return this.attachConditionalNode(state2, child, {
-        getContainer: () => this.element,
-        getReferenceNode: () => null
-      });
+      for (const node of this.expandChildren(nodes)) {
+        if (isComponentSelectionState(node)) {
+          this.attachConditionalSelectionState(state2, node, {
+            getContainer: () => this.element,
+            getReferenceNode: () => null
+          });
+          continue;
+        }
+        this.attachConditionalNode(state2, node, {
+          getContainer: () => this.element,
+          getReferenceNode: () => null
+        });
+      }
+      return this;
     }
     /**
-     * Prepends a child conditionally based on state.
-     * When the state becomes true, the child is inserted before existing content.
+     * Prepends children conditionally based on state.
+     * When the state becomes true, children are inserted before the current first child.
      * @param state - A State<boolean> that controls visibility.
-     * @param child - The child to prepend conditionally.
-     * @returns A cleanup function that removes the conditional binding and the child.
+     * @param nodes - Nodes or iterables of nodes to prepend conditionally.
+     * @returns This component for chaining.
      */
-    prependWhen(state2, child) {
+    prependWhen(state2, ...nodes) {
       this.ensureActive();
-      return this.attachConditionalNode(state2, child, {
-        getContainer: () => this.element,
-        getReferenceNode: () => this.element.firstChild
-      });
+      const referenceNode = this.element.firstChild;
+      for (const node of this.expandChildren(nodes)) {
+        if (isComponentSelectionState(node)) {
+          this.attachConditionalSelectionState(state2, node, {
+            getContainer: () => this.element,
+            getReferenceNode: () => referenceNode
+          });
+          continue;
+        }
+        this.attachConditionalNode(state2, node, {
+          getContainer: () => this.element,
+          getReferenceNode: () => referenceNode
+        });
+      }
+      return this;
     }
     /**
      * Inserts children conditionally before or after this component, based on state.
@@ -2184,27 +2633,136 @@ ${innerRules}
      * @param state - A State<boolean> that controls visibility.
      * @param where - "before" to insert before this component, or "after" to insert after.
      * @param nodes - Nodes or iterables of nodes to insert conditionally.
-     * @returns A cleanup function that removes all conditional bindings and children.
+     * @returns This component for chaining.
      */
     insertWhen(state2, where, ...nodes) {
       this.ensureActive();
       const insertables = this.expandChildren(nodes);
       const orderedInsertables = where === "before" ? insertables : [...insertables].reverse();
-      const cleanups = orderedInsertables.map((node) => {
+      for (const node of orderedInsertables) {
         if (isComponentSelectionState(node)) {
-          return noop6;
+          this.attachConditionalSelectionState(state2, node, {
+            getContainer: () => this.element.parentNode,
+            getReferenceNode: () => where === "before" ? this.element : this.element.nextSibling
+          });
+          continue;
         }
-        return this.attachConditionalNode(state2, node, {
+        this.attachConditionalNode(state2, node, {
           getContainer: () => this.element.parentNode,
           getReferenceNode: () => where === "before" ? this.element : this.element.nextSibling
         });
-      });
-      return () => {
-        for (const cleanup of cleanups) {
-          cleanup();
+      }
+      return this;
+    }
+    attachConditionalSelectionState(visibleState, selectionState, options) {
+      const marker = Marker("kitsui:conditional-stateful").setOwner(this);
+      const storage = createStorageElement(this.element.ownerDocument);
+      let active = true;
+      let markerWasInserted = false;
+      let renderedComponents = [];
+      const retainedHiddenComponents = /* @__PURE__ */ new Set();
+      const cleanupRenderedComponents = (nextComponents = /* @__PURE__ */ new Set(), mode = "dispose") => {
+        for (const component of renderedComponents) {
+          if (nextComponents.has(component)) {
+            retainedHiddenComponents.delete(component);
+            continue;
+          }
+          if (mode === "dispose") {
+            retainedHiddenComponents.delete(component);
+            component.remove();
+            continue;
+          }
+          retainedHiddenComponents.add(component);
+        }
+        renderedComponents = renderedComponents.filter((component) => nextComponents.has(component));
+      };
+      const releaseRetainedHiddenComponents = (nextComponents) => {
+        for (const component of [...retainedHiddenComponents]) {
+          if (nextComponents.has(component)) {
+            continue;
+          }
+          retainedHiddenComponents.delete(component);
+          component.element.parentNode?.removeChild(component.element);
+          component.refreshOrphanCheck();
         }
       };
+      const render = () => {
+        if (!active) {
+          return;
+        }
+        const nextComponents = this.resolveComponentSelection(selectionState.value);
+        const nextComponentSet = new Set(nextComponents);
+        const container = options.getContainer();
+        if (!isMoveParent(container)) {
+          if (markerWasInserted) {
+            this.remove();
+            return;
+          }
+          cleanupRenderedComponents(nextComponentSet, visibleState.value ? "dispose" : "retain");
+          if (visibleState.value) {
+            releaseRetainedHiddenComponents(nextComponentSet);
+          }
+          for (const component of nextComponents) {
+            retainedHiddenComponents.delete(component);
+            component.ensureActive();
+            component.onBeforeMove?.();
+            moveNode(storage, component.element, null);
+          }
+          renderedComponents = nextComponents;
+          return;
+        }
+        if (markerWasInserted && marker.node.parentNode !== container) {
+          this.remove();
+          return;
+        }
+        if (marker.node.parentNode !== container) {
+          moveNode(container, marker.node, options.getReferenceNode());
+          markerWasInserted = true;
+        }
+        cleanupRenderedComponents(nextComponentSet, visibleState.value ? "dispose" : "retain");
+        if (visibleState.value) {
+          releaseRetainedHiddenComponents(nextComponentSet);
+          for (const component of nextComponents) {
+            retainedHiddenComponents.delete(component);
+            component.ensureActive();
+            component.onBeforeMove?.();
+            const moved = moveNode(container, component.element, marker.node);
+            if (moved) {
+              component.refreshOrphanCheck();
+              component.dispatchMount();
+            }
+          }
+        } else {
+          for (const component of nextComponents) {
+            retainedHiddenComponents.delete(component);
+            component.ensureActive();
+            component.onBeforeMove?.();
+            moveNode(storage, component.element, null);
+          }
+        }
+        renderedComponents = nextComponents;
+      };
+      const cleanup = this.trackStructuralCleanup(() => {
+        active = false;
+        releaseVisibleSubscription();
+        releaseSelectionSubscription();
+        cleanupRenderedComponents();
+        for (const component of retainedHiddenComponents) {
+          component.remove();
+        }
+        retainedHiddenComponents.clear();
+        marker.remove();
+        storage.remove();
+      });
+      const releaseVisibleSubscription = visibleState.subscribe(this, render);
+      const releaseSelectionSubscription = selectionState.subscribe(this, render);
+      render();
+      return cleanup;
     }
+    /**
+     * Clears all child nodes from this component.
+     * @returns This component for chaining.
+     */
     clear() {
       this.ensureActive();
       this.releaseStructuralCleanups();
@@ -2212,17 +2770,6 @@ ${innerRules}
         disposeManagedNode(childNode);
       }
       this.element.replaceChildren();
-      return this;
-    }
-    /**
-     * Sets a single attribute on the element.
-     * @param name - The attribute name.
-     * @param value - The attribute value.
-     * @returns This component for chaining.
-     */
-    setAttribute(name, value) {
-      this.ensureActive();
-      this.element.setAttribute(name, value);
       return this;
     }
     use(setupOrState, render) {
@@ -2269,7 +2816,7 @@ ${innerRules}
         return this;
       }
       this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop6;
+      this.releaseExplicitOwner = noop7;
       this.explicitOwner = owner;
       if (owner) {
         this.releaseExplicitOwner = owner.onCleanup(() => {
@@ -2291,7 +2838,7 @@ ${innerRules}
       this.clearOrphanCheck();
       this.releaseStructuralCleanups();
       this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop6;
+      this.releaseExplicitOwner = noop7;
       this.explicitOwner = null;
       if (getLiveComponent(this.element) === this) {
         elementComponents.delete(this.element);
@@ -2412,7 +2959,7 @@ ${innerRules}
     }
     trackStructuralCleanup(cleanup) {
       let active = true;
-      let releaseOwnerCleanup = noop6;
+      let releaseOwnerCleanup = noop7;
       const trackedCleanup = () => {
         if (!active) {
           return;
@@ -2434,65 +2981,88 @@ ${innerRules}
     }
     attachConditionalNode(state2, node, options) {
       if (!node && node !== "") {
-        return noop6;
+        return noop7;
       }
       const resolvedNode = this.resolveNode(node);
-      const placeholder = this.element.ownerDocument.createComment("kitsui:conditional");
+      const placeholder = Marker("kitsui:conditional").setOwner(this);
       const storage = createStorageElement(this.element.ownerDocument);
       const childComponent = node instanceof _ComponentClass ? node : null;
       let active = true;
-      let releaseChildCleanup = noop6;
+      let releaseChildCleanup = noop7;
       let placeholderWasInserted = false;
+      const getSafeReferenceNode = (container) => {
+        const referenceNode = options.getReferenceNode();
+        if (!referenceNode) {
+          return null;
+        }
+        return referenceNode.parentNode === container ? referenceNode : null;
+      };
       const removeOwnerForMissingMarker = () => {
         if (!active) {
           return;
         }
         this.remove();
       };
-      const placeVisible = () => {
-        if (!active) {
-          return;
-        }
+      const ensurePlaceholder = () => {
         const container = options.getContainer();
         if (!isMoveParent(container)) {
           if (placeholderWasInserted) {
             removeOwnerForMissingMarker();
-            return;
           }
+          return null;
+        }
+        if (!placeholderWasInserted) {
+          moveNode(container, placeholder.node, getSafeReferenceNode(container));
+          placeholderWasInserted = true;
+          return container;
+        }
+        if (placeholder.node.parentNode !== container) {
+          removeOwnerForMissingMarker();
+          return null;
+        }
+        return container;
+      };
+      const placeVisible = () => {
+        if (!active) {
+          return;
+        }
+        const initialContainer = options.getContainer();
+        if (isMoveParent(initialContainer) && wouldCreateRecursiveTree(initialContainer, resolvedNode)) {
+          console.error(recursiveTreeErrorMessage);
+          return;
+        }
+        const container = ensurePlaceholder();
+        if (!active) {
+          return;
+        }
+        if (!container) {
           moveNode(storage, resolvedNode, null);
           return;
         }
-        if (placeholderWasInserted && resolvedNode.parentNode === storage && placeholder.parentNode !== container) {
-          removeOwnerForMissingMarker();
-          return;
+        const moved = moveNode(container, resolvedNode, placeholder.node);
+        if (moved) {
+          childComponent?.refreshOrphanCheck();
+          childComponent?.dispatchMount();
         }
-        if (placeholder.parentNode === container) {
-          moveNode(container, resolvedNode, placeholder);
-          placeholder.remove();
-        } else {
-          moveNode(container, resolvedNode, options.getReferenceNode());
-        }
-        childComponent?.refreshOrphanCheck();
-        childComponent?.dispatchMount();
       };
       const placeHidden = () => {
         if (!active) {
           return;
         }
-        const container = options.getContainer();
-        if (!isMoveParent(container)) {
-          if (placeholderWasInserted) {
-            removeOwnerForMissingMarker();
-            return;
-          }
+        const initialContainer = options.getContainer();
+        if (isMoveParent(initialContainer) && wouldCreateRecursiveTree(initialContainer, resolvedNode)) {
+          console.error(recursiveTreeErrorMessage);
+          return;
+        }
+        const container = ensurePlaceholder();
+        if (!active) {
+          return;
+        }
+        if (!container) {
           if (resolvedNode.parentNode !== storage) {
             moveNode(storage, resolvedNode, null);
           }
           return;
-        }
-        if (placeholder.parentNode !== container) {
-          moveNode(container, placeholder, options.getReferenceNode());
-          placeholderWasInserted = true;
         }
         if (resolvedNode.parentNode !== storage) {
           moveNode(storage, resolvedNode, null);
@@ -2505,6 +3075,12 @@ ${innerRules}
         placeholder.remove();
         storage.remove();
         if (childComponent) {
+          const explicitOwner = childComponent.getOwner();
+          if (explicitOwner && explicitOwner !== this) {
+            childComponent.element.parentNode?.removeChild(childComponent.element);
+            childComponent.refreshOrphanCheck();
+            return;
+          }
           childComponent.remove();
           return;
         }
@@ -2528,7 +3104,7 @@ ${innerRules}
       return cleanup;
     }
     attachStatefulChildren(state2, options) {
-      const marker = this.element.ownerDocument.createComment("kitsui:stateful-child");
+      const marker = Marker("kitsui:stateful-child").setOwner(this);
       const storage = createStorageElement(this.element.ownerDocument);
       let active = true;
       let renderedComponents = [];
@@ -2557,21 +3133,23 @@ ${innerRules}
           cleanupRenderedComponents();
           return;
         }
-        if (markerWasInserted && marker.parentNode !== container) {
+        if (markerWasInserted && marker.node.parentNode !== container) {
           this.remove();
           return;
         }
-        if (marker.parentNode !== container) {
-          moveNode(container, marker, options.getReferenceNode());
+        if (marker.node.parentNode !== container) {
+          moveNode(container, marker.node, options.getReferenceNode());
           markerWasInserted = true;
         }
         cleanupRenderedComponents(nextComponentSet);
         for (const component of nextComponents) {
           component.ensureActive();
           component.onBeforeMove?.();
-          moveNode(container, component.element, marker);
-          component.refreshOrphanCheck();
-          component.dispatchMount();
+          const moved = moveNode(container, component.element, marker.node);
+          if (moved) {
+            component.refreshOrphanCheck();
+            component.dispatchMount();
+          }
         }
         renderedComponents = nextComponents;
       };
@@ -2639,12 +3217,12 @@ ${innerRules}
     }
     return Component(element);
   };
-  Component.extend = function extend2() {
+  Component.extend = function extend3() {
     return ComponentClass;
   };
 
   // src/component/extensions/placeExtension.ts
-  var noop7 = () => {
+  var noop8 = () => {
   };
   var PlacementLifecycleOwner = class extends Owner {
     // Uses Owner's default lifecycle hooks.
@@ -2652,6 +3230,7 @@ ${innerRules}
   var placementControllers = /* @__PURE__ */ new WeakMap();
   var placementOwners = /* @__PURE__ */ new WeakMap();
   var placementLifecycleOwners = /* @__PURE__ */ new WeakMap();
+  var recursiveTreeErrorMessage2 = "Cannot move a node into itself or one of its descendants.";
   var componentClass = null;
   var patched = false;
   function getComponentClass() {
@@ -2661,12 +3240,28 @@ ${innerRules}
   function isMoveParent2(value) {
     return value !== null && typeof value.insertBefore === "function";
   }
+  function wouldCreateRecursiveTree2(parent, node) {
+    return node === parent || node.contains(parent);
+  }
   function moveNode2(parent, node, beforeNode) {
-    if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
-      parent.moveBefore(node, beforeNode);
-      return;
+    if (wouldCreateRecursiveTree2(parent, node)) {
+      console.error(recursiveTreeErrorMessage2);
+      return false;
     }
-    parent.insertBefore(node, beforeNode);
+    try {
+      if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
+        parent.moveBefore(node, beforeNode);
+        return true;
+      }
+      parent.insertBefore(node, beforeNode);
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "HierarchyRequestError") {
+        console.error(recursiveTreeErrorMessage2);
+        return false;
+      }
+      throw error;
+    }
   }
   function createStorageElement2(documentRef) {
     return documentRef.createElement("kitsui-storage");
@@ -2698,7 +3293,7 @@ ${innerRules}
   function setPlacementController(component, cleanup) {
     clearPlacement(component);
     let active = true;
-    let releaseDisposeCleanup = noop7;
+    let releaseDisposeCleanup = noop8;
     const trackedCleanup = () => {
       if (!active) {
         return;
@@ -2727,7 +3322,7 @@ ${innerRules}
      * @returns This place for chaining.
      */
     appendTo(target) {
-      moveNode2(resolvePlacementContainer(target), this.marker, null);
+      this.marker.appendTo(target);
       return this;
     }
     /**
@@ -2736,8 +3331,7 @@ ${innerRules}
      * @returns This place for chaining.
      */
     prependTo(target) {
-      const container = resolvePlacementContainer(target);
-      moveNode2(container, this.marker, container.firstChild);
+      this.marker.prependTo(target);
       return this;
     }
     /**
@@ -2748,15 +3342,7 @@ ${innerRules}
      * @throws If the target's parent is not a valid insert location.
      */
     insertTo(where, target) {
-      const referenceNode = resolvePlacementReferenceNode(target);
-      if (!referenceNode) {
-        return this;
-      }
-      const parentNode = referenceNode.parentNode;
-      if (!isMoveParent2(parentNode)) {
-        throw new Error("Insert target was not found.");
-      }
-      moveNode2(parentNode, this.marker, where === "before" ? referenceNode : referenceNode.nextSibling);
+      this.marker.insertTo(where, target);
       return this;
     }
     /**
@@ -2773,8 +3359,11 @@ ${innerRules}
     if (isComponent(target)) {
       return target.element;
     }
+    if (target instanceof Marker) {
+      return target.node;
+    }
     if (target instanceof PlaceClass) {
-      return target.marker;
+      return target.marker.node;
     }
     return target;
   }
@@ -2814,6 +3403,9 @@ ${innerRules}
     if (isComponent(target)) {
       return target === component ? resolveOwnPlacementOwner(component) : resolveOwnPlacementOwner(target);
     }
+    if (target instanceof Marker) {
+      return target.getOwner() ?? resolveNearestWrappedAncestor(target.node) ?? null;
+    }
     if (target instanceof PlaceClass) {
       return target.owner;
     }
@@ -2830,23 +3422,29 @@ ${innerRules}
     return resolvePlacementOwner(target, component);
   }
   function toPlaceSource(state2, place) {
-    return {
-      get value() {
-        return state2.value ? place : null;
-      },
-      subscribe(owner, listener) {
-        return state2.subscribe(owner, (value) => {
-          listener(value ? place : null);
-        });
-      }
-    };
+    const placeState = State(place.owner, state2.value ? place : null);
+    state2.subscribe(place.marker, (value) => {
+      placeState.set(value ? place : null);
+    });
+    return placeState;
   }
   function placeComponent(component, parent, beforeNode) {
     component["onBeforeMove"]?.();
     clearPlacement(component);
-    moveNode2(parent, component.element, beforeNode);
+    const moved = moveNode2(parent, component.element, beforeNode);
+    if (!moved) {
+      return;
+    }
     component["refreshOrphanCheck"]();
     component["dispatchMount"]();
+  }
+  function placeMarker(marker, parent, beforeNode) {
+    const moved = moveNode2(parent, marker.node, beforeNode);
+    if (!moved) {
+      return;
+    }
+    marker["refreshOrphanCheck"]();
+    marker["dispatchMount"]();
   }
   function placeExtension() {
     if (patched) {
@@ -2857,9 +3455,37 @@ ${innerRules}
       return placementOwners.get(component) ?? null;
     });
     const ComponentClass2 = getComponentClass();
+    const MarkerClass2 = Marker.extend();
     const prototype = ComponentClass2.prototype;
+    const markerPrototype = MarkerClass2.prototype;
+    markerPrototype.appendTo = function appendTo(target) {
+      this.setOwner(resolvePlacementContainerOwner(target));
+      const container = resolvePlacementContainer(target);
+      placeMarker(this, container, null);
+      return this;
+    };
+    markerPrototype.prependTo = function prependTo(target) {
+      this.setOwner(resolvePlacementContainerOwner(target));
+      const container = resolvePlacementContainer(target);
+      placeMarker(this, container, container.firstChild);
+      return this;
+    };
+    markerPrototype.insertTo = function insertTo(where, target) {
+      this.setOwner(resolvePlacementOwner(target));
+      const referenceNode = resolvePlacementReferenceNode(target);
+      if (!referenceNode) {
+        return this;
+      }
+      const parentNode = referenceNode.parentNode;
+      if (!isMoveParent2(parentNode)) {
+        throw new Error("Insert target was not found.");
+      }
+      placeMarker(this, parentNode, where === "before" ? referenceNode : referenceNode.nextSibling);
+      return this;
+    };
     prototype.appendTo = function appendTo(target) {
       ensureActive(this);
+      this.setOwner(resolvePlacementContainerOwner(target, this));
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, null);
       return this;
@@ -2873,6 +3499,7 @@ ${innerRules}
     };
     prototype.prependTo = function prependTo(target) {
       ensureActive(this);
+      this.setOwner(resolvePlacementContainerOwner(target, this));
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, container.firstChild);
       return this;
@@ -2886,6 +3513,7 @@ ${innerRules}
     };
     prototype.insertTo = function insertTo(where, target) {
       ensureActive(this);
+      this.setOwner(resolvePlacementOwner(target, this));
       const referenceNode = resolvePlacementReferenceNode(target);
       if (!referenceNode) {
         return this;
@@ -2913,14 +3541,15 @@ ${innerRules}
       const storage = createStorageElement2(documentRef);
       const places = /* @__PURE__ */ new Set();
       const Place = function Place2() {
-        const place2 = new PlaceClass(placementOwner, documentRef.createComment("kitsui:place"));
+        const place2 = new PlaceClass(placementOwner, Marker("kitsui:place").setOwner(placementOwner));
         places.add(place2);
         return place2;
       };
       Place.prototype = PlaceClass.prototype;
       const placeState = placer(Place);
-      let releaseOwnerCleanup = noop7;
-      let releaseStateCleanup = noop7;
+      let releaseOwnerCleanup = noop8;
+      let releaseStateCleanup = noop8;
+      let blockedByRecursivePlacement = false;
       const cleanup = setPlacementController(this, () => {
         releaseOwnerCleanup();
         releaseStateCleanup();
@@ -2936,16 +3565,28 @@ ${innerRules}
       this["onBeforeMove"] = () => clearPlacement(this);
       const syncPlace = (place2) => {
         if (!place2) {
+          if (blockedByRecursivePlacement) {
+            return;
+          }
           moveNode2(storage, this.element, null);
           return;
         }
-        const parentNode = place2.marker.parentNode;
+        const parentNode = place2.marker.node.parentNode;
         if (!isMoveParent2(parentNode)) {
           console.error("Placement marker was removed. Treating placement as null.");
           moveNode2(storage, this.element, null);
           return;
         }
-        moveNode2(parentNode, this.element, place2.marker);
+        if (wouldCreateRecursiveTree2(parentNode, this.element)) {
+          console.error(recursiveTreeErrorMessage2);
+          blockedByRecursivePlacement = true;
+          return;
+        }
+        blockedByRecursivePlacement = false;
+        const moved = moveNode2(parentNode, this.element, place2.marker.node);
+        if (!moved) {
+          return;
+        }
         this["refreshOrphanCheck"]();
         this["dispatchMount"]();
       };
@@ -2958,10 +3599,79 @@ ${innerRules}
     };
   }
 
+  // src/state/extensions/groupExtension.ts
+  var patched2 = false;
+  function scheduleNextTick(callback) {
+    const schedulerRef = globalThis;
+    if (typeof schedulerRef.scheduler?.yield === "function") {
+      void schedulerRef.scheduler.yield().then(callback);
+      return;
+    }
+    queueMicrotask(callback);
+  }
+  function readGroupSnapshot(states) {
+    const entries = Object.entries(states).map(([key, state2]) => {
+      return [key, state2.value];
+    });
+    return Object.fromEntries(entries);
+  }
+  function createGroupedState(owner, states) {
+    const grouped = State(owner, readGroupSnapshot(states));
+    const releaseSubscriptions = [];
+    let active = true;
+    let queued = false;
+    const flush = () => {
+      queued = false;
+      if (!active || grouped.disposed) {
+        return;
+      }
+      grouped.set(readGroupSnapshot(states));
+    };
+    const queueGroupedUpdate = () => {
+      if (!active || queued || grouped.disposed) {
+        return;
+      }
+      queued = true;
+      scheduleNextTick(flush);
+    };
+    for (const state2 of Object.values(states)) {
+      releaseSubscriptions.push(state2.subscribeImmediate(grouped, queueGroupedUpdate));
+    }
+    grouped.onCleanup(() => {
+      if (!active) {
+        return;
+      }
+      active = false;
+      queued = false;
+      for (const releaseSubscription of releaseSubscriptions) {
+        releaseSubscription();
+      }
+      releaseSubscriptions.length = 0;
+    });
+    return grouped;
+  }
+  function groupExtension() {
+    if (patched2) {
+      return;
+    }
+    patched2 = true;
+    const StateWithGroup = State;
+    const Group = function Group2(owner, states) {
+      if (!(owner instanceof Owner)) {
+        throw new TypeError("State.Group requires an Owner as the first argument.");
+      }
+      if (typeof states !== "object" || states === null) {
+        throw new TypeError("State.Group requires a states object as the second argument.");
+      }
+      return createGroupedState(owner, states);
+    };
+    StateWithGroup.Group = Group;
+  }
+
   // src/state/extensions/mappingExtension.ts
   var truthyStates = /* @__PURE__ */ new WeakMap();
   var falsyStates = /* @__PURE__ */ new WeakMap();
-  var patched2 = false;
+  var patched3 = false;
   function createMappedState(source, owner, mapValue) {
     const graphOption = {
       graph: source.getGraph()
@@ -2983,10 +3693,10 @@ ${innerRules}
     return mapped;
   }
   function mappingExtension() {
-    if (patched2) {
+    if (patched3) {
       return;
     }
-    patched2 = true;
+    patched3 = true;
     const StateClass2 = State.extend();
     const prototype = StateClass2.prototype;
     prototype.map = function map(ownerOrMapValue, maybeMapValue) {
@@ -3034,6 +3744,7 @@ ${innerRules}
 
   // src/index.ts
   placeExtension();
+  groupExtension();
   mappingExtension();
   return __toCommonJS(index_exports);
 })();

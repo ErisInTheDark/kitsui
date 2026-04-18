@@ -1,20 +1,11 @@
-import { Owner, type CleanupFunction } from "../state/State";
+import { State } from "../state/State";
 import type { Component } from "./Component";
 /** Serializable values accepted by the text manipulator. */
 export type TextValue = string | number | bigint | boolean;
 /** Text content selections, including nullish values that clear the text content. */
 export type TextSelection = TextValue | null | undefined;
-/** A subscribable source of text content. */
-export interface TextSource {
-    readonly value: TextSelection;
-    subscribe(owner: Owner, listener: (value: TextSelection) => void): CleanupFunction;
-}
 /** A direct or subscribable text input. */
-export type TextInput = TextSelection | TextSource;
-type PresenceSource = {
-    readonly value: boolean;
-    subscribe(owner: Owner, listener: (value: boolean) => void): CleanupFunction;
-};
+export type TextInput = TextSelection | State<TextSelection>;
 /**
  * Manages an element's text content with support for direct values and reactive sources.
  */
@@ -37,8 +28,7 @@ export declare class TextManipulator {
      * @param value Direct or reactive text input.
      * @returns The owning component for fluent chaining.
      */
-    bind(visible: PresenceSource, value: TextInput): Component;
+    bind(visible: State<boolean>, value: TextInput): Component;
     private replaceDeterminer;
     private ensureActive;
 }
-export {};

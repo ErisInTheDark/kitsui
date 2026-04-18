@@ -1,4 +1,4 @@
-import { Owner, State, type CleanupFunction } from "../state/State";
+import { Owner, State } from "../state/State";
 import type { Component } from "./Component";
 import { Style } from "./Style";
 /**
@@ -12,22 +12,9 @@ export type Falsy = false | 0 | 0n | "" | null | undefined;
  */
 export type StyleSelection = Style.Class | Falsy | Iterable<Style.Class | Falsy>;
 /**
- * A reactive source of style selections, such as a State.
- */
-export interface StyleSelectionSource {
-    readonly value: StyleSelection;
-    /**
-     * Subscribe to changes in the style selection.
-     * @param owner The owner that manages the lifecycle of this subscription.
-     * @param listener Called whenever the style selection changes.
-     * @returns A cleanup function that unsubscribes from changes.
-     */
-    subscribe(owner: Owner, listener: (value: StyleSelection) => void): CleanupFunction;
-}
-/**
  * A style input: a static style, falsy value, reactive style source, or any combination.
  */
-export type StyleInput = Style.Class | Falsy | StyleSelectionSource;
+export type StyleInput = Style.Class | Falsy | State<StyleSelection>;
 /**
  * Manages CSS class application to an HTML element with support for static values,
  * reactive state, and multiple overlapping style determiners.

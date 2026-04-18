@@ -44,12 +44,16 @@ export interface StateOptions<T> {
 export interface StateExtensions<T> {
 }
 /**
+ * A marker interface for module-level State static extensions.
+ * Extend this interface to add static methods to the State constructor function.
+ */
+export interface StateStaticExtensions {
+}
+/**
  * Constructor type for extending the State class with custom methods.
  * Used with {@link State.extend} to access and modify the State prototype.
  */
-export type ExtendableStateClass<T = unknown> = (abstract new (...args: never[]) => State<T>) & {
-    prototype: State<T>;
-};
+export type ExtendableStateClass = StateConstructor & StateStaticExtensions;
 interface StateGraph {
     pendingListeners: Set<QueuedStateListenerRecord<unknown>>;
     scheduled: boolean;
@@ -116,9 +120,12 @@ declare class StateClass<T> extends Owner {
     private requiresExplicitOwner;
     private orphanCheckId;
     private currentValue;
+    /** @deprecated Use getEqualityFunction(this) */
     private equalityFunction;
     private readonly graph;
+    /** @deprecated Use getImmediateListeners(this) */
     private readonly immediateListeners;
+    /** @deprecated Use getQueuedListeners(this) */
     private readonly queuedListeners;
     constructor(owner: Owner | null, initialValue: T, options?: StateInternalOptions<T>);
     /**
@@ -238,7 +245,32 @@ type StateConstructor = {
     new <T>(initialValue: T, options?: StateOptions<T>): State<T>;
     new <T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
     prototype: State<unknown>;
-    extend<T = unknown>(): ExtendableStateClass<T>;
+    /**
+     * Returns the underlying State class for prototype extension.
+     * This allows modules to add custom methods and properties to all State instances.
+     *
+     * @returns The ExtendableStateClass constructor, whose prototype can be modified.
+     *
+     * @example
+     * ```
+     * const StateClass = State.extend<number>();
+     * StateClass.prototype.double = function() {
+     *   return this.value * 2;
+     * };
+     *
+     * const num = State(owner, 5);
+     * num.double(); // 10
+     * ```
+     */
+    extend<T = unknown>(): ExtendableStateClass;
+    /**
+     * Creates a new State instance that can never change.
+     * The returned state has a fixed value and ignores all updates.
+     * It is not associated with any owner and does not require disposal.
+     * @param value The fixed value for the readonly state.
+     * @returns A new readonly state instance with the specified value.
+     */
+    Readonly<T>(value: T): State<T>;
 };
 /**
  * Creates a reactive state container with an initial value.
@@ -273,5 +305,5 @@ type StateConstructor = {
  * ```
  * @group State
  */
-export declare const State: StateConstructor;
+export declare const State: StateConstructor & StateStaticExtensions;
 export {};

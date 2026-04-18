@@ -1,27 +1,19 @@
-import { Owner, State, type CleanupFunction } from "../../state/State";
+import { Owner, State } from "../../state/State";
 import type { Falsy } from "../ClassManipulator";
 import { Component, type InsertWhere } from "../Component";
+import { Marker } from "../Marker";
 /** A placement target: a DOM node, Component, Place marker, or null/falsy. */
-export type PlacementTarget = Node | Component | Place | Falsy;
+export type PlacementTarget = Node | Component | Marker | Place | Falsy;
 /** A DOM parent node that can host appended or prepended placements. */
 export type PlacementParent = ParentNode & Node;
-/**
- * A reactive source for placement that emits Place or null.
- * @property value The current place or null.
- * @property subscribe Subscribes to placement changes.
- */
-export interface PlaceSource {
-    readonly value: Place | null;
-    subscribe(owner: Owner, listener: (value: Place | null) => void): CleanupFunction;
-}
 /** @group Place */
 type PlaceConstructor = {
     (): Place;
     new (): Place;
     prototype: Place;
 };
-/** A function that receives a Place constructor and returns a PlaceSource for reactive placement. */
-export type PlacerFunction = (Place: PlaceConstructor) => PlaceSource;
+/** A function that receives a Place constructor and returns State<Place | null> for reactive placement. */
+export type PlacerFunction = (Place: PlaceConstructor) => State<Place | null>;
 declare module "../Component" {
     interface ComponentExtensions {
         /**
@@ -76,13 +68,20 @@ declare module "../Component" {
         insertToWhen(state: State<boolean>, where: InsertWhere, target: PlacementTarget): this;
         /**
          * Manually controls component placement with a reactive placer function.
-         * The placer receives a Place constructor and returns a PlaceSource that controls where the component is inserted.
+         * The placer receives a Place constructor and returns State<Place | null> that controls where the component is inserted.
          * @param owner The owner who manages the placement lifecycle.
-         * @param placer A function that produces a PlaceSource determining the component's location.
+         * @param placer A function that produces State<Place | null> determining the component's location.
          * @returns This component for chaining.
          * @throws If this component is disposed.
          */
         place(owner: Owner, placer: PlacerFunction): this;
+    }
+}
+declare module "../Marker" {
+    interface MarkerExtensions {
+        appendTo(target: PlacementContainer): this;
+        prependTo(target: PlacementContainer): this;
+        insertTo(where: InsertWhere, target: PlacementTarget): this;
     }
 }
 type PlacementContainer = Component | PlacementParent;
@@ -94,8 +93,8 @@ type PlacementContainer = Component | PlacementParent;
  */
 declare class PlaceClass {
     readonly owner: Owner;
-    readonly marker: Comment;
-    constructor(owner: Owner, marker: Comment);
+    readonly marker: Marker;
+    constructor(owner: Owner, marker: Marker);
     /**
      * Moves this placement marker to the end of the target component or DOM parent.
      * @param target The target component or DOM parent.

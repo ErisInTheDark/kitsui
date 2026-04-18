@@ -1,5 +1,4 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
-import { Class } from "../utility/types";
 import { AriaManipulator } from "./AriaManipulator";
 import { AttributeManipulator } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
@@ -55,6 +54,17 @@ export interface ComponentSelectionState {
  */
 export interface ComponentExtensions {
 }
+/**
+ * A marker interface for module-level Component static extensions.
+ * Extend this interface to add static methods to the Component constructor function.
+ */
+export interface ComponentStaticExtensions {
+}
+/**
+ * Constructor type for extending the Component class with custom methods.
+ * Used with {@link Component.extend} to access and modify the Component prototype.
+ */
+export type ExtendableComponentClass = ComponentConstructor & ComponentStaticExtensions;
 /** @group Component */
 type ComponentConstructor = {
     /**
@@ -96,7 +106,7 @@ type ComponentConstructor = {
      * const ComponentClass = Component.extend();
      * ComponentClass.prototype.custom = function() { return "custom"; };
      */
-    extend(): Class<Component>;
+    extend(): ExtendableComponentClass;
 };
 /**
  * A function that resolves the owner of a component in a custom context.
@@ -170,38 +180,36 @@ declare class ComponentClass extends Owner {
      */
     insert(where: InsertWhere, ...nodes: ComponentChildren[]): this;
     /**
-     * Appends a child conditionally based on state.
-     * When the state becomes true, the child is inserted. When false, it's stored but stays in the DOM as a placeholder.
+     * Appends children conditionally based on state.
+     * When the state becomes true, children are inserted. When false, they are parked in storage and placeholders remain in-flow.
      * @param state - A State<boolean> that controls visibility.
-     * @param child - The child to append conditionally.
-     * @returns A cleanup function that removes the conditional binding and the child.
+     * @param nodes - Nodes or iterables of nodes to append conditionally.
+     * @returns This component for chaining.
      */
-    appendWhen(state: State<boolean>, child: ComponentChild): CleanupFunction;
+    appendWhen(state: State<boolean>, ...nodes: ComponentChildren[]): this;
     /**
-     * Prepends a child conditionally based on state.
-     * When the state becomes true, the child is inserted before existing content.
+     * Prepends children conditionally based on state.
+     * When the state becomes true, children are inserted before the current first child.
      * @param state - A State<boolean> that controls visibility.
-     * @param child - The child to prepend conditionally.
-     * @returns A cleanup function that removes the conditional binding and the child.
+     * @param nodes - Nodes or iterables of nodes to prepend conditionally.
+     * @returns This component for chaining.
      */
-    prependWhen(state: State<boolean>, child: ComponentChild): CleanupFunction;
+    prependWhen(state: State<boolean>, ...nodes: ComponentChildren[]): this;
     /**
      * Inserts children conditionally before or after this component, based on state.
      * When the state becomes true, children are inserted. When false, they're stored but stay in the DOM as a placeholder.
      * @param state - A State<boolean> that controls visibility.
      * @param where - "before" to insert before this component, or "after" to insert after.
      * @param nodes - Nodes or iterables of nodes to insert conditionally.
-     * @returns A cleanup function that removes all conditional bindings and children.
-     */
-    insertWhen(state: State<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): CleanupFunction;
-    clear(): this;
-    /**
-     * Sets a single attribute on the element.
-     * @param name - The attribute name.
-     * @param value - The attribute value.
      * @returns This component for chaining.
      */
-    setAttribute(name: string, value: string): this;
+    insertWhen(state: State<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): this;
+    private attachConditionalSelectionState;
+    /**
+     * Clears all child nodes from this component.
+     * @returns This component for chaining.
+     */
+    clear(): this;
     /**
      * Runs a setup callback against this component, or subscribes a render function to a state.
      * The stateful form invokes the render immediately with the current value, then again each time the state changes.
@@ -271,5 +279,5 @@ export type Component = ComponentClass;
  * const wrapped = Component(document.getElementById("existing"));
  * @group Component
  */
-export declare const Component: ComponentConstructor;
+export declare const Component: ComponentConstructor & ComponentStaticExtensions;
 export {};
