@@ -381,10 +381,12 @@ function renderStyleSheet (): void {
 		styleElement.append(document.createTextNode("\n"));
 }
 
+/** @hidden */
 export function mountStylesheet (): void {
 	renderStyleSheet();
 }
 
+/** @hidden */
 export function unmountStylesheet (): void {
 	styleElement = null;
 	animationRules.clear();

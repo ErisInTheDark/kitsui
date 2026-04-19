@@ -224,8 +224,7 @@ function mergeCallableClassGroup (
 	const name = groupName;
 	const rawComment = factory?.comment ?? typeAlias?.comment ?? classDecl.comment;
 	const comment = rawComment ? stripSignatureBlockTags(rawComment) : undefined;
-	const signatures = extractCallableSignatures(factory);
-	const constructorSignatures = extractConstructorSignatures(constructorType);
+	const mergedSignatures = extractCallConstructSignatures(factory) ?? extractCallConstructSignatures(constructorType);
 
 	const mergedChildren = (classDecl.children ?? [])
 		.filter(child => child.kind !== ReflectionKind.Constructor);
@@ -247,7 +246,7 @@ function mergeCallableClassGroup (
 			name,
 			kind: ReflectionKind.Class,
 			comment,
-			signatures: signatures ?? constructorSignatures,
+			signatures: applySignatureLikeCommentToSignatures(mergedSignatures, rawComment),
 			children: mergedChildren.length > 0 ? mergedChildren : undefined,
 			sources: classDecl.sources,
 		},
@@ -261,7 +260,7 @@ function extractConstructorSignatures (
 		return undefined;
 
 	if (constructorType.signatures && constructorType.signatures.length > 0)
-		return constructorType.signatures;
+		return filterSignaturesByKind(constructorType.signatures, ReflectionKind.ConstructorSignature);
 
 	if (!constructorType.type)
 		return undefined;
@@ -271,7 +270,7 @@ function extractConstructorSignatures (
 		return undefined;
 
 	const declaration = (type as JSONOutput.ReflectionType).declaration;
-	return declaration?.signatures;
+	return filterSignaturesByKind(declaration?.signatures, ReflectionKind.ConstructorSignature);
 }
 
 function extractCallableSignatures (
@@ -281,7 +280,7 @@ function extractCallableSignatures (
 		return undefined;
 
 	if (declaration.signatures && declaration.signatures.length > 0)
-		return declaration.signatures;
+		return filterSignaturesByKind(declaration.signatures, ReflectionKind.CallSignature);
 
 	if (!declaration.type)
 		return undefined;
@@ -294,7 +293,94 @@ function extractCallableSignatures (
 		return undefined;
 
 	const reflectionDeclaration = (type as JSONOutput.ReflectionType).declaration;
-	return reflectionDeclaration?.signatures;
+	return filterSignaturesByKind(reflectionDeclaration?.signatures, ReflectionKind.CallSignature);
+}
+
+function extractCallConstructSignatures (
+	declaration: JSONOutput.DeclarationReflection | undefined,
+): JSONOutput.SignatureReflection[] | undefined {
+	const callSignatures = extractCallableSignatures(declaration);
+	const constructorSignatures = extractConstructorSignatures(declaration);
+
+	if (callSignatures && constructorSignatures) {
+		return [...callSignatures, ...constructorSignatures];
+	}
+
+	return callSignatures ?? constructorSignatures;
+}
+
+function mergeCommentBlockTags (
+	left: JSONOutput.CommentTag[] | undefined,
+	right: JSONOutput.CommentTag[] | undefined,
+): JSONOutput.CommentTag[] | undefined {
+	if (!left || left.length === 0) {
+		return right && right.length > 0 ? right : undefined;
+	}
+
+	if (!right || right.length === 0) {
+		return left;
+	}
+
+	return [...left, ...right];
+}
+
+function applySignatureLikeCommentToSignatures (
+	signatures: JSONOutput.SignatureReflection[] | undefined,
+	comment: JSONOutput.Comment | undefined,
+): JSONOutput.SignatureReflection[] | undefined {
+	if (!signatures || signatures.length === 0 || !comment) {
+		return signatures;
+	}
+
+	const paramComments = new Map<string, JSONOutput.CommentDisplayPart[]>();
+	const signatureTags = (comment.blockTags ?? []).filter(tag => {
+		if (tag.tag === "@param" && tag.name) {
+			paramComments.set(tag.name, tag.content);
+			return false;
+		}
+
+		return tag.tag === "@returns" || tag.tag === "@throws";
+	});
+
+	const signatureComment = signatureTags.length > 0
+		? {
+			summary: [] as JSONOutput.CommentDisplayPart[],
+			blockTags: signatureTags,
+		} satisfies JSONOutput.Comment
+		: undefined;
+
+	return signatures.map(signature => ({
+		...signature,
+		comment: signatureComment
+			? {
+				...(signature.comment ?? signatureComment),
+				summary: signature.comment?.summary ?? signatureComment.summary,
+				blockTags: mergeCommentBlockTags(signature.comment?.blockTags, signatureComment.blockTags),
+			}
+			: signature.comment,
+		parameters: signature.parameters?.map(parameter => {
+			const parameterCommentSummary = paramComments.get(parameter.name);
+			if (!parameterCommentSummary || parameter.comment) {
+				return parameter;
+			}
+
+			return {
+				...parameter,
+				comment: { summary: parameterCommentSummary },
+			};
+		}),
+	}));
+}
+
+function filterSignaturesByKind (
+	signatures: JSONOutput.SignatureReflection[] | undefined,
+	kind: ReflectionKind.CallSignature | ReflectionKind.ConstructorSignature,
+): JSONOutput.SignatureReflection[] | undefined {
+	if (!signatures || signatures.length === 0)
+		return undefined;
+
+	const filtered = signatures.filter(signature => signature.kind === kind);
+return filtered.length > 0 ? filtered : undefined;
 }
 
 function extractConstructorChildren (
@@ -774,10 +860,14 @@ export function prepareModuleSections (
 					consumedHelperTypeAliasIds.add(helperAlias.id);
 				}
 
+				const methodComment = method.comment ? stripSignatureBlockTags(method.comment) : method.comment;
+				const helperSignatures = extractCallConstructSignatures(helperAlias) ?? method.signatures;
+
 				return {
 					...method,
 					name: `${rootClassName}.${method.name}`,
-					signatures: extractConstructorSignatures(helperAlias) ?? method.signatures,
+					comment: methodComment,
+					signatures: applySignatureLikeCommentToSignatures(helperSignatures, method.comment),
 				};
 			}) as PreparedDeclarationReflection[];
 

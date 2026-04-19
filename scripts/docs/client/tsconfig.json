@@ -5,8 +5,9 @@
 		"rootDir": ".",
 		"outDir": "../../../docs",
 		"paths": {
-			"kitsui": ["../../../dist/index.d.ts"],
+			"kitsui": ["../../../src/index.ts"],
 		}
 	},
-	"include": ["./**/*.ts"]
+	"include": ["./**/*.ts"],
+	"exclude": []
 }

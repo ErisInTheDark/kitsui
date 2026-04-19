@@ -4,6 +4,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { writeDeclarationBundle } from "./dts";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, "..");
@@ -65,7 +66,12 @@ ${text}
 		}),
 	]);
 
-	console.log(`Built ${path.relative(projectRoot, outputFile)}, ${path.relative(projectRoot, esmOutputFile)}, and dist/index.d.ts`);
+	await writeDeclarationBundle({
+		log: false,
+		sourceDirectory: distDirectory,
+	});
+
+	console.log(`Built ${path.relative(projectRoot, outputFile)}, ${path.relative(projectRoot, esmOutputFile)}, dist/index.d.ts, and dist/kitsui.d.ts`);
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {

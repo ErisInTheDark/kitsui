@@ -38,11 +38,11 @@ function serializeTextSelection (value: TextSelection): string {
 /**
  * Manages an element's text content with support for direct values and reactive sources.
  */
-export class TextManipulator {
+export class TextManipulator<OWNER extends Component> {
 	private determiner: DeterminerRecord | null = null;
 
 	constructor (
-		private readonly owner: Component,
+		private readonly owner: OWNER,
 		private readonly writeText: (value: string) => void,
 	) { }
 
@@ -52,7 +52,7 @@ export class TextManipulator {
 	 * @param value Direct or reactive text input.
 	 * @returns The owning component for fluent chaining.
 	 */
-	set (value: TextInput): Component {
+	set (value: TextInput): OWNER {
 		this.ensureActive();
 		const textSource = toTextSource(value);
 
@@ -74,7 +74,7 @@ export class TextManipulator {
 	 * @param value Direct or reactive text input.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (visible: State<boolean>, value: TextInput): Component {
+	bind (visible: State<boolean>, value: TextInput): OWNER {
 		this.ensureActive();
 		const textSource = toTextSource(value);
 

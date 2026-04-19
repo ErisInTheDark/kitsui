@@ -98,6 +98,8 @@ describe("build:docs pipeline", () => {
 		const componentHtml = await readFile(path.join(docsDirectory, "Component.html"), "utf8");
 		const stateHtml = await readFile(path.join(docsDirectory, "State.html"), "utf8");
 		const styleHtml = await readFile(path.join(docsDirectory, "Style.html"), "utf8");
+		const markerHtml = await readFile(path.join(docsDirectory, "Marker.html"), "utf8");
+		const eventHtml = await readFile(path.join(docsDirectory, "EventManipulator.html"), "utf8");
 		const manipulatorModules = (docsModel.children ?? [])
 			.filter(child => child.name.startsWith("component/") && child.name.endsWith("Manipulator"))
 			.map(child => child.name.slice(child.name.lastIndexOf("/") + 1))
@@ -110,9 +112,13 @@ describe("build:docs pipeline", () => {
 		const firstManipulatorHtml = await readFile(path.join(docsDirectory, `${firstManipulator}.html`), "utf8");
 		expect(indexHtml.includes('<html lang="en">'), "Missing html element with lang attribute").toBe(true);
 		expect(kitsuiDeclaration.includes('declare module "kitsui" {'), "Missing kitsui module declaration bundle for Monaco").toBe(true);
-		expect(kitsuiDeclaration.includes('declare module "kitsui/component/Component" {'), "Missing rewritten kitsui/component/Component declaration module").toBe(true);
-		expect(kitsuiDeclaration.includes('declare module "kitsui/state/State" {'), "Missing rewritten kitsui/state/State declaration module").toBe(true);
-		expect(kitsuiDeclaration.includes('declare module "kitsui/component/Component"') && kitsuiDeclaration.includes('declare module "kitsui/component/extensions/placeExtension"'), "Expected hoisted declaration modules for extension augmentation targets").toBe(true);
+		expect(kitsuiDeclaration.includes('export interface ComponentExtensions {'), "Missing flattened ComponentExtensions interface in the main kitsui module").toBe(true);
+		expect(kitsuiDeclaration.includes('export interface StateExtensions<T> {'), "Missing flattened StateExtensions interface in the main kitsui module").toBe(true);
+		expect(kitsuiDeclaration.includes('export interface StateStaticExtensions {'), "Missing flattened StateStaticExtensions interface in the main kitsui module").toBe(true);
+		expect(kitsuiDeclaration.includes('appendTo(target: PlacementContainer): this;'), "Missing merged placeExtension methods on ComponentExtensions").toBe(true);
+		expect(kitsuiDeclaration.includes('Group: GroupConstructor;'), "Missing merged State.Group declaration on StateStaticExtensions").toBe(true);
+		expect(/^\s*declare module "kitsui\//mu.test(kitsuiDeclaration), "Declaration bundle should not emit secondary kitsui submodule declarations").toBe(false);
+		expect(/^\s*declare global\s*\{/mu.test(kitsuiDeclaration), "Declaration bundle should not leak global declarations into the public bundle").toBe(false);
 		expect(kitsuiDeclaration.includes('from "./') || kitsuiDeclaration.includes('from "../'), "Declaration bundle should not contain unresolved relative import specifiers").toBe(false);
 		expect(kitsuiDeclaration.includes('declare module "./') || kitsuiDeclaration.includes('declare module "../'), "Declaration bundle should not contain unresolved relative declaration-module specifiers").toBe(false);
 		expect(clientJs.includes('lib: ['), "Playground editor should rely on Monaco's built-in default libs instead of overriding the lib list").toBe(false);
@@ -125,6 +131,16 @@ describe("build:docs pipeline", () => {
 		expect(indexHtml.includes('<a class="docs-sidebar-link" href="playground.html">Playground</a>'), "Playground should move out of the sidebar on regular docs pages").toBe(false);
 		expect(/class="docs-header-right"[^>]*><a class="docs-header-link" href="playground.html">Playground<\/a><\/div>/u.test(indexHtml), "Regular docs pages should expose Playground in the masthead").toBe(true);
 		expect(/class="docs-header-right"[^>]*><a class="docs-header-link" href="playground.html">Playground<\/a><\/div>/u.test(componentHtml), "API docs pages should expose Playground in the masthead").toBe(true);
+		expect(styleHtml.includes('id="mountStylesheet"'), "mountStylesheet should not appear in the public Style docs").toBe(false);
+		expect(styleHtml.includes('id="unmountStylesheet"'), "unmountStylesheet should not appear in the public Style docs").toBe(false);
+		const markerEventMapDeclaration = declarationSlice(markerHtml, "MarkerEventMap");
+		expect(markerEventMapDeclaration.includes("Lifecycle event map emitted by Marker instances."), "MarkerEventMap should render its JSDoc summary").toBe(true);
+		const markerExtensionsDeclaration = declarationSlice(markerHtml, "MarkerExtensions");
+		expect(markerExtensionsDeclaration.includes("module augmentation of instance-level Marker APIs"), "MarkerExtensions should render its JSDoc summary").toBe(true);
+		const eventManipulatorDeclaration = declarationSlice(eventHtml, "EventManipulator");
+		expect(eventManipulatorDeclaration.includes("Manages event listeners for a host owner with automatic cleanup and reactive listener support."), "EventManipulator should render its JSDoc summary").toBe(true);
+		const ownedEventManipulatorDeclaration = declarationSlice(eventHtml, "OwnedEventManipulator");
+		expect(ownedEventManipulatorDeclaration.includes("Fluent interface exposed by"), "OwnedEventManipulator should render its JSDoc summary").toBe(true);
 		expect(/class="docs-header-right"[^>]*><a class="docs-header-link docs-header-link-active" href="playground.html">Playground<\/a><\/div>/u.test(playgroundHtml), "Playground page should mark the masthead link active").toBe(true);
 		expect(playgroundHtml.includes('<main class="docs-playground-main" role="main">'), "Playground page should render a dedicated full-height main region").toBe(true);
 		expect(playgroundHtml.includes('class="docs-layout-shell"'), "Playground page should not render the standard docs sidebar shell").toBe(false);
@@ -155,6 +171,10 @@ describe("build:docs pipeline", () => {
 		expect(indexHtml.includes("DOM-first UI library built around owned"), "Missing description snippet").toBe(true);
 		expect(componentHtml.includes('<span class="docs-declaration-name">Component.extend</span>'), "Missing Component.extend declaration name").toBe(true);
 		expect(componentHtml.includes('<span class="docs-signature-name">Component.extend</span>'), "Missing Component.extend signature name").toBe(true);
+		expect(componentHtml.includes('<span class="docs-declaration-name">Component.query</span>'), "Missing Component.query declaration name").toBe(true);
+		expect(componentHtml.includes('<span class="docs-signature-name">Component.query</span>'), "Missing Component.query signature name").toBe(true);
+		expect(componentHtml.includes('<span class="docs-declaration-name">Component.fromHTML</span>'), "Missing Component.fromHTML declaration name").toBe(true);
+		expect(componentHtml.includes('<span class="docs-signature-name">Component.fromHTML</span>'), "Missing Component.fromHTML signature name").toBe(true);
 		expect(componentHtml.includes('<span class="docs-declaration-name">extend</span><span class="docs-flags"><span class="docs-flag">static</span></span>'), "Found nested static extend declaration").toBe(false);
 		expect(componentHtml.includes('<span class="docs-signature-punctuation">get </span><span class="docs-signature-name">class</span>'), "Missing punctuation-coloured get keyword in accessor signature").toBe(true);
 		expect(/class="docs-declaration-anchor" href="#[^"]+"/u.test(componentHtml), "Missing declaration # quick-link anchors").toBe(true);
@@ -223,6 +243,13 @@ describe("build:docs pipeline", () => {
 		const styleClassConstructorSignatureCount = (styleClassConstructorDeclaration.match(/class="docs-signature docs-signature-accent-method"/gu) ?? []).length;
 		expect(styleClassConstructorSignatureCount, "Paired call/constructor signatures should render in a single signature container").toBe(1);
 		expect(styleClassConstructorDeclaration.includes('<br>'), "Paired call/constructor signatures should render both forms in one signature code block").toBe(true);
+		const componentDeclaration = declarationSlice(componentHtml, "Component");
+		const componentSignatureSection = componentDeclaration.split('<div class="docs-declaration-children">')[0] ?? componentDeclaration;
+		const componentSignatureCount = (componentSignatureSection.match(/class="docs-signature docs-signature-accent-method"/gu) ?? []).length;
+		const normalizedComponentDeclaration = componentSignatureSection.replace(/\s+/gu, " ");
+		expect(componentSignatureCount, "Component should render three paired callable/constructable signature groups").toBe(3);
+		expect(/<span class="docs-parameter-name">tagName<\/span>[\s\S]*?<br><span class="docs-signature-punctuation">new <\/span><span class="docs-signature-name">Component<\/span>[\s\S]*?<span class="docs-parameter-name">tagName<\/span>/u.test(normalizedComponentDeclaration), "Component(tagName) should pair with new Component(tagName)").toBe(true);
+		expect(/<span class="docs-parameter-name">element<\/span>[\s\S]*?<br><span class="docs-signature-punctuation">new <\/span><span class="docs-signature-name">Component<\/span>[\s\S]*?<span class="docs-parameter-name">element<\/span>/u.test(normalizedComponentDeclaration), "Component(element) should pair with new Component(element)").toBe(true);
 		const styleValueDeclaration = declarationSlice(styleHtml, "StyleValue");
 		expect(styleValueDeclaration.includes('class="docs-declaration-fancy docs-declaration-fancy-accent-reference"'), "Declarations without signatures should render their comment/type content in a fancy bordered wrapper").toBe(true);
 		const stateDeclarationForCommentPlacement = declarationSlice(stateHtml, "State");
@@ -246,6 +273,8 @@ describe("build:docs pipeline", () => {
 		expect(stateGroupDeclaration.includes('docs-kind-property'), "Constructor-backed static extensions should not use property icon styling").toBe(false);
 		expect(stateGroupDeclaration.includes('docs-kind-reference'), "Constructor-backed static extensions should use class/reference icon styling").toBe(true);
 		expect(stateGroupDeclaration.includes('<br>'), "State.Group should preserve both call and constructor signatures").toBe(true);
+		expect(/docs-signature-param-row[\s\S]*?<span class="docs-parameter-name">owner<\/span>[\s\S]*?<div class="docs-comment"><span><span class="docs-comment">The owner that manages the grouped state's lifecycle\./u.test(stateGroupDeclaration), "State.Group should render the owner description in the signature parameter details").toBe(true);
+		expect(/docs-signature-param-row[\s\S]*?<span class="docs-parameter-name">states<\/span>[\s\S]*?<div class="docs-comment"><span><span class="docs-comment">A record of source states to group\./u.test(stateGroupDeclaration), "State.Group should render the states description in the signature parameter details").toBe(true);
 		const mainStateSectionEnd = groupSectionStart;
 		const mainStateSectionHtml = stateHtml.slice(0, mainStateSectionEnd);
 		expect(mainStateSectionHtml.includes('id="StateStaticExtensions.Group"'), "State.Group should not remain nested in the main State section").toBe(false);

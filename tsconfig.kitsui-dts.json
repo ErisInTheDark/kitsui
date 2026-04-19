@@ -1,0 +1,10 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"paths": {
+			"kitsui": ["./dist/kitsui.d.ts"]
+		}
+	},
+	"include": ["dist/kitsui.d.ts", "scripts/typecheck/kitsui-dts-check.ts"],
+	"exclude": []
+}

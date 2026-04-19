@@ -23,6 +23,12 @@ function summarizeComment (comment: JSONOutput.Comment | undefined): string {
 	return `${summary}||${tags}`;
 }
 
+function summarizeSignatureShape (signature: JSONOutput.SignatureReflection): string {
+	const typeParameters = (signature.typeParameters ?? []).map(typeParameter => typeParameter.name).join(",");
+	const parameters = (signature.parameters ?? []).map(parameter => parameter.name).join(",");
+	return `${typeParameters}||${parameters}`;
+}
+
 function hasRenderableComment (comment: JSONOutput.Comment | undefined): comment is JSONOutput.Comment {
 	if (!comment) {
 		return false;
@@ -52,6 +58,9 @@ function findPairedSignature (
 		: ReflectionKind.CallSignature;
 
 	const sigSummary = summarizeComment(sig.comment);
+	const sigShape = summarizeSignatureShape(sig);
+	let commentMatchIndex: number | undefined;
+	let shapeMatchIndex: number | undefined;
 
 	for (let j = 0; j < signatures.length; j++) {
 		if (j === index || rendered.has(j)) continue;
@@ -59,10 +68,18 @@ function findPairedSignature (
 		if (other.kind !== pairKind) continue;
 
 		const otherSummary = summarizeComment(other.comment);
-		if (sigSummary === otherSummary) return j;
+		const otherShape = summarizeSignatureShape(other);
+
+		if (sigShape === otherShape && sigSummary === otherSummary) return j;
+		if (shapeMatchIndex === undefined && sigShape === otherShape) {
+			shapeMatchIndex = j;
+		}
+		if (commentMatchIndex === undefined && sigSummary === otherSummary) {
+			commentMatchIndex = j;
+		}
 	}
 
-	return undefined;
+	return shapeMatchIndex ?? commentMatchIndex;
 }
 
 function renderedSignatureGroupCount (signatures: JSONOutput.SignatureReflection[]): number {

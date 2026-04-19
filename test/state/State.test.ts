@@ -17,7 +17,7 @@ declare module "../../src/state/State" {
 mappingExtension();
 groupExtension();
 
-function mountedOwner (tagName: string = "div"): Component {
+function mountedOwner<NAME extends keyof HTMLElementTagNameMap = "div">(tagName: NAME = "div" as NAME): Component<HTMLElementTagNameMap[NAME]> {
 	return Component(tagName).appendTo(document.body);
 }
 
@@ -638,6 +638,76 @@ describe("State", () => {
 
 			owner.remove();
 			sourceOwner.remove();
+		}
+		finally {
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies ownerless source states inherit implicit ownership from mapped children. */
+	it("ownerless source state gains implicit owner from a mapped child", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+
+		try {
+			const source = State(5);
+			const mapped = source.map((value) => value * 2);
+			const owner = mountedOwner();
+
+			mapped.subscribe(owner, () => undefined);
+
+			expect(mapped.getOwner(), "the mapped child should gain the implicit owner directly").toBe(owner);
+			expect(source.getOwner(), "the source state should inherit the mapped child's implicit owner").toBe(owner);
+
+			owner.remove();
+
+			expect(source.disposed, "disposing the inherited implicit owner should dispose the source state").toBe(true);
+			expect(mapped.disposed, "disposing the inherited implicit owner should also dispose the mapped child").toBe(true);
+		}
+		finally {
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies implicit ownership propagates through chains of mapped states. */
+	it("propagates implicit owners through chained mapped states", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+
+		try {
+			const source = State(2);
+			const mapped = source.map((value) => value + 1);
+			const mappedAgain = mapped.map((value) => value * 3);
+			const owner = mountedOwner();
+
+			mappedAgain.subscribe(owner, () => undefined);
+
+			expect(source.getOwner(), "the root source should inherit the descendant's implicit owner").toBe(owner);
+			expect(mapped.getOwner(), "the intermediate mapped state should inherit the descendant's implicit owner").toBe(owner);
+			expect(mappedAgain.getOwner(), "the subscribed descendant should keep the implicit owner").toBe(owner);
+
+			owner.remove();
+
+			expect(source.disposed, "disposing the implicit owner should dispose the root source state").toBe(true);
+			expect(mapped.disposed, "disposing the implicit owner should dispose the intermediate mapped state").toBe(true);
+			expect(mappedAgain.disposed, "disposing the implicit owner should dispose the descendant mapped state").toBe(true);
+		}
+		finally {
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies explicit ownership does not propagate back from mapped children. */
+	it("does not propagate explicit owners from mapped children", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+
+		try {
+			const source = State(3);
+			const owner = mountedOwner();
+			const mapped = source.map(owner, (value) => value * 2);
+
+			expect(mapped.getOwner(), "the mapped child should keep its explicit owner").toBe(owner);
+			expect(source.getOwner(), "explicit ownership should not propagate to the source state").toBeNull();
+
+			owner.remove();
 		}
 		finally {
 			orphanCheckSpy.restore();

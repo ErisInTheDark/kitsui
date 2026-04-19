@@ -1,4 +1,4 @@
-import { Owner, State, type StateOptions } from "../State";
+import { Owner, State, type CleanupFunction, type StateOptions } from "../State";
 
 type Nullish = null | undefined;
 
@@ -11,6 +11,10 @@ export interface RecomputableState<T> extends State<T> {
 	 */
 	recompute (): void;
 }
+
+type ImplicitOwnerLinkedState = State<unknown> & {
+	_registerImplicitOwnerDependent?: (dependent: State<unknown>) => CleanupFunction;
+};
 
 declare module "../State" {
 	interface StateExtensions<T> {
@@ -79,6 +83,7 @@ function createMappedState<T, TMapped> (
 		? State(owner, mapValue(source.value), graphOption as Parameters<typeof State>[2])
 		: State(mapValue(source.value), graphOption as StateOptions<TMapped>)
 	) as RecomputableState<TMapped>;
+	const releaseImplicitOwnerPropagation = ((mapped as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(source)) ?? (() => undefined);
 	const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
 		mapped.set(mapValue(value, oldValue));
 	});
@@ -87,6 +92,7 @@ function createMappedState<T, TMapped> (
 	});
 
 	mapped.onCleanup(() => {
+		releaseImplicitOwnerPropagation();
 		releaseSourceCleanup();
 		releaseSourceSubscription();
 	});

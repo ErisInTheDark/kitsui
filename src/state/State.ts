@@ -255,6 +255,7 @@ class StateClass<T> extends Owner {
 	private releaseOwner: CleanupFunction = noop;
 	private isImplicitOwner = false;
 	private requiresExplicitOwner = false;
+	private readonly implicitOwnerDependents = new Set<StateClass<unknown>>();
 	private orphanCheckId: ReturnType<typeof setTimeout> | null = null;
 	private currentValue: T;
 	/** @deprecated Use getEqualityFunction(this) */
@@ -510,6 +511,24 @@ class StateClass<T> extends Owner {
 		};
 	}
 
+	_registerImplicitOwnerDependent (dependent: State<unknown>): CleanupFunction {
+		const dependentState = dependent as StateClass<unknown>;
+
+		if (this.disposed || dependentState.disposed) {
+			return noop;
+		}
+
+		this.implicitOwnerDependents.add(dependentState);
+
+		if (this.isImplicitOwner && this.owner !== null) {
+			dependentState.setImplicitOwnerCandidate(this.owner);
+		}
+
+		return () => {
+			this.implicitOwnerDependents.delete(dependentState);
+		};
+	}
+
 	protected beforeDispose (): void {
 		this.clearOrphanCheck();
 		this.releaseOwner();
@@ -529,6 +548,7 @@ class StateClass<T> extends Owner {
 
 		getImmediateListeners(this).clear();
 		getQueuedListeners(this).clear();
+		this.implicitOwnerDependents.clear();
 	}
 
 	private clearOrphanCheck (): void {
@@ -585,6 +605,7 @@ class StateClass<T> extends Owner {
 			this.isImplicitOwner = false;
 			this.requiresExplicitOwner = true;
 			this.refreshOrphanCheck();
+			this.notifyImplicitOwnerDependents(candidate);
 			return;
 		}
 
@@ -594,6 +615,13 @@ class StateClass<T> extends Owner {
 			this.dispose();
 		});
 		this.clearOrphanCheck();
+		this.notifyImplicitOwnerDependents(candidate);
+	}
+
+	private notifyImplicitOwnerDependents (candidate: Owner): void {
+		for (const dependent of this.implicitOwnerDependents) {
+			dependent.setImplicitOwnerCandidate(candidate);
+		}
 	}
 
 	private ensureActive (): void {

@@ -13,5 +13,5 @@
     "isolatedModules": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "scripts/**/*.d.ts", "vitest.config.ts"],
-  "exclude": ["scripts/docs/client/**/*.ts", "scripts/docs/examples/**/*.ts"],
+  "exclude": ["scripts/docs/client/**/*.ts", "scripts/docs/examples/**/*.ts", "scripts/typecheck/**/*.ts"],
 }

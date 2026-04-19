@@ -8,6 +8,7 @@ const MONACO_BASE = "./vs";
 const MONACO_EDITOR_STYLESHEET = `${MONACO_BASE}/editor/editor.main.css`;
 const PLAYGROUND_MODEL_URI = "inmemory://playground/main.ts";
 const PLAYGROUND_TYPES_URI = "inmemory://kitsui-types/kitsui.d.ts";
+const EXAMPLE_QUERY_PARAM = "example";
 
 interface Disposable {
 	dispose (): void;
@@ -154,6 +155,7 @@ function createPreviewFrame (panel: HTMLElement): HTMLIFrameElement {
 	frame.style.display = "block";
 	frame.style.minHeight = "320px";
 	frame.style.width = "100%";
+	frame.style.height = "100%";
 	return panel.appendChild(frame);
 }
 
@@ -194,16 +196,36 @@ function mountPreviewFrame (runtime: EditorRuntime, js: string): void {
 			background: var(--bg-page, transparent);
 			color: var(--text-primary, inherit);
 			min-height: 100vh;
+			font-size: 13px;
+			line-height: 1.5;
+			white-space: pre-wrap;
 		}
 		#preview-root-shell {
 			background: var(--bg-page, transparent);
 			min-height: 100vh;
+			font-family: var(--font-sans);
 		}
 		pre {
 			color: #b42318;
-			font: 13px/1.5 'JetBrains Mono', 'Fira Code', monospace;
+			font: 13px/1.5 var(--font-mono);
 			margin: 0;
 			white-space: pre-wrap;
+		}
+		button {
+			background: #3b82f6;
+			border: none;
+			border-radius: 8px;
+			color: #fff;
+			font-size: 16px;
+			padding: 8px 18px;
+			width: fit-content;
+		}
+		button:hover {
+			background: #5b9aff;
+			cursor: pointer;
+		}
+		p {
+			margin-bottom: 16px;
 		}
 	</style>
 </head>
@@ -285,6 +307,31 @@ async function fetchExampleSource (name: string): Promise<string> {
 	const res = await fetch(`examples/${name}`);
 	if (!res.ok) throw new Error(`Failed to fetch example '${name}': ${res.status}`);
 	return res.text();
+}
+
+function getExampleFromSearchParams (manifest: ExamplesManifest): {
+	example: string;
+	requestedExample: string | null;
+} {
+	const requestedExample = new URL(window.location.href).searchParams.get(EXAMPLE_QUERY_PARAM);
+	return {
+		example: requestedExample && manifest.examples.includes(requestedExample)
+			? requestedExample
+			: manifest.examples[0] ?? "",
+		requestedExample,
+	};
+}
+
+function setExampleSearchParam (exampleName: string): void {
+	const url = new URL(window.location.href);
+
+	if (exampleName) {
+		url.searchParams.set(EXAMPLE_QUERY_PARAM, exampleName);
+	} else {
+		url.searchParams.delete(EXAMPLE_QUERY_PARAM);
+	}
+
+	history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 async function fetchKitsuiDeclaration (): Promise<string> {
@@ -376,10 +423,17 @@ export async function initEditor (): Promise<void> {
 			PLAYGROUND_TYPES_URI,
 		);
 
-		// Load the first example as the initial content
-		const initialExample = manifest.examples[0] ?? "";
+		const { example: initialExample, requestedExample } = getExampleFromSearchParams(manifest);
 		let initialSource = "";
 		if (initialExample) {
+			if (select) {
+				select.value = initialExample;
+			}
+
+			if (requestedExample && requestedExample !== initialExample) {
+				setExampleSearchParam(initialExample);
+			}
+
 			try {
 				initialSource = await fetchExampleSource(initialExample);
 			} catch {
@@ -463,6 +517,7 @@ export async function initEditor (): Promise<void> {
 		// Switch example via dropdown — AbortController prevents stale-fetch race on rapid switching
 		if (select) {
 			runtime.selectChangeListener = async () => {
+				setExampleSearchParam(select.value);
 				runtime.exampleFetchAbort?.abort();
 				runtime.exampleFetchAbort = new AbortController();
 				const controller = runtime.exampleFetchAbort;

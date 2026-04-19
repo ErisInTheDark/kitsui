@@ -7,17 +7,22 @@ declare global {
 	}
 }
 
+/** Lifecycle event map emitted by Marker instances. */
 export interface MarkerEventMap {
 	Mount: CustomEvent;
 	Dispose: CustomEvent;
 }
 
+/** Marker interface for module augmentation of instance-level Marker APIs. */
 export interface MarkerExtensions { }
 
+/** Marker interface for module augmentation of static Marker APIs. */
 export interface MarkerStaticExtensions { }
 
+/** Constructor type exposed by `Marker.extend()` for prototype augmentation. */
 export type ExtendableMarkerClass = MarkerConstructor & MarkerStaticExtensions;
 
+/** Definition object consumed by `Marker.builder()` to create marker factories. */
 export interface MarkerBuilderDefinition<A extends any[]> {
 	id (...args: A): string;
 	build (marker: Marker, ...args: A): CleanupFunction;

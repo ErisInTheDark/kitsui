@@ -3,6 +3,7 @@ import { AriaManipulator } from "./AriaManipulator";
 import { AttributeManipulator } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
 import { ClassManipulator } from "./ClassManipulator";
+import type { ComponentHTMLElementEventMap } from "./EventManipulator";
 import { EventManipulator } from "./EventManipulator";
 import { Marker } from "./Marker";
 import { TextManipulator } from "./TextManipulator";
@@ -79,17 +80,33 @@ export type ExtendableComponentClass = ComponentConstructor & ComponentStaticExt
 /** @group Component */
 type ComponentConstructor = {
 	/**
-	 * @param tagNameOrElement - Either an HTML tag name (creates new element) or an existing HTMLElement to wrap. Defaults to "span".
-	 * @returns A new component that wraps a DOM element.
-	 * @throws If wrapping an element that already has a component.
+	 * @returns A new component that wraps a <span> element.
 	 */
-	(tagNameOrElement: string | HTMLElement): Component;
+	(): Component<HTMLSpanElement>;
 	/**
-	 * @param tagNameOrElement - Either an HTML tag name (creates new element) or an existing HTMLElement to wrap. Defaults to "span".
+	 * @param tagName - An HTML tag name (creates new element).
+	 * @returns A new component that wraps a DOM element.
+	 */
+	<NAME extends keyof HTMLElementTagNameMap> (tagName: NAME): Component<HTMLElementTagNameMap[NAME]>;
+	/**
+	 * @param element - An existing HTMLElement to wrap.
 	 * @returns A new component that wraps a DOM element.
 	 * @throws If wrapping an element that already has a component.
 	 */
-	new(tagNameOrElement: string | HTMLElement): Component;
+	<ELEMENT extends HTMLElement> (element: ELEMENT): Component<ELEMENT>;
+	new (): Component<HTMLSpanElement>;
+	/**
+	 * @param tagName - An HTML tag name (creates new element).
+	 * @returns A new component that wraps a DOM element.
+	 * @throws If wrapping an element that already has a component.
+	 */
+	new<NAME extends keyof HTMLElementTagNameMap> (tagName: NAME): Component<HTMLElementTagNameMap[NAME]>;
+	/**
+	 * @param element - An existing HTMLElement to wrap.
+	 * @returns A new component that wraps a DOM element.
+	 * @throws If wrapping an element that already has a component.
+	 */
+	new <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
 	prototype: Component;
 	/**
 	 * Selects the first element in the document matching the CSS selector and wraps it in a component (or returns the existing).
@@ -126,7 +143,7 @@ const noop: CleanupFunction = () => {
 
 const orphanedComponentErrorMessage = "Components must be connected to the document or have a managed owner before the next tick.";
 const recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
-const elementComponents = new WeakMap<HTMLElement, WeakRef<ComponentClass>>();
+const elementComponents = new WeakMap<HTMLElement, WeakRef<ComponentClass<HTMLElement>>>();
 const componentOwnerResolvers = new Set<ComponentOwnerResolver>();
 let componentAccessorInstalled = false;
 
@@ -171,7 +188,7 @@ function createStorageElement (documentRef: Document): HTMLElement {
 	return documentRef.createElement("kitsui-storage");
 }
 
-function getLiveComponent (element: HTMLElement): ComponentClass | undefined {
+function getLiveComponent (element: HTMLElement): ComponentClass<HTMLElement> | undefined {
 	const component = elementComponents.get(element)?.deref();
 
 	if (!component) {
@@ -260,11 +277,11 @@ function disposeManagedNode (node: Node): void {
 }
 
 /** @group Component */
-class ComponentClass extends Owner {
+class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	/**
 	 * The underlying DOM element managed by this component.
 	 */
-	readonly element: HTMLElement;
+	readonly element: ELEMENT;
 	private explicitOwner: Owner | null = null;
 	private releaseExplicitOwner: CleanupFunction = noop;
 	private readonly structuralCleanups = new Set<CleanupFunction>();
@@ -276,10 +293,11 @@ class ComponentClass extends Owner {
 		super();
 		installNodeComponentAccessor();
 
-		this.element =
+		this.element =(
 			typeof tagNameOrElement === "string"
 				? document.createElement(tagNameOrElement)
-				: tagNameOrElement;
+				: tagNameOrElement
+		) as ELEMENT;
 
 		if (getLiveComponent(this.element)) {
 			throw new Error("This node already has a component. Use node.component to retrieve it.");
@@ -292,7 +310,7 @@ class ComponentClass extends Owner {
 	/**
 	 * Lazily creates and memoizes a ClassManipulator for adding/removing CSS classes.
 	 */
-	get class (): ClassManipulator {
+	get class (): ClassManipulator<this> {
 		this.ensureActive();
 
 		const manipulator = new ClassManipulator(this, this.element);
@@ -309,7 +327,7 @@ class ComponentClass extends Owner {
 	/**
 	 * Lazily creates and memoizes an AttributeManipulator for managing element attributes.
 	 */
-	get attribute (): AttributeManipulator {
+	get attribute (): AttributeManipulator<this> {
 		this.ensureActive();
 
 		const manipulator = new AttributeManipulator(this, this.element);
@@ -326,7 +344,7 @@ class ComponentClass extends Owner {
 	/**
 	 * Lazily creates and memoizes an AriaManipulator for managing ARIA attributes.
 	 */
-	get aria (): AriaManipulator {
+	get aria (): AriaManipulator<this> {
 		this.ensureActive();
 
 		const manipulator = new AriaManipulator(this, this.attribute);
@@ -343,7 +361,7 @@ class ComponentClass extends Owner {
 	/**
 	 * Lazily creates and memoizes a TextManipulator for managing text content.
 	 */
-	get text (): TextManipulator {
+	get text (): TextManipulator<this> {
 		this.ensureActive();
 
 		const manipulator = new TextManipulator(this, (value) => {
@@ -371,7 +389,7 @@ class ComponentClass extends Owner {
 	get event (): EventManipulator<this> {
 		this.ensureActive();
 
-		const manipulator = new EventManipulator<this, "component", HTMLElementEventMap>(this, this.element);
+		const manipulator = new EventManipulator<this, "component", ComponentHTMLElementEventMap>(this, this.element);
 		Object.defineProperty(this, "event", {
 			configurable: true,
 			enumerable: true,
@@ -1028,6 +1046,10 @@ class ComponentClass extends Owner {
 		let releaseChildCleanup: CleanupFunction = noop;
 		let placeholderWasInserted = false;
 
+		if (childComponent && childComponent.getOwner() === null) {
+			childComponent.setOwner(this);
+		}
+
 		const getSafeReferenceNode = (container: ParentNode): Node | null => {
 			const referenceNode = options.getReferenceNode();
 			if (!referenceNode) {
@@ -1295,10 +1317,10 @@ class ComponentClass extends Owner {
 	}
 }
 
-interface ComponentClass extends ComponentExtensions { }
+interface ComponentClass<ELEMENT extends HTMLElement> extends ComponentExtensions { }
 
 /** @group Component */
-export type Component = ComponentClass;
+export type Component<ELEMENT extends HTMLElement = HTMLElement> = ComponentClass<ELEMENT>;
 
 /**
  * Creates a new component that wraps or creates an HTMLElement.

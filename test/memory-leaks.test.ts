@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, type TestError } from "vitest";
+import { Component } from "../src";
 
 type LeakScenarioResult = {
 	finalized: string[];
@@ -459,7 +460,7 @@ async function leakProbe (
 			const stateOwner = hold(new TestOwner());
 			const state = hold(State(stateOwner, 0));
 			let component = track("use component", Component("div").appendTo(body));
-			const render = track("use render callback", (value: number, target: typeof component) => {
+			const render = track("use render callback", (value: number, target: Component) => {
 				target.text.set(String(value));
 			});
 

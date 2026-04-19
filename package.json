@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "description": "UI framework template built around mutable Component wrappers and explicit State transitions.",
   "main": "./dist/kitsui.umd.js",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/kitsui.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/kitsui.d.ts",
       "default": "./dist/kitsui.umd.js"
     }
   },
@@ -21,11 +21,12 @@
   },
   "scripts": {
     "build": "tsx ./scripts/build.ts",
+    "build:dts": "tsx ./scripts/dts.ts",
     "build:docs": "tsx ./scripts/docs.ts",
     "watch": "tsx ./scripts/watch.ts",
     "test": "vitest",
     "test:run": "vitest run",
-    "typecheck": "tsgo --noEmit -p tsconfig.json"
+    "typecheck": "tsx ./scripts/typecheck.ts"
   },
   "devDependencies": {
     "@typescript/native-preview": "7.0.0-dev.20260405.1",

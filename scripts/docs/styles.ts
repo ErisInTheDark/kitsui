@@ -1,7 +1,7 @@
 import { Style } from "../../src";
 
 export const monoFont = Style({
-	fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace",
+	fontFamily: "$fontMono",
 });
 
 export const containerCenter = Style({
@@ -19,7 +19,7 @@ export const pageLayoutStyle = Style.Class("docs-layout-page", {
 	background: "$bgPage",
 	color: "$textPrimary",
 	...stackColumn,
-	fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+	fontFamily: "$fontSans",
 	fontSize: "17px",
 	lineHeight: 1.6,
 	minHeight: "100vh",
@@ -68,6 +68,9 @@ export const homeSummaryClass = Style.Class("docs-home-summary", {
 
 export const theme = Style.Class("docs-theme", {
 	colorScheme: "light dark",
+
+	$fontSans: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+	$fontMono: "'JetBrains Mono', 'Fira Code', monospace",
 
 	// Background — in light mode: main content white, less important bgs get darker
 	$bgPage: "light-dark( #fafafa, #0d0d0d)",

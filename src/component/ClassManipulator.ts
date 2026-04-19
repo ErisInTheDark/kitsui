@@ -99,7 +99,7 @@ function resolveStyleSelection (selection: StyleSelection): Map<string, Style.Cl
  * // Multiple styles or iterables
  * component.class.add([primaryStyle, accentStyle]);
  */
-export class ClassManipulator {
+export class ClassManipulator<OWNER extends Component> {
 	private readonly styleDeterminers = new Map<string, DeterminerRecord>();
 
 	/**
@@ -107,7 +107,7 @@ export class ClassManipulator {
 	 * @param element The HTML element to manipulate.
 	 */
 	constructor (
-		private readonly owner: Component,
+		private readonly owner: OWNER,
 		private readonly element: HTMLElement,
 	) { }
 
@@ -131,7 +131,7 @@ export class ClassManipulator {
 	 * const selection = State(component, null);
 	 * component.class.add(selection);
 	 */
-	add (...classes: StyleInput[]): Component {
+	add (...classes: StyleInput[]): OWNER {
 		this.ensureActive();
 
 		for (const style of classes) {
@@ -150,7 +150,7 @@ export class ClassManipulator {
 	 * @returns The owning component for fluent chaining.
 	 * @throws If the owner is disposed.
 	 */
-	remove (...classes: StyleInput[]): Component {
+	remove (...classes: StyleInput[]): OWNER {
 		this.ensureActive();
 
 		for (const style of classes) {
@@ -176,7 +176,7 @@ export class ClassManipulator {
 	 * component.class.bind(isActive, activeStyle);
 	 * // activeStyle is present iff isActive.value is true
 	 */
-	bind (state: State<boolean>, ...classes: StyleInput[]): Component {
+	bind (state: State<boolean>, ...classes: StyleInput[]): OWNER {
 		this.ensureActive();
 
 		for (const style of classes.filter((value): value is Exclude<StyleInput, Falsy> => Boolean(value))) {
@@ -222,7 +222,7 @@ export class ClassManipulator {
 	 * component.class.addFrom(externalOwner, externalStyle);
 	 * // externalStyle is removed when externalOwner is cleaned up
 	 */
-	addFrom (owner: Owner, ...classes: StyleInput[]): Component {
+	addFrom (owner: Owner, ...classes: StyleInput[]): OWNER {
 		this.ensureActive();
 
 		for (const style of classes.filter((value): value is Exclude<StyleInput, Falsy> => Boolean(value))) {

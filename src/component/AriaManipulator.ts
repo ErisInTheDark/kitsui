@@ -251,17 +251,17 @@ function toReferenceValueInput (owner: Component, value: AriaReferenceInput): At
  * Methods return the owning Component to enable fluent chaining.
  * Internally uses an AttributeManipulator to apply changes.
  */
-export class AriaManipulator {
+export class AriaManipulator<OWNER extends Component> {
 	constructor (
-		private readonly owner: Component,
-		private readonly attribute: AttributeManipulator,
+		private readonly owner: OWNER,
+		private readonly attribute: AttributeManipulator<OWNER>,
 	) { }
 
 	/**
 	 * Set the ARIA role.
 	 * @param value The role value or reactive State.
 	 */
-	role (value: AriaRoleInput): Component {
+	role (value: AriaRoleInput): OWNER {
 		return this.set("role", value);
 	}
 
@@ -269,7 +269,7 @@ export class AriaManipulator {
 	 * Set the ARIA label.
 	 * @param value The label text or reactive State.
 	 */
-	label (value: AriaTextInput): Component {
+	label (value: AriaTextInput): OWNER {
 		return this.set("aria-label", value);
 	}
 
@@ -277,7 +277,7 @@ export class AriaManipulator {
 	 * Set the ARIA description.
 	 * @param value The description text or reactive State.
 	 */
-	description (value: AriaTextInput): Component {
+	description (value: AriaTextInput): OWNER {
 		return this.set("aria-description", value);
 	}
 
@@ -285,7 +285,7 @@ export class AriaManipulator {
 	 * Set the ARIA role description.
 	 * @param value The role description text or reactive State.
 	 */
-	roleDescription (value: AriaTextInput): Component {
+	roleDescription (value: AriaTextInput): OWNER {
 		return this.set("aria-roledescription", value);
 	}
 
@@ -293,7 +293,7 @@ export class AriaManipulator {
 	 * Set aria-labelledby: elements that label this element.
 	 * @param value Element reference(s) or reactive State.
 	 */
-	labelledBy (value: AriaReferenceInput): Component {
+	labelledBy (value: AriaReferenceInput): OWNER {
 		return this.set("aria-labelledby", toReferenceValueInput(this.owner, value));
 	}
 
@@ -301,7 +301,7 @@ export class AriaManipulator {
 	 * Set aria-describedby: elements that describe this element.
 	 * @param value Element reference(s) or reactive State.
 	 */
-	describedBy (value: AriaReferenceInput): Component {
+	describedBy (value: AriaReferenceInput): OWNER {
 		return this.set("aria-describedby", toReferenceValueInput(this.owner, value));
 	}
 
@@ -309,7 +309,7 @@ export class AriaManipulator {
 	 * Set aria-controls: elements controlled by this element.
 	 * @param value Element reference(s) or reactive State.
 	 */
-	controls (value: AriaReferenceInput): Component {
+	controls (value: AriaReferenceInput): OWNER {
 		return this.set("aria-controls", toReferenceValueInput(this.owner, value));
 	}
 
@@ -317,7 +317,7 @@ export class AriaManipulator {
 	 * Set aria-details: elements that provide details for this element.
 	 * @param value Element reference(s) or reactive State.
 	 */
-	details (value: AriaReferenceInput): Component {
+	details (value: AriaReferenceInput): OWNER {
 		return this.set("aria-details", toReferenceValueInput(this.owner, value));
 	}
 
@@ -325,7 +325,7 @@ export class AriaManipulator {
 	 * Set aria-owns: elements owned by this element.
 	 * @param value Element reference(s) or reactive State.
 	 */
-	owns (value: AriaReferenceInput): Component {
+	owns (value: AriaReferenceInput): OWNER {
 		return this.set("aria-owns", toReferenceValueInput(this.owner, value));
 	}
 
@@ -333,7 +333,7 @@ export class AriaManipulator {
 	 * Set aria-flowto: elements that follow this element.
 	 * @param value Element reference(s) or reactive State.
 	 */
-	flowTo (value: AriaReferenceInput): Component {
+	flowTo (value: AriaReferenceInput): OWNER {
 		return this.set("aria-flowto", toReferenceValueInput(this.owner, value));
 	}
 
@@ -341,7 +341,7 @@ export class AriaManipulator {
 	 * Set aria-hidden: whether this element is hidden from assistive technology.
 	 * @param value The boolean value or reactive State.
 	 */
-	hidden (value: AriaBooleanInput): Component {
+	hidden (value: AriaBooleanInput): OWNER {
 		return this.set("aria-hidden", value);
 	}
 
@@ -349,7 +349,7 @@ export class AriaManipulator {
 	 * Set aria-disabled: whether this element is disabled.
 	 * @param value The boolean value or reactive State.
 	 */
-	disabled (value: AriaBooleanInput): Component {
+	disabled (value: AriaBooleanInput): OWNER {
 		return this.set("aria-disabled", value);
 	}
 
@@ -357,7 +357,7 @@ export class AriaManipulator {
 	 * Set aria-expanded: whether this element is expanded.
 	 * @param value The boolean value or reactive State.
 	 */
-	expanded (value: AriaBooleanInput): Component {
+	expanded (value: AriaBooleanInput): OWNER {
 		return this.set("aria-expanded", value);
 	}
 
@@ -365,7 +365,7 @@ export class AriaManipulator {
 	 * Set aria-busy: whether this element is busy/loading.
 	 * @param value The boolean value or reactive State.
 	 */
-	busy (value: AriaBooleanInput): Component {
+	busy (value: AriaBooleanInput): OWNER {
 		return this.set("aria-busy", value);
 	}
 
@@ -373,7 +373,7 @@ export class AriaManipulator {
 	 * Set aria-selected: whether this element is selected.
 	 * @param value The boolean value or reactive State.
 	 */
-	selected (value: AriaBooleanInput): Component {
+	selected (value: AriaBooleanInput): OWNER {
 		return this.set("aria-selected", value);
 	}
 
@@ -381,7 +381,7 @@ export class AriaManipulator {
 	 * Set aria-checked: whether this element is checked (true, false, or "mixed").
 	 * @param value The boolean/mixed value or reactive State.
 	 */
-	checked (value: AriaBooleanMixedInput): Component {
+	checked (value: AriaBooleanMixedInput): OWNER {
 		return this.set("aria-checked", value);
 	}
 
@@ -389,7 +389,7 @@ export class AriaManipulator {
 	 * Set aria-pressed: whether this element is pressed (true, false, or "mixed").
 	 * @param value The boolean/mixed value or reactive State.
 	 */
-	pressed (value: AriaBooleanMixedInput): Component {
+	pressed (value: AriaBooleanMixedInput): OWNER {
 		return this.set("aria-pressed", value);
 	}
 
@@ -397,7 +397,7 @@ export class AriaManipulator {
 	 * Set aria-current: mark this element or one of its descendants as the current page/step/location.
 	 * @param value The current value (true, false, or a location type) or reactive State.
 	 */
-	current (value: AriaCurrentInput): Component {
+	current (value: AriaCurrentInput): OWNER {
 		return this.set("aria-current", value);
 	}
 
@@ -405,11 +405,11 @@ export class AriaManipulator {
 	 * Set aria-live: announce dynamic content updates (off, polite, or assertive).
 	 * @param value The politeness level or reactive State.
 	 */
-	live (value: AriaLiveInput): Component {
+	live (value: AriaLiveInput): OWNER {
 		return this.set("aria-live", value);
 	}
 
-	private set (name: string, value: AttributeValueInput): Component {
+	private set (name: string, value: AttributeValueInput): OWNER {
 		this.attribute.set(name, value);
 		return this.owner;
 	}

@@ -23,21 +23,35 @@ type OwnedEventOnProxyFor<THost extends Owner, THostKey extends string, TEventMa
 	[KEventName in keyof TEventMap & string]: (listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
 };
 
+/** A DOM event augmented with the owning Component on `.component`. */
 export type ComponentEvent<TEvent extends Event, THost extends Component = Component> = HostedEvent<TEvent, THost, "component">;
 
+/** A component event listener that receives the owning Component on the event object. */
 export type ComponentEventListener<THost extends Component, TEvent extends Event> = EventListenerFor<THost, "component", TEvent>;
 
+/** A direct or reactive event-listener input accepted by component event APIs. */
 export type EventListenerInput<THost extends Component, TEvent extends Event> = EventListenerInputFor<THost, "component", TEvent>;
+
+// Keep this aligned with the global Component.ts augmentation so the bundled public d.ts retains Mount/Dispose even after declare global blocks are stripped.
+/** Event map for Component hosts, including lifecycle events emitted by kitsui. */
+export interface ComponentHTMLElementEventMap extends HTMLElementEventMap {
+	Mount: CustomEvent;
+	Dispose: CustomEvent;
+}
 
 type ListenerKey = object;
 type EventListenerValue<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | null | undefined;
 
-export type EventOnProxy<THost extends Component> = EventOnProxyFor<THost, "component", HTMLElementEventMap>;
+/** Proxy of owner-bound event registration methods keyed by event name. */
+export type EventOnProxy<THost extends Component> = EventOnProxyFor<THost, "component", ComponentHTMLElementEventMap>;
 
-export type EventOffProxy<THost extends Component> = EventOffProxyFor<THost, "component", HTMLElementEventMap>;
+/** Proxy of event-removal methods keyed by event name. */
+export type EventOffProxy<THost extends Component> = EventOffProxyFor<THost, "component", ComponentHTMLElementEventMap>;
 
-export type OwnedEventOnProxy<THost extends Component> = OwnedEventOnProxyFor<THost, "component", HTMLElementEventMap>;
+/** Proxy of event registration methods that implicitly use the host Component as the owner. */
+export type OwnedEventOnProxy<THost extends Component> = OwnedEventOnProxyFor<THost, "component", ComponentHTMLElementEventMap>;
 
+/** Fluent interface exposed by `event.owned` for self-owned event listeners. */
 export interface OwnedEventManipulator<THost extends Component> {
 	readonly on: OwnedEventOnProxy<THost>;
 	readonly off: EventOffProxy<THost>;
@@ -94,7 +108,12 @@ function defineHostedEvent<THost extends Owner, THostKey extends string, TEvent 
 	return event as HostedEvent<TEvent, THost, THostKey>;
 }
 
-export class EventManipulator<THost extends Owner = Component, THostKey extends string = "component", TEventMap = HTMLElementEventMap> {
+/**
+ * Manages event listeners for a host owner with automatic cleanup and reactive listener support.
+ * 
+ * For Components, this powers the fluent `component.event.on.*`, `.off.*`, and `.owned.on.*` APIs.
+ */
+export class EventManipulator<THost extends Owner = Component, THostKey extends string = "component", TEventMap = ComponentHTMLElementEventMap> {
 	readonly on: EventOnProxyFor<THost, THostKey, TEventMap>;
 	readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
 	readonly owned: {

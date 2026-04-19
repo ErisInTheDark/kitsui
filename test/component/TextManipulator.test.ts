@@ -6,7 +6,7 @@ import { State } from "../../src/state/State";
 
 placeExtension();
 
-function mountedComponent (tagName: string = "div"): Component {
+function mountedComponent<NAME extends keyof HTMLElementTagNameMap = "div">(tagName: NAME = "div" as NAME): Component<HTMLElementTagNameMap[NAME]> {
 	return Component(tagName).appendTo(document.body);
 }
 

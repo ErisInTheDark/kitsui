@@ -39,6 +39,31 @@ function installMatchMediaStub (): void {
 	});
 }
 
+async function flushPromises (): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
+}
+
+function installEditorFetchStub (examples: Record<string, string>): void {
+	vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+		const url = String(input);
+		if (url.endsWith("examples/examples.json")) {
+			return createFetchResponse(JSON.stringify({ examples: Object.keys(examples) }));
+		}
+
+		const exampleName = Object.keys(examples).find((name) => url.endsWith(`examples/${name}`));
+		if (exampleName) {
+			return createFetchResponse(examples[exampleName]);
+		}
+
+		if (url.endsWith("kitsui.d.ts")) {
+			return createFetchResponse('declare module "kitsui" {}');
+		}
+
+		throw new Error(`Unexpected fetch: ${url}`);
+	}));
+}
+
 async function importEditorModule () {
 	vi.resetModules();
 	return import("../scripts/docs/client/editor");
@@ -108,6 +133,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	document.head.innerHTML = "";
 	document.body.innerHTML = "";
+	history.replaceState(null, "", "/docs/playground.html");
 	Reflect.deleteProperty(window, "require");
 	Reflect.deleteProperty(window, "matchMedia");
 	Reflect.deleteProperty(globalThis, "fetch");
@@ -197,22 +223,9 @@ describe("docs editor preview import rewriting", () => {
 			{ config: vi.fn() },
 		);
 
-		vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url.endsWith("examples/examples.json")) {
-				return createFetchResponse(JSON.stringify({ examples: ["hello-world.ts"] }));
-			}
-
-			if (url.endsWith("examples/hello-world.ts")) {
-				return createFetchResponse("export default function () { return document.createElement('div'); }");
-			}
-
-			if (url.endsWith("kitsui.d.ts")) {
-				return createFetchResponse('declare module "kitsui" {}');
-			}
-
-			throw new Error(`Unexpected fetch: ${url}`);
-		}));
+		installEditorFetchStub({
+			"hello-world.ts": "export default function () { return document.createElement('div'); }",
+		});
 
 		await expect(initEditor()).resolves.toBeUndefined();
 		expect(monaco.editor.createModel).toHaveBeenCalledTimes(1);
@@ -233,22 +246,9 @@ describe("docs editor preview import rewriting", () => {
 		loader.id = "monaco-loader";
 		document.head.appendChild(loader);
 
-		vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-			const url = String(input);
-			if (url.endsWith("examples/examples.json")) {
-				return createFetchResponse(JSON.stringify({ examples: ["hello-world.ts"] }));
-			}
-
-			if (url.endsWith("examples/hello-world.ts")) {
-				return createFetchResponse("export default function () { return document.createElement('div'); }");
-			}
-
-			if (url.endsWith("kitsui.d.ts")) {
-				return createFetchResponse('declare module "kitsui" {}');
-			}
-
-			throw new Error(`Unexpected fetch: ${url}`);
-		}));
+		installEditorFetchStub({
+			"hello-world.ts": "export default function () { return document.createElement('div'); }",
+		});
 
 		const initPromise = initEditor();
 		runPageCleanup();
@@ -263,5 +263,104 @@ describe("docs editor preview import rewriting", () => {
 
 		await expect(initPromise).resolves.toBeUndefined();
 		expect(monaco.editor.createModel).not.toHaveBeenCalled();
+	});
+
+	it("restores the selected example from the URL search params on init", async () => {
+		history.replaceState(null, "", "/docs/playground.html?example=second.ts");
+		const { initEditor } = await importEditorModule();
+		document.body.innerHTML = makeEditorHtml();
+		installMatchMediaStub();
+
+		const { models, monaco } = createFakeMonaco();
+		const loader = document.createElement("script");
+		loader.id = "monaco-loader";
+		document.head.appendChild(loader);
+
+		(window as any).require = Object.assign(
+			(_dependencies: string[], onLoad: (monacoModule: unknown) => void) => {
+				onLoad(monaco);
+			},
+			{ config: vi.fn() },
+		);
+
+		installEditorFetchStub({
+			"first.ts": "export default function first () {}",
+			"second.ts": "export default function second () {}",
+		});
+
+		await expect(initEditor()).resolves.toBeUndefined();
+
+		const select = document.getElementById("docs-editor-example-select") as HTMLSelectElement;
+		expect(select.value).toBe("second.ts");
+		expect(models.get("inmemory://playground/main.ts")?.value).toContain("function second");
+	});
+
+	it("replaces an invalid example param with the loaded fallback on init", async () => {
+		history.replaceState(null, "", "/docs/playground.html?debug=true&example=missing.ts#preview");
+		const { initEditor } = await importEditorModule();
+		document.body.innerHTML = makeEditorHtml();
+		installMatchMediaStub();
+
+		const { models, monaco } = createFakeMonaco();
+		const loader = document.createElement("script");
+		loader.id = "monaco-loader";
+		document.head.appendChild(loader);
+
+		(window as any).require = Object.assign(
+			(_dependencies: string[], onLoad: (monacoModule: unknown) => void) => {
+				onLoad(monaco);
+			},
+			{ config: vi.fn() },
+		);
+
+		installEditorFetchStub({
+			"first.ts": "export default function first () {}",
+			"second.ts": "export default function second () {}",
+		});
+
+		await expect(initEditor()).resolves.toBeUndefined();
+
+		const url = new URL(window.location.href);
+		expect(url.searchParams.get("debug")).toBe("true");
+		expect(url.searchParams.get("example")).toBe("first.ts");
+		expect(url.hash).toBe("#preview");
+		expect(models.get("inmemory://playground/main.ts")?.value).toContain("function first");
+	});
+
+	it("updates the URL search params when switching examples", async () => {
+		history.replaceState(null, "", "/docs/playground.html?debug=true#preview");
+		const { initEditor } = await importEditorModule();
+		document.body.innerHTML = makeEditorHtml();
+		installMatchMediaStub();
+
+		const { models, monaco } = createFakeMonaco();
+		const loader = document.createElement("script");
+		loader.id = "monaco-loader";
+		document.head.appendChild(loader);
+
+		(window as any).require = Object.assign(
+			(_dependencies: string[], onLoad: (monacoModule: unknown) => void) => {
+				onLoad(monaco);
+			},
+			{ config: vi.fn() },
+		);
+
+		installEditorFetchStub({
+			"first.ts": "export default function first () {}",
+			"second.ts": "export default function second () {}",
+		});
+
+		await expect(initEditor()).resolves.toBeUndefined();
+
+		const select = document.getElementById("docs-editor-example-select") as HTMLSelectElement;
+		select.value = "second.ts";
+		select.dispatchEvent(new Event("change"));
+		await flushPromises();
+
+		const url = new URL(window.location.href);
+		expect(url.searchParams.get("debug")).toBe("true");
+		expect(url.searchParams.get("example")).toBe("second.ts");
+		expect(url.hash).toBe("#preview");
+		expect(models.get("inmemory://playground/main.ts")?.value).toContain("function second");
 	});
 });

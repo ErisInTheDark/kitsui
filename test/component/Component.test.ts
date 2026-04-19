@@ -14,7 +14,7 @@ declare module "../../src/component/Component" {
 
 placeExtension();
 
-function mountedComponent (tagName: string = "div", configure?: (component: Component) => void): Component {
+function mountedComponent<NAME extends keyof HTMLElementTagNameMap = "div">(tagName: NAME = "div" as NAME, configure?: (component: Component<HTMLElementTagNameMap[NAME]>) => void): Component<HTMLElementTagNameMap[NAME]> {
 	const component = Component(tagName);
 	configure?.(component);
 	return component.appendTo(document.body);
@@ -33,6 +33,27 @@ async function flushEffects (): Promise<void> {
 	}
 
 	await Promise.resolve();
+}
+
+function captureTimeoutCallbacks (): {
+	callbacks: Array<() => void>;
+	restore: () => void;
+} {
+	const callbacks: Array<() => void> = [];
+	const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler) => {
+		if (typeof handler === "function") {
+			callbacks.push(handler as unknown as () => void);
+		}
+
+		return 0 as unknown as ReturnType<typeof setTimeout>;
+	}) as unknown as typeof setTimeout);
+
+	return {
+		callbacks,
+		restore (): void {
+			setTimeoutSpy.mockRestore();
+		},
+	};
 }
 
 function nonCommentNodes (element: HTMLElement): Node[] {
@@ -435,6 +456,103 @@ describe("Component", () => {
 
 		expect(host.element.childNodes[1]).toBeInstanceOf(Comment);
 		expect(toggled.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+	});
+
+	it("keeps hidden appendWhen children managed until their host is mounted", () => {
+		const timeoutSpy = captureTimeoutCallbacks();
+
+		try {
+			const root = Component("div");
+			const visible = State(root, false);
+			const host = Component("section");
+			const child = Component("p").text.set("child");
+
+			host.appendWhen(visible, child);
+			root.append(host);
+			document.body.append(root.element);
+
+			expect(child.getOwner(), "hidden conditional children should be managed by their host while parked").toBe(host);
+			expect(() => {
+				for (const callback of timeoutSpy.callbacks) {
+					callback();
+				}
+			}, "mounting the host before the next tick should prevent orphan errors for hidden conditional children").not.toThrow();
+
+			root.remove();
+		}
+		finally {
+			timeoutSpy.restore();
+		}
+	});
+
+	it("preserves explicit owners for hidden appendWhen children", () => {
+		const host = mountedComponent("div");
+		const retentionOwner = mountedComponent("section");
+		const visible = State(host, false);
+		const child = Component("span").text.set("child").setOwner(retentionOwner);
+
+		host.appendWhen(visible, child);
+
+		expect(child.getOwner(), "conditionally parking a child should not override an existing explicit owner").toBe(retentionOwner);
+
+		host.remove();
+		retentionOwner.remove();
+	});
+
+	it("preserves explicit owners for hidden conditional children across visibility toggles", async () => {
+		const host = mountedComponent("div");
+		const retentionOwner = mountedComponent("section");
+		const visible = State(host, false);
+		const anchor = Component("span").text.set("anchor");
+		const trailing = Component("span").text.set("trailing");
+		const appended = Component("span").text.set("appended").setOwner(retentionOwner);
+		const prepended = Component("span").text.set("prepended").setOwner(retentionOwner);
+		const inserted = Component("span").text.set("inserted").setOwner(retentionOwner);
+
+		host.append(anchor, trailing);
+		host.appendWhen(visible, appended);
+		host.prependWhen(visible, prepended);
+		anchor.insertWhen(visible, "after", inserted);
+
+		expect(appended.getOwner()).toBe(retentionOwner);
+		expect(prepended.getOwner()).toBe(retentionOwner);
+		expect(inserted.getOwner()).toBe(retentionOwner);
+
+		visible.set(true);
+		await flushEffects();
+
+		expect(nonCommentNodes(host.element)).toEqual([
+			prepended.element,
+			anchor.element,
+			inserted.element,
+			trailing.element,
+			appended.element,
+		]);
+		expect(appended.getOwner()).toBe(retentionOwner);
+		expect(prepended.getOwner()).toBe(retentionOwner);
+		expect(inserted.getOwner()).toBe(retentionOwner);
+
+		visible.set(false);
+		await flushEffects();
+
+		expect(appended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(prepended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(inserted.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(appended.getOwner()).toBe(retentionOwner);
+		expect(prepended.getOwner()).toBe(retentionOwner);
+		expect(inserted.getOwner()).toBe(retentionOwner);
+
+		host.remove();
+
+		expect(appended.disposed).toBe(false);
+		expect(prepended.disposed).toBe(false);
+		expect(inserted.disposed).toBe(false);
+
+		retentionOwner.remove();
+
+		expect(appended.disposed).toBe(true);
+		expect(prepended.disposed).toBe(true);
+		expect(inserted.disposed).toBe(true);
 	});
 
 	it("returns this from appendWhen and disposes parked children when host is removed", async () => {

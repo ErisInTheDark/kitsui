@@ -135,7 +135,7 @@ function toAttributeValueSource (value: AttributeValueInput): State<AttributeVal
  * Attributes can be added, set, removed, and bound to reactive state.
  * Values are kept in sync with their sources and invalid configurations are rejected.
  */
-export class AttributeManipulator {
+export class AttributeManipulator<OWNER extends Component> {
 	private readonly attributeDeterminers = new Map<string, AttributeDeterminerRecord>();
 
 	/**
@@ -143,7 +143,7 @@ export class AttributeManipulator {
 	 * @param element The DOM element whose attributes are managed.
 	 */
 	constructor (
-		private readonly owner: Component,
+		private readonly owner: OWNER,
 		private readonly element: HTMLElement,
 	) { }
 
@@ -152,7 +152,7 @@ export class AttributeManipulator {
 	 * @param attributes Attribute names to add.
 	 * @returns The owning component for fluent chaining.
 	 */
-	add (...attributes: AttributeNameInput[]): Component {
+	add (...attributes: AttributeNameInput[]): OWNER {
 		this.ensureActive();
 
 		for (const attribute of attributes) {
@@ -169,15 +169,15 @@ export class AttributeManipulator {
 	 * @param value - Attribute value or source.
 	 * @returns The owning component for fluent chaining.
 	 */
-	set (name: AttributeNameInput, value: AttributeValueInput): Component;
+	set (name: AttributeNameInput, value: AttributeValueInput): OWNER;
 	/**
 	 * Sets attribute values using entries with name and value pairs.
 	 * Values or names can be subscribable sources that update automatically.
 	 * @param entries - Objects with `name` and `value` properties.
 	 * @returns The owning component for fluent chaining.
 	 */
-	set (...entries: AttributeEntry[]): Component;
-	set (...argumentsList: [AttributeNameInput, AttributeValueInput] | AttributeEntry[]): Component {
+	set (...entries: AttributeEntry[]): OWNER;
+	set (...argumentsList: [AttributeNameInput, AttributeValueInput] | AttributeEntry[]): OWNER {
 		this.ensureActive();
 
 		const entries = this.resolveSetEntries(argumentsList);
@@ -194,7 +194,7 @@ export class AttributeManipulator {
 	 * @param attributes Attribute names to remove.
 	 * @returns The owning component for fluent chaining.
 	 */
-	remove (...attributes: AttributeNameInput[]): Component {
+	remove (...attributes: AttributeNameInput[]): OWNER {
 		this.ensureActive();
 
 		for (const attribute of attributes) {
@@ -210,7 +210,7 @@ export class AttributeManipulator {
 	 * @param attributes Attribute names to bind.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: State<boolean>, ...attributes: AttributeNameInput[]): Component;
+	bind (state: State<boolean>, ...attributes: AttributeNameInput[]): OWNER;
 	/**
 	 * Binds attribute entries to a boolean state, setting/removing them based on state value.
 	 * When state is true, attributes are set; when false, they are removed.
@@ -218,11 +218,11 @@ export class AttributeManipulator {
 	 * @param entries Objects with `name` and `value` properties.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: State<boolean>, ...entries: AttributeEntry[]): Component;
+	bind (state: State<boolean>, ...entries: AttributeEntry[]): OWNER;
 	bind (
 		state: State<boolean>,
 		...inputs: Array<AttributeNameInput | AttributeEntry>
-	): Component {
+	): OWNER {
 		this.ensureActive();
 
 		if (inputs.some(isAttributeEntry)) {
