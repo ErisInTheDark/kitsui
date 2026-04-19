@@ -206,6 +206,7 @@ var __kitsui_factory__ = (() => {
       __publicField(this, "releaseOwner", noop);
       __publicField(this, "isImplicitOwner", false);
       __publicField(this, "requiresExplicitOwner", false);
+      __publicField(this, "implicitOwnerDependents", /* @__PURE__ */ new Set());
       __publicField(this, "orphanCheckId", null);
       __publicField(this, "currentValue");
       /** @deprecated Use getEqualityFunction(this) */
@@ -422,6 +423,19 @@ var __kitsui_factory__ = (() => {
         unsubscribe();
       };
     }
+    _registerImplicitOwnerDependent(dependent) {
+      const dependentState = dependent;
+      if (this.disposed || dependentState.disposed) {
+        return noop;
+      }
+      this.implicitOwnerDependents.add(dependentState);
+      if (this.isImplicitOwner && this.owner !== null) {
+        dependentState.setImplicitOwnerCandidate(this.owner);
+      }
+      return () => {
+        this.implicitOwnerDependents.delete(dependentState);
+      };
+    }
     beforeDispose() {
       this.clearOrphanCheck();
       this.releaseOwner();
@@ -438,6 +452,7 @@ var __kitsui_factory__ = (() => {
       }
       getImmediateListeners(this).clear();
       getQueuedListeners(this).clear();
+      this.implicitOwnerDependents.clear();
     }
     clearOrphanCheck() {
       if (this.orphanCheckId === null) {
@@ -482,6 +497,7 @@ var __kitsui_factory__ = (() => {
         this.isImplicitOwner = false;
         this.requiresExplicitOwner = true;
         this.refreshOrphanCheck();
+        this.notifyImplicitOwnerDependents(candidate);
         return;
       }
       this.owner = candidate;
@@ -490,6 +506,12 @@ var __kitsui_factory__ = (() => {
         this.dispose();
       });
       this.clearOrphanCheck();
+      this.notifyImplicitOwnerDependents(candidate);
+    }
+    notifyImplicitOwnerDependents(candidate) {
+      for (const dependent of this.implicitOwnerDependents) {
+        dependent.setImplicitOwnerCandidate(candidate);
+      }
     }
     ensureActive() {
       if (this.disposed) {
@@ -2990,6 +3012,9 @@ ${innerRules}
       let active = true;
       let releaseChildCleanup = noop7;
       let placeholderWasInserted = false;
+      if (childComponent && childComponent.getOwner() === null) {
+        childComponent.setOwner(this);
+      }
       const getSafeReferenceNode = (container) => {
         const referenceNode = options.getReferenceNode();
         if (!referenceNode) {
@@ -3677,6 +3702,7 @@ ${innerRules}
       graph: source.getGraph()
     };
     const mapped = owner ? State(owner, mapValue(source.value), graphOption) : State(mapValue(source.value), graphOption);
+    const releaseImplicitOwnerPropagation = mapped._registerImplicitOwnerDependent?.(source) ?? (() => void 0);
     const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
       mapped.set(mapValue(value, oldValue));
     });
@@ -3684,6 +3710,7 @@ ${innerRules}
       mapped.dispose();
     });
     mapped.onCleanup(() => {
+      releaseImplicitOwnerPropagation();
       releaseSourceCleanup();
       releaseSourceSubscription();
     });

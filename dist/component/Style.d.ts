@@ -37,7 +37,9 @@ declare class StyleClass {
     constructor(className: string, definition: StyleDefinition, cssText: string, afterClassNames: readonly string[]);
     toString(): string;
 }
+/** @hidden */
 export declare function mountStylesheet(): void;
+/** @hidden */
 export declare function unmountStylesheet(): void;
 /**
  * Creates a reusable style definition fragment that can be spread into other definitions.

@@ -34,7 +34,7 @@ export interface AttributeEntry {
  * Attributes can be added, set, removed, and bound to reactive state.
  * Values are kept in sync with their sources and invalid configurations are rejected.
  */
-export declare class AttributeManipulator {
+export declare class AttributeManipulator<OWNER extends Component> {
     private readonly owner;
     private readonly element;
     private readonly attributeDeterminers;
@@ -42,13 +42,13 @@ export declare class AttributeManipulator {
      * @param owner The component owner managing this manipulator's cleanup.
      * @param element The DOM element whose attributes are managed.
      */
-    constructor(owner: Component, element: HTMLElement);
+    constructor(owner: OWNER, element: HTMLElement);
     /**
      * Adds valueless attributes to the element. Multiple names can be passed as separate arguments or as an iterable.
      * @param attributes Attribute names to add.
      * @returns The owning component for fluent chaining.
      */
-    add(...attributes: AttributeNameInput[]): Component;
+    add(...attributes: AttributeNameInput[]): OWNER;
     /**
      * Sets attribute values using either a (name, value) pair or entries with name and value.
      * Values or names can be subscribable sources that update automatically.
@@ -56,27 +56,27 @@ export declare class AttributeManipulator {
      * @param value - Attribute value or source.
      * @returns The owning component for fluent chaining.
      */
-    set(name: AttributeNameInput, value: AttributeValueInput): Component;
+    set(name: AttributeNameInput, value: AttributeValueInput): OWNER;
     /**
      * Sets attribute values using entries with name and value pairs.
      * Values or names can be subscribable sources that update automatically.
      * @param entries - Objects with `name` and `value` properties.
      * @returns The owning component for fluent chaining.
      */
-    set(...entries: AttributeEntry[]): Component;
+    set(...entries: AttributeEntry[]): OWNER;
     /**
      * Removes attributes from the element. Multiple names can be passed as separate arguments or as an iterable.
      * @param attributes Attribute names to remove.
      * @returns The owning component for fluent chaining.
      */
-    remove(...attributes: AttributeNameInput[]): Component;
+    remove(...attributes: AttributeNameInput[]): OWNER;
     /**
      * Binds valueless attributes to a boolean state, adding/removing them based on state value.
      * @param state A subscribable boolean state.
      * @param attributes Attribute names to bind.
      * @returns The owning component for fluent chaining.
      */
-    bind(state: State<boolean>, ...attributes: AttributeNameInput[]): Component;
+    bind(state: State<boolean>, ...attributes: AttributeNameInput[]): OWNER;
     /**
      * Binds attribute entries to a boolean state, setting/removing them based on state value.
      * When state is true, attributes are set; when false, they are removed.
@@ -84,7 +84,7 @@ export declare class AttributeManipulator {
      * @param entries Objects with `name` and `value` properties.
      * @returns The owning component for fluent chaining.
      */
-    bind(state: State<boolean>, ...entries: AttributeEntry[]): Component;
+    bind(state: State<boolean>, ...entries: AttributeEntry[]): OWNER;
     private ensureActive;
     private resolveSetEntries;
     private installAttributePresence;

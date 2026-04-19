@@ -16,10 +16,6 @@ declare module "../State" {
          * The grouped state subscribes to all input states and coalesces source updates
          * into a single next-tick grouped update per tick.
          *
-         * Supports both call and constructor forms:
-         * - `State.Group(owner, states)`
-         * - `new State.Group(owner, states)`
-         *
          * @param owner The owner that manages the grouped state's lifecycle.
          * @param states A record of source states to group.
          * @returns A state whose value is an object with the current value of each source state.

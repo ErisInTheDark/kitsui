@@ -42,104 +42,104 @@ export type AriaReferenceInput = AriaReferenceSelection | State<AriaReferenceSel
  * Methods return the owning Component to enable fluent chaining.
  * Internally uses an AttributeManipulator to apply changes.
  */
-export declare class AriaManipulator {
+export declare class AriaManipulator<OWNER extends Component> {
     private readonly owner;
     private readonly attribute;
-    constructor(owner: Component, attribute: AttributeManipulator);
+    constructor(owner: OWNER, attribute: AttributeManipulator<OWNER>);
     /**
      * Set the ARIA role.
      * @param value The role value or reactive State.
      */
-    role(value: AriaRoleInput): Component;
+    role(value: AriaRoleInput): OWNER;
     /**
      * Set the ARIA label.
      * @param value The label text or reactive State.
      */
-    label(value: AriaTextInput): Component;
+    label(value: AriaTextInput): OWNER;
     /**
      * Set the ARIA description.
      * @param value The description text or reactive State.
      */
-    description(value: AriaTextInput): Component;
+    description(value: AriaTextInput): OWNER;
     /**
      * Set the ARIA role description.
      * @param value The role description text or reactive State.
      */
-    roleDescription(value: AriaTextInput): Component;
+    roleDescription(value: AriaTextInput): OWNER;
     /**
      * Set aria-labelledby: elements that label this element.
      * @param value Element reference(s) or reactive State.
      */
-    labelledBy(value: AriaReferenceInput): Component;
+    labelledBy(value: AriaReferenceInput): OWNER;
     /**
      * Set aria-describedby: elements that describe this element.
      * @param value Element reference(s) or reactive State.
      */
-    describedBy(value: AriaReferenceInput): Component;
+    describedBy(value: AriaReferenceInput): OWNER;
     /**
      * Set aria-controls: elements controlled by this element.
      * @param value Element reference(s) or reactive State.
      */
-    controls(value: AriaReferenceInput): Component;
+    controls(value: AriaReferenceInput): OWNER;
     /**
      * Set aria-details: elements that provide details for this element.
      * @param value Element reference(s) or reactive State.
      */
-    details(value: AriaReferenceInput): Component;
+    details(value: AriaReferenceInput): OWNER;
     /**
      * Set aria-owns: elements owned by this element.
      * @param value Element reference(s) or reactive State.
      */
-    owns(value: AriaReferenceInput): Component;
+    owns(value: AriaReferenceInput): OWNER;
     /**
      * Set aria-flowto: elements that follow this element.
      * @param value Element reference(s) or reactive State.
      */
-    flowTo(value: AriaReferenceInput): Component;
+    flowTo(value: AriaReferenceInput): OWNER;
     /**
      * Set aria-hidden: whether this element is hidden from assistive technology.
      * @param value The boolean value or reactive State.
      */
-    hidden(value: AriaBooleanInput): Component;
+    hidden(value: AriaBooleanInput): OWNER;
     /**
      * Set aria-disabled: whether this element is disabled.
      * @param value The boolean value or reactive State.
      */
-    disabled(value: AriaBooleanInput): Component;
+    disabled(value: AriaBooleanInput): OWNER;
     /**
      * Set aria-expanded: whether this element is expanded.
      * @param value The boolean value or reactive State.
      */
-    expanded(value: AriaBooleanInput): Component;
+    expanded(value: AriaBooleanInput): OWNER;
     /**
      * Set aria-busy: whether this element is busy/loading.
      * @param value The boolean value or reactive State.
      */
-    busy(value: AriaBooleanInput): Component;
+    busy(value: AriaBooleanInput): OWNER;
     /**
      * Set aria-selected: whether this element is selected.
      * @param value The boolean value or reactive State.
      */
-    selected(value: AriaBooleanInput): Component;
+    selected(value: AriaBooleanInput): OWNER;
     /**
      * Set aria-checked: whether this element is checked (true, false, or "mixed").
      * @param value The boolean/mixed value or reactive State.
      */
-    checked(value: AriaBooleanMixedInput): Component;
+    checked(value: AriaBooleanMixedInput): OWNER;
     /**
      * Set aria-pressed: whether this element is pressed (true, false, or "mixed").
      * @param value The boolean/mixed value or reactive State.
      */
-    pressed(value: AriaBooleanMixedInput): Component;
+    pressed(value: AriaBooleanMixedInput): OWNER;
     /**
      * Set aria-current: mark this element or one of its descendants as the current page/step/location.
      * @param value The current value (true, false, or a location type) or reactive State.
      */
-    current(value: AriaCurrentInput): Component;
+    current(value: AriaCurrentInput): OWNER;
     /**
      * Set aria-live: announce dynamic content updates (off, polite, or assertive).
      * @param value The politeness level or reactive State.
      */
-    live(value: AriaLiveInput): Component;
+    live(value: AriaLiveInput): OWNER;
     private set;
 }

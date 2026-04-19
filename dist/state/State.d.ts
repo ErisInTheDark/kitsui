@@ -118,6 +118,7 @@ declare class StateClass<T> extends Owner {
     private releaseOwner;
     private isImplicitOwner;
     private requiresExplicitOwner;
+    private readonly implicitOwnerDependents;
     private orphanCheckId;
     private currentValue;
     /** @deprecated Use getEqualityFunction(this) */
@@ -202,10 +203,12 @@ declare class StateClass<T> extends Owner {
      * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
      */
     subscribe(owner: Owner, listener: StateListener<T>): CleanupFunction;
+    _registerImplicitOwnerDependent(dependent: State<unknown>): CleanupFunction;
     protected beforeDispose(): void;
     private clearOrphanCheck;
     private refreshOrphanCheck;
     private setImplicitOwnerCandidate;
+    private notifyImplicitOwnerDependents;
     private ensureActive;
 }
 interface StateClass<T> extends StateExtensions<T> {

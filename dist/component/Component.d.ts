@@ -68,17 +68,33 @@ export type ExtendableComponentClass = ComponentConstructor & ComponentStaticExt
 /** @group Component */
 type ComponentConstructor = {
     /**
-     * @param tagNameOrElement - Either an HTML tag name (creates new element) or an existing HTMLElement to wrap. Defaults to "span".
-     * @returns A new component that wraps a DOM element.
-     * @throws If wrapping an element that already has a component.
+     * @returns A new component that wraps a <span> element.
      */
-    (tagNameOrElement: string | HTMLElement): Component;
+    (): Component<HTMLSpanElement>;
     /**
-     * @param tagNameOrElement - Either an HTML tag name (creates new element) or an existing HTMLElement to wrap. Defaults to "span".
+     * @param tagName - An HTML tag name (creates new element).
+     * @returns A new component that wraps a DOM element.
+     */
+    <NAME extends keyof HTMLElementTagNameMap>(tagName: NAME): Component<HTMLElementTagNameMap[NAME]>;
+    /**
+     * @param element - An existing HTMLElement to wrap.
      * @returns A new component that wraps a DOM element.
      * @throws If wrapping an element that already has a component.
      */
-    new (tagNameOrElement: string | HTMLElement): Component;
+    <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
+    new (): Component<HTMLSpanElement>;
+    /**
+     * @param tagName - An HTML tag name (creates new element).
+     * @returns A new component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    new <NAME extends keyof HTMLElementTagNameMap>(tagName: NAME): Component<HTMLElementTagNameMap[NAME]>;
+    /**
+     * @param element - An existing HTMLElement to wrap.
+     * @returns A new component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    new <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
     prototype: Component;
     /**
      * Selects the first element in the document matching the CSS selector and wraps it in a component (or returns the existing).
@@ -122,11 +138,11 @@ export type ComponentOwnerResolver = (component: Component) => Owner | null;
  */
 export declare function registerComponentOwnerResolver(resolver: ComponentOwnerResolver): CleanupFunction;
 /** @group Component */
-declare class ComponentClass extends Owner {
+declare class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
     /**
      * The underlying DOM element managed by this component.
      */
-    readonly element: HTMLElement;
+    readonly element: ELEMENT;
     private explicitOwner;
     private releaseExplicitOwner;
     private readonly structuralCleanups;
@@ -137,19 +153,19 @@ declare class ComponentClass extends Owner {
     /**
      * Lazily creates and memoizes a ClassManipulator for adding/removing CSS classes.
      */
-    get class(): ClassManipulator;
+    get class(): ClassManipulator<this>;
     /**
      * Lazily creates and memoizes an AttributeManipulator for managing element attributes.
      */
-    get attribute(): AttributeManipulator;
+    get attribute(): AttributeManipulator<this>;
     /**
      * Lazily creates and memoizes an AriaManipulator for managing ARIA attributes.
      */
-    get aria(): AriaManipulator;
+    get aria(): AriaManipulator<this>;
     /**
      * Lazily creates and memoizes a TextManipulator for managing text content.
      */
-    get text(): TextManipulator;
+    get text(): TextManipulator<this>;
     /**
      * Lazily creates and memoizes an EventManipulator for managing host event listeners.
      */
@@ -263,10 +279,10 @@ declare class ComponentClass extends Owner {
     private attachStatefulChildren;
     private resolveComponentSelection;
 }
-interface ComponentClass extends ComponentExtensions {
+interface ComponentClass<ELEMENT extends HTMLElement> extends ComponentExtensions {
 }
 /** @group Component */
-export type Component = ComponentClass;
+export type Component<ELEMENT extends HTMLElement = HTMLElement> = ComponentClass<ELEMENT>;
 /**
  * Creates a new component that wraps or creates an HTMLElement.
  * Can be called with or without the `new` keyword.

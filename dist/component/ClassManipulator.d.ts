@@ -38,7 +38,7 @@ export type StyleInput = Style.Class | Falsy | State<StyleSelection>;
  * // Multiple styles or iterables
  * component.class.add([primaryStyle, accentStyle]);
  */
-export declare class ClassManipulator {
+export declare class ClassManipulator<OWNER extends Component> {
     private readonly owner;
     private readonly element;
     private readonly styleDeterminers;
@@ -46,7 +46,7 @@ export declare class ClassManipulator {
      * @param owner The owner managing this manipulator's lifecycle.
      * @param element The HTML element to manipulate.
      */
-    constructor(owner: Component, element: HTMLElement);
+    constructor(owner: OWNER, element: HTMLElement);
     /**
      * Adds one or more styles to the element. Each style replaces any prior determiner
      * for that class. Falsy values and values in iterables are ignored.
@@ -67,7 +67,7 @@ export declare class ClassManipulator {
      * const selection = State(component, null);
      * component.class.add(selection);
      */
-    add(...classes: StyleInput[]): Component;
+    add(...classes: StyleInput[]): OWNER;
     /**
      * Removes one or more styles from the element. Each style replaces any prior determiner
      * for that class. Falsy values and values in iterables are ignored.
@@ -77,7 +77,7 @@ export declare class ClassManipulator {
      * @returns The owning component for fluent chaining.
      * @throws If the owner is disposed.
      */
-    remove(...classes: StyleInput[]): Component;
+    remove(...classes: StyleInput[]): OWNER;
     /**
      * Binds one or more styles to a boolean State. The classes are added when the
      * state value is true, and removed when false. Each style replaces any prior
@@ -94,7 +94,7 @@ export declare class ClassManipulator {
      * component.class.bind(isActive, activeStyle);
      * // activeStyle is present iff isActive.value is true
      */
-    bind(state: State<boolean>, ...classes: StyleInput[]): Component;
+    bind(state: State<boolean>, ...classes: StyleInput[]): OWNER;
     /**
      * Adds one or more styles under the ownership of another Owner. The styles are
      * automatically removed when that owner is cleaned up. Falsy values and values
@@ -110,7 +110,7 @@ export declare class ClassManipulator {
      * component.class.addFrom(externalOwner, externalStyle);
      * // externalStyle is removed when externalOwner is cleaned up
      */
-    addFrom(owner: Owner, ...classes: StyleInput[]): Component;
+    addFrom(owner: Owner, ...classes: StyleInput[]): OWNER;
     private ensureActive;
     private installAddInput;
     private installRemoveInput;
