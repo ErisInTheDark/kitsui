@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
 
     steps:
@@ -29,7 +29,33 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build
+      - name: Run tests
+        run: pnpm run test:run
+
+      - name: Run typecheck
+        run: pnpm run typecheck
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
         run: pnpm run build
 
       - name: Stage package branch contents
@@ -38,8 +64,9 @@ jobs:
           mkdir -p build
           cp package.json build/package.json
           cp -r dist build/dist
+          find build/dist -type f -name '*.d.ts' ! -name 'kitsui.d.ts' -delete
 
-      - name: Deploy
+      - name: Deploy package branch
         uses: s0/git-publish-subdir-action@v2.5.1
         env:
           REPO: self
@@ -47,3 +74,35 @@ jobs:
           FOLDER: build
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MESSAGE: "Deploy {sha}:\n{msg}"
+
+  docs:
+    needs: verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build docs
+        run: pnpm run build:docs
+
+      - name: Deploy pages branch
+        uses: s0/git-publish-subdir-action@v2.5.1
+        env:
+          REPO: self
+          BRANCH: pages
+          FOLDER: docs
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MESSAGE: "Docs {sha}:\n{msg}"
