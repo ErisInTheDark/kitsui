@@ -6,6 +6,7 @@ import { createSidebarPages } from "../navigation";
 
 export const componentModuleOptions: Omit<PrepareModuleSectionsOptions, "declarationLinkPath"> = {
 	extensionsInterfaceName: "MarkerExtensions",
+	modulePrefix: "component/extensions/",
 	rootModuleName: "component/Marker",
 	stripDefaultExports: true,
 } as const;

@@ -8,10 +8,12 @@ import Arrays from "../utility/Arrays";
  */
 export type StyleValue = string | number;
 
+/** A mounted animation marker whose generated `name` can be referenced in style definitions. */
 export interface AnimationMarker extends Marker {
 	readonly name: string;
 }
 
+/** Keyframe definitions keyed by percentage selectors such as `from`, `to`, or `50%`. */
 export type KeyframesDefinition = Record<string, StyleDefinition | null | undefined>;
 
 /**
@@ -528,6 +530,14 @@ const styleAnimationBuilder = Marker.builder<[definition: AnimationMarkerData]>(
 	},
 });
 
+/**
+ * Registers a named keyframes animation and returns a marker exposing the generated animation name.
+ * 
+ * The returned marker owns the injected keyframes rule and removes it again when disposed.
+ * @param name The base name to use when generating a unique animation identifier.
+ * @param keyframes The keyframe steps to register for the animation.
+ * @returns A marker whose `.name` property contains the generated animation name.
+ */
 export function StyleAnimation (name: string, keyframes: KeyframesDefinition): AnimationMarker {
 	const suffixedName = `${name}-${++animationIdCounter}`;
 	const marker = styleAnimationBuilder({ keyframes, name: suffixedName }) as AnimationMarker;
@@ -638,7 +648,7 @@ export const StyleSelector = Marker.builder<[selector: string, definition: Style
 })
 
 /**
- * Registers a CSS `@import` rule that, when mounted, is placed at the very start of the generated stylesheet.
+ * Registers a stylesheet import rule that, when mounted, is placed at the very start of the generated stylesheet.
  * Import rules are placed before reset rules, root rules, font-face declarations, and all other styles.
  * This is commonly used to load external stylesheets such as Google Fonts.
  *
@@ -646,7 +656,7 @@ export const StyleSelector = Marker.builder<[selector: string, definition: Style
  *
  * @example
  * StyleImport("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap").appendTo(document.head);
- * // When mounted, generates: @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
+	* // When mounted, generates an import rule for that URL at the start of the stylesheet.
  */
 export const StyleImport = Marker.builder<[url: string]>({
 	id (url) {

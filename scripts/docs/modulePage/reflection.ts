@@ -747,6 +747,45 @@ function resolveReferencedTypeAlias (
 	);
 }
 
+function collectReferencedDeclarationTargets (
+	value: unknown,
+	referencedIds: Set<number>,
+	referencedNames: Set<string>,
+	seen = new WeakSet<object>(),
+): void {
+	if (!value)
+		return;
+
+	if (Array.isArray(value)) {
+		for (const item of value)
+			collectReferencedDeclarationTargets(item, referencedIds, referencedNames, seen);
+		return;
+	}
+
+	if (typeof value !== "object")
+		return;
+
+	if (seen.has(value))
+		return;
+
+	seen.add(value);
+
+	const record = value as Record<string, unknown>;
+	if (record.type === "reference") {
+		if (typeof record.target === "number") {
+			referencedIds.add(record.target);
+		}
+
+		if (typeof record.name === "string") {
+			referencedNames.add(record.name);
+		}
+	}
+
+	for (const child of Object.values(record)) {
+		collectReferencedDeclarationTargets(child, referencedIds, referencedNames, seen);
+	}
+}
+
 export function prepareModuleSections (
 	project: JSONOutput.ProjectReflection,
 	options: PrepareModuleSectionsOptions,
@@ -785,6 +824,9 @@ export function prepareModuleSections (
 
 	const rootClassName = extractModuleName(options.rootModuleName);
 	let rootClassForExtensionLinks: PreparedDeclarationReflection | undefined;
+	const rootVisibleReferenceIds = new Set<number>();
+	const rootVisibleReferenceNames = new Set<string>();
+	let rootVisibleReferenceText = "";
 
 	const sections = processedModules.map(({ module, children: rawChildren }) => {
 		const modulePath = `src/${module.name}.ts`;
@@ -832,8 +874,10 @@ export function prepareModuleSections (
 			);
 
 			rootClassForExtensionLinks = findRootClassDeclaration(children, rootClassName);
+			collectReferencedDeclarationTargets(children, rootVisibleReferenceIds, rootVisibleReferenceNames);
+			rootVisibleReferenceText = JSON.stringify(children);
 		} else if (extensions || staticExtensions) {
-			const rootExtensionDeclarations = ((rootModule?.children as JSONOutput.DeclarationReflection[] | undefined) ?? [])
+			const rootExtensionDeclarations = children
 				.filter(child =>
 					child.name !== options.extensionsInterfaceName
 					&& child.name !== staticExtensionsInterfaceName
@@ -850,14 +894,21 @@ export function prepareModuleSections (
 				!hasTestSources(method)
 				&& methodBelongsToModule(method, modulePath),
 			);
+			const sectionReferenceIds = new Set<number>();
+			const sectionReferenceNames = new Set<string>();
+			collectReferencedDeclarationTargets(extensionMethods, sectionReferenceIds, sectionReferenceNames);
+			collectReferencedDeclarationTargets(staticExtensionMethods, sectionReferenceIds, sectionReferenceNames);
+			let sectionReferenceText = JSON.stringify(extensionMethods) + JSON.stringify(staticExtensionMethods);
 			const rootSearchSpace = (rootModule?.children as JSONOutput.DeclarationReflection[] | undefined) ?? [];
 			const staticSignatureSearchSpace = [...rootSearchSpace, ...children];
-            const consumedHelperTypeAliasIds = new Set<number>();
+			const consumedHelperTypeAliasIds = new Set<number>();
 
 			const staticTopLevelMethods = staticExtensionMethods.map(method => {
 				const helperAlias = resolveReferencedTypeAlias(method, staticSignatureSearchSpace);
 				if (helperAlias?.kind === ReflectionKind.TypeAlias) {
 					consumedHelperTypeAliasIds.add(helperAlias.id);
+					collectReferencedDeclarationTargets(helperAlias, sectionReferenceIds, sectionReferenceNames);
+					sectionReferenceText += JSON.stringify(helperAlias);
 				}
 
 				const methodComment = method.comment ? stripSignatureBlockTags(method.comment) : method.comment;
@@ -871,22 +922,34 @@ export function prepareModuleSections (
 				};
 			}) as PreparedDeclarationReflection[];
 
-			const filteredRootExtensionDeclarations = rootExtensionDeclarations.filter(declaration =>
-				!consumedHelperTypeAliasIds.has(declaration.id),
+			const isDirectlyRelevant = (declaration: JSONOutput.DeclarationReflection): boolean => (
+				rootVisibleReferenceIds.size === 0
+				|| sectionReferenceIds.has(declaration.id)
+				|| sectionReferenceNames.has(declaration.name)
+				|| sectionReferenceText.includes(`"name":"${declaration.name}"`)
+				|| rootVisibleReferenceIds.has(declaration.id)
+				|| rootVisibleReferenceNames.has(declaration.name)
+				|| rootVisibleReferenceText.includes(`"name":"${declaration.name}"`)
 			);
 
-			if (filteredRootExtensionDeclarations.length > 0) {
-				const existingChildIds = new Set(children.map(child => child.id));
-				for (const declaration of filteredRootExtensionDeclarations) {
-					if (!existingChildIds.has(declaration.id)) {
-						children.push(declaration as PreparedDeclarationReflection);
-					}
-				}
-			}
+			const callableRelevantDeclarations = rootExtensionDeclarations.filter(declaration =>
+				isDirectlyRelevant(declaration)
+				&& (extractCallConstructSignatures(declaration)?.length ?? 0) > 0,
+			);
+			const callableRelevantReferenceIds = new Set<number>();
+			const callableRelevantReferenceNames = new Set<string>();
+			collectReferencedDeclarationTargets(callableRelevantDeclarations, callableRelevantReferenceIds, callableRelevantReferenceNames);
+			const shouldFilterAuxiliaryDeclarations = module.name.endsWith("placeExtension");
 
-			if (staticTopLevelMethods.length > 0) {
-				children.unshift(...staticTopLevelMethods);
-			}
+			const filteredRootExtensionDeclarations = rootExtensionDeclarations.filter(declaration =>
+				!consumedHelperTypeAliasIds.has(declaration.id)
+				&& (
+					!shouldFilterAuxiliaryDeclarations
+					|| isDirectlyRelevant(declaration)
+					|| callableRelevantReferenceIds.has(declaration.id)
+					|| callableRelevantReferenceNames.has(declaration.name)
+				),
+			);
 
 			const collapsedExtensionMethods = extensionMethods.map(method => {
 				const targetId = rootClassForExtensionLinks
@@ -902,13 +965,47 @@ export function prepareModuleSections (
 				};
 			});
 
-			if (collapsedExtensionMethods.length > 0 && extensions) {
-				children.unshift({
-					...extensions,
-					children: collapsedExtensionMethods,
-					sources: undefined,
-					comment: undefined,
-				});
+			if (shouldFilterAuxiliaryDeclarations) {
+				const extensionSectionChildren: PreparedDeclarationReflection[] = [];
+
+				if (staticTopLevelMethods.length > 0) {
+					extensionSectionChildren.unshift(...staticTopLevelMethods);
+				}
+
+				if (collapsedExtensionMethods.length > 0 && extensions) {
+					extensionSectionChildren.unshift({
+						...extensions,
+						children: collapsedExtensionMethods,
+						sources: undefined,
+						comment: undefined,
+					});
+				}
+
+				if (filteredRootExtensionDeclarations.length > 0) {
+					extensionSectionChildren.push(...filteredRootExtensionDeclarations as PreparedDeclarationReflection[]);
+				}
+
+				children = extensionSectionChildren;
+			} else {
+				const existingChildIds = new Set(children.map(child => child.id));
+				for (const declaration of filteredRootExtensionDeclarations) {
+					if (!existingChildIds.has(declaration.id)) {
+						children.push(declaration as PreparedDeclarationReflection);
+					}
+				}
+
+				if (staticTopLevelMethods.length > 0) {
+					children.unshift(...staticTopLevelMethods);
+				}
+
+				if (collapsedExtensionMethods.length > 0 && extensions) {
+					children.unshift({
+						...extensions,
+						children: collapsedExtensionMethods,
+						sources: undefined,
+						comment: undefined,
+					});
+				}
 			}
 		}
 

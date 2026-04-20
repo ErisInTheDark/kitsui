@@ -97,8 +97,24 @@ declare module "../Component" {
 
 declare module "../Marker" {
 	interface MarkerExtensions {
+		/**
+		 * Appends this marker to the end of the target component or DOM parent.
+		 * @param target The target component or DOM parent.
+		 * @returns This marker for chaining.
+		 */
 		appendTo (target: PlacementContainer): this;
+		/**
+		 * Prepends this marker to the start of the target component or DOM parent.
+		 * @param target The target component or DOM parent.
+		 * @returns This marker for chaining.
+		 */
 		prependTo (target: PlacementContainer): this;
+		/**
+		 * Inserts this marker relative to another target.
+		 * @param where Whether to insert before or after the target.
+		 * @param target The component, marker, place, or DOM node to insert around.
+		 * @returns This marker for chaining.
+		 */
 		insertTo (where: InsertWhere, target: PlacementTarget): this;
 	}
 }

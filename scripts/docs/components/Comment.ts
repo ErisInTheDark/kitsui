@@ -1,7 +1,7 @@
 import { JSONOutput } from "typedoc";
 import { Component, Style } from "../../../src";
 import { monoFont } from "../styles";
-import Type, { dominantTypeColor } from "./Type";
+import Type, { dominantTypeColor, resolveTypeDeclarationLink, resolveTypeDeclarationLinkById } from "./Type";
 
 const commentStyle = Style.Class("docs-comment", {
 	color: "$textBody",
@@ -45,6 +45,10 @@ const codeSpanStyle = Style.Class("docs-comment-code", {
 	color: "$accentPrimary",
 	fontSize: "13px",
 	padding: "2px 5px",
+});
+
+const commentLinkStyle = Style.Class("docs-comment-link", {
+	textDecoration: "none",
 });
 
 const codeBlockStyle = Style.Class("docs-comment-code-block", {
@@ -108,10 +112,30 @@ export function renderDisplayParts (parts: JSONOutput.CommentDisplayPart[]): Com
 					.appendTo(container);
 			}
 		} else if (part.kind === "inline-tag") {
-			Component("code")
+			const inlineTag = part as JSONOutput.CommentDisplayPart & { tag?: string; target?: number | { name?: string } };
+			const targetId = typeof inlineTag.target === "number" ? inlineTag.target : undefined;
+			const targetName = typeof inlineTag.target === "object" && inlineTag.target && "name" in inlineTag.target
+				? inlineTag.target.name
+				: undefined;
+			const link = targetId !== undefined
+				? resolveTypeDeclarationLinkById(targetId)
+				: targetName
+					? resolveTypeDeclarationLink(targetName)
+					: resolveTypeDeclarationLink(part.text);
+
+			const code = Component("code")
 				.class.add(codeSpanStyle)
-				.text.set(part.text)
-				.appendTo(container);
+				.text.set(part.text);
+
+			if ((inlineTag.tag === "@link" || inlineTag.tag === "@linkcode" || inlineTag.tag === "@linkplain") && link) {
+				Component("a")
+					.class.add(commentLinkStyle)
+					.attribute.set("href", link)
+					.append(code)
+					.appendTo(container);
+			} else {
+				code.appendTo(container);
+			}
 		}
 	}
 

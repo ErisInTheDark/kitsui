@@ -2,8 +2,10 @@ import { Owner, State, type CleanupFunction, type StateOptions } from "../State"
 
 type Nullish = null | undefined;
 
+/** Maps a source state value, and optionally its previous value, into a derived value. */
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
 
+/** A mapped state that can be manually recomputed when external mapping inputs change. */
 export interface RecomputableState<T> extends State<T> {
 	/**
 	 * Recomputes the current value of the state by reapplying all mapping and transformation functions.
