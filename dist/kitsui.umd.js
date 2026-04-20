@@ -1298,8 +1298,13 @@ var __kitsui_factory__ = (() => {
     return false;
   }
   var MarkerClass = class extends Owner {
+    /**
+     * Creates a new marker comment with the given identifier text.
+     * @param id The comment text to store in the marker node.
+     */
     constructor(id) {
       super();
+      /** The underlying DOM comment node that this marker wraps. */
       __publicField(this, "node");
       __publicField(this, "explicitOwner", null);
       __publicField(this, "releaseExplicitOwner", noop4);
@@ -1310,6 +1315,7 @@ var __kitsui_factory__ = (() => {
       markers.set(this.node, new WeakRef(this));
       this.refreshOrphanCheck();
     }
+    /** Lazily creates the marker's event manipulator for mount and dispose lifecycle events. */
     get event() {
       this.ensureActive();
       const manipulator = new EventManipulator(this, this.node, "marker");
@@ -1321,9 +1327,15 @@ var __kitsui_factory__ = (() => {
       });
       return manipulator;
     }
+    /** Disposes the marker and removes its comment node from the DOM. */
     remove() {
       super.dispose();
     }
+    /**
+     * Assigns or clears the explicit owner responsible for disposing this marker.
+     * @param owner The owner to bind to this marker, or `null` to clear explicit ownership.
+     * @returns This marker for chaining.
+     */
     setOwner(owner) {
       this.ensureActive();
       if (this.explicitOwner === owner) {
@@ -1340,9 +1352,16 @@ var __kitsui_factory__ = (() => {
       this.refreshOrphanCheck();
       return this;
     }
+    /** Returns the marker's current explicit owner, if one has been assigned. */
     getOwner() {
       return this.explicitOwner;
     }
+    /**
+     * Registers mount and optional dispose hooks tied to this marker's lifecycle events.
+     * @param onMount Called when the marker mounts. May return a cleanup function.
+     * @param onDispose Called after the marker disposes.
+     * @returns This marker for chaining.
+     */
     use(onMount, onDispose) {
       let disposeCleanup;
       this.event.owned.on.Mount(() => {

@@ -4,9 +4,11 @@ import { Marker } from "../component/Marker";
  * Numbers are serialized as plain numbers without any unit suffix.
  */
 export type StyleValue = string | number;
+/** A mounted animation marker whose generated `name` can be referenced in style definitions. */
 export interface AnimationMarker extends Marker {
     readonly name: string;
 }
+/** Keyframe definitions keyed by percentage selectors such as `from`, `to`, or `50%`. */
 export type KeyframesDefinition = Record<string, StyleDefinition | null | undefined>;
 /**
  * CSS style property definition. Supports:
@@ -94,6 +96,14 @@ export declare namespace Style {
         Class(className: string, definition: StyleDefinition): Style.Class;
     };
 }
+/**
+ * Registers a named keyframes animation and returns a marker exposing the generated animation name.
+ *
+ * The returned marker owns the injected keyframes rule and removes it again when disposed.
+ * @param name The base name to use when generating a unique animation identifier.
+ * @param keyframes The keyframe steps to register for the animation.
+ * @returns A marker whose `.name` property contains the generated animation name.
+ */
 export declare function StyleAnimation(name: string, keyframes: KeyframesDefinition): AnimationMarker;
 /**
  * Registers global CSS reset rules that, when mounted, are are placed before all other styles
@@ -151,7 +161,7 @@ export declare const StyleRoot: (definition: StyleDefinition) => Marker;
  */
 export declare const StyleSelector: (selector: string, definition: StyleDefinition) => Marker;
 /**
- * Registers a CSS `@import` rule that, when mounted, is placed at the very start of the generated stylesheet.
+ * Registers a stylesheet import rule that, when mounted, is placed at the very start of the generated stylesheet.
  * Import rules are placed before reset rules, root rules, font-face declarations, and all other styles.
  * This is commonly used to load external stylesheets such as Google Fonts.
  *
@@ -159,7 +169,7 @@ export declare const StyleSelector: (selector: string, definition: StyleDefiniti
  *
  * @example
  * StyleImport("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap").appendTo(document.head);
- * // When mounted, generates: @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
+    * // When mounted, generates an import rule for that URL at the start of the stylesheet.
  */
 export declare const StyleImport: (url: string) => Marker;
 /**
