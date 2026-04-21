@@ -398,6 +398,10 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      */
     get attribute(): AttributeManipulator<this>;
     /**
+     * Lazily creates and memoizes a StyleManipulator for managing inline styles.
+     */
+    get style(): StyleManipulator<this>;
+    /**
      * Lazily creates and memoizes an AriaManipulator for managing ARIA attributes.
      */
     get aria(): AriaManipulator<this>;
@@ -829,6 +833,8 @@ export type StyleDefinition = ({
 } & {
     [KEY in `$${string}`]?: StyleValue | null | undefined;
 } & {
+    [KEY in `{${string}}`]?: StyleDefinition | null | undefined;
+} & {
     animationName?: readonly AnimationMarker[] | AnimationMarker | "none" | null | undefined;
 });
 
@@ -965,6 +971,41 @@ export function whenOpen(definition: StyleDefinition): StyleDefinition;
 
 export function whenClosed(definition: StyleDefinition): StyleDefinition;
 
+export type StyleAttributeValue = StyleValue | null | undefined;
+
+export type StyleAttributeValueInput = StyleAttributeValue | State<StyleAttributeValue>;
+
+export type StyleAttributeDefinition = ({
+    [KEY in keyof CSSStyleDeclaration as KEY extends string ? CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never : never]?: StyleAttributeValueInput;
+} & {
+    [KEY in `$${string}`]?: StyleAttributeValueInput;
+});
+
+export type StyleAttributeInput = StyleAttributeDefinition | State<StyleAttributeDefinition | null | undefined>;
+
+export class StyleManipulator<OWNER extends Component> {
+    private readonly owner;
+    private readonly element;
+    private determiner;
+    /**
+     * @param owner The component owner managing this manipulator's lifecycle.
+     * @param element The element whose inline styles are controlled.
+     */
+    constructor(owner: OWNER, element: HTMLElement);
+    /**
+     * Sets inline styles from a direct definition or a subscribable definition source.
+     * Each property can also be driven by its own subscribable value.
+     * Nullish property values remove that property from the inline style attribute.
+     * @param value Direct or reactive inline style definition.
+     * @returns The owning component for fluent chaining.
+     */
+    set(value: StyleAttributeInput): OWNER;
+    private installDefinition;
+    private replaceDeterminer;
+    private writeProperty;
+    private ensureActive;
+}
+
 export type TextValue = string | number | bigint | boolean;
 
 export type TextSelection = TextValue | null | undefined;
@@ -1050,9 +1091,6 @@ export interface StateExtensions<T> {
         equals(compareValue: T): State<boolean>;
     }
 
-/**
- * Function invoked during cleanup to release resources.
- */
 export type CleanupFunction = () => void;
 
 export type StateEqualityFunction<T> = (currentValue: T, nextValue: T) => boolean;

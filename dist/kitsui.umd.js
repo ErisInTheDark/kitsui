@@ -46,6 +46,7 @@ var __kitsui_factory__ = (() => {
     StyleAnimation: () => StyleAnimation,
     StyleFontFace: () => StyleFontFace,
     StyleImport: () => StyleImport,
+    StyleManipulator: () => StyleManipulator,
     StyleReset: () => StyleReset,
     StyleRoot: () => StyleRoot,
     StyleSelector: () => StyleSelector,
@@ -76,6 +77,42 @@ var __kitsui_factory__ = (() => {
     whenOpen: () => whenOpen,
     whenStuck: () => whenStuck
   });
+
+  // src/utility/timeoutPromise.ts
+  function scheduleTimeoutPromise(callback) {
+    let active = true;
+    let timeoutId = null;
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutId = setTimeout(resolve, 0);
+    });
+    void timeoutPromise.then(() => {
+      timeoutId = null;
+      if (!active) {
+        return;
+      }
+      active = false;
+      try {
+        callback();
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    });
+    return {
+      cancel() {
+        if (!active) {
+          return;
+        }
+        active = false;
+        if (timeoutId === null) {
+          return;
+        }
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+  }
 
   // src/state/State.ts
   var noop = () => {
@@ -458,7 +495,7 @@ var __kitsui_factory__ = (() => {
       if (this.orphanCheckId === null) {
         return;
       }
-      clearTimeout(this.orphanCheckId);
+      this.orphanCheckId.cancel();
       this.orphanCheckId = null;
     }
     refreshOrphanCheck() {
@@ -469,13 +506,13 @@ var __kitsui_factory__ = (() => {
       if (this.orphanCheckId !== null) {
         return;
       }
-      this.orphanCheckId = setTimeout(() => {
+      this.orphanCheckId = scheduleTimeoutPromise(() => {
         this.orphanCheckId = null;
         if (this.disposed || this.owner !== null) {
           return;
         }
         throw new Error(orphanedStateErrorMessage);
-      }, 0);
+      });
     }
     setImplicitOwnerCandidate(candidate) {
       if (candidate instanceof _StateClass) {
@@ -1405,7 +1442,7 @@ var __kitsui_factory__ = (() => {
       if (this.orphanCheckId === null) {
         return;
       }
-      clearTimeout(this.orphanCheckId);
+      this.orphanCheckId.cancel();
       this.orphanCheckId = null;
     }
     /** @internal */
@@ -1417,7 +1454,7 @@ var __kitsui_factory__ = (() => {
       if (this.orphanCheckId !== null) {
         return;
       }
-      this.orphanCheckId = setTimeout(() => {
+      this.orphanCheckId = scheduleTimeoutPromise(() => {
         this.orphanCheckId = null;
         if (this.disposed) {
           return;
@@ -1427,7 +1464,7 @@ var __kitsui_factory__ = (() => {
           return;
         }
         throw new Error(orphanedMarkerErrorMessage);
-      }, 0);
+      });
     }
     isManaged() {
       if (isManagedNode(this.node)) {
@@ -1481,6 +1518,102 @@ var __kitsui_factory__ = (() => {
   })(Arrays || (Arrays = {}));
   var Arrays_default = Arrays;
 
+  // src/component/styleValue.ts
+  function isWordCharacter(character) {
+    const charCode = character.charCodeAt(0);
+    return charCode >= 48 && charCode <= 57 || charCode >= 65 && charCode <= 90 || charCode >= 97 && charCode <= 122 || charCode === 45 || charCode === 95;
+  }
+  function isWhitespaceCharacter(character) {
+    const charCode = character.charCodeAt(0);
+    return charCode === 32 || charCode === 9 || charCode === 10 || charCode === 13;
+  }
+  function toCssPropertyName(propertyName) {
+    if (propertyName.startsWith("--")) {
+      return propertyName;
+    }
+    if (propertyName.startsWith("$")) {
+      propertyName = `--${propertyName.slice(1)}`;
+    }
+    return propertyName.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
+  }
+  function expandVariableAccessShorthand(styleValue) {
+    if (typeof styleValue === "number") {
+      return String(styleValue);
+    }
+    const src = styleValue;
+    let i = 0;
+    function consumeChar(expected) {
+      if (src[i] === expected) {
+        i++;
+        return true;
+      }
+      return false;
+    }
+    function consumeWord() {
+      const start = i;
+      for (; i < src.length; i++) {
+        if (!isWordCharacter(src[i])) {
+          break;
+        }
+      }
+      return src.slice(start, i);
+    }
+    function consumeWhitespace() {
+      let result = "";
+      while (i < src.length && isWhitespaceCharacter(src[i])) {
+        result += src[i++];
+      }
+      return result;
+    }
+    let awaitingClosingBrace = 0;
+    function consumeVariableAccess() {
+      const restorePoint = i;
+      if (!consumeChar("$")) {
+        return void 0;
+      }
+      if (!consumeChar("{")) {
+        const variableName2 = consumeWord();
+        if (!variableName2) {
+          i = restorePoint;
+          return void 0;
+        }
+        return `var(${toCssPropertyName(`$${variableName2}`)})`;
+      }
+      consumeWhitespace();
+      const variableName = consumeWord();
+      if (!variableName) {
+        i = restorePoint;
+        return void 0;
+      }
+      consumeWhitespace();
+      if (!consumeChar(":")) {
+        i = restorePoint;
+        return void 0;
+      }
+      consumeWhitespace();
+      awaitingClosingBrace++;
+      const fallbackValue = consumeStyleValue();
+      consumeWhitespace();
+      if (!consumeChar("}")) {
+        i = restorePoint;
+        return void 0;
+      }
+      return `var(${toCssPropertyName(`$${variableName}`)}, ${fallbackValue})`;
+    }
+    function consumeStyleValue() {
+      let result = "";
+      do {
+        if (awaitingClosingBrace && src[i] === "}") {
+          awaitingClosingBrace--;
+          return result;
+        }
+        result += consumeWhitespace() || consumeVariableAccess() || src[i++];
+      } while (i < src.length);
+      return result;
+    }
+    return consumeStyleValue();
+  }
+
   // src/component/Style.ts
   var styleRegistry = /* @__PURE__ */ new Map();
   var styleOrder = [];
@@ -1493,15 +1626,6 @@ var __kitsui_factory__ = (() => {
   var styleElement = null;
   var animationMarkerOwner = new class StyleAnimationOwner extends Owner {
   }();
-  function toCssPropertyName(propertyName) {
-    if (propertyName.startsWith("--")) {
-      return propertyName;
-    }
-    if (propertyName.startsWith("$")) {
-      propertyName = `--${propertyName.slice(1)}`;
-    }
-    return propertyName.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
-  }
   function isNestedDefinition(key, value) {
     return typeof value === "object" && value !== null && key.startsWith("{");
   }
@@ -1593,92 +1717,6 @@ ${innerRules}
   }
   function serializeDefinition(className, definition) {
     return serializeRules(`.${className}`, definition).join("\n");
-  }
-  function isWordCharacter(character) {
-    const charCode = character.charCodeAt(0);
-    return charCode >= 48 && charCode <= 57 || charCode >= 65 && charCode <= 90 || charCode >= 97 && charCode <= 122 || charCode === 45 || charCode === 95;
-  }
-  function isWhitespaceCharacter(character) {
-    const charCode = character.charCodeAt(0);
-    return charCode === 32 || charCode === 9 || charCode === 10 || charCode === 13;
-  }
-  function expandVariableAccessShorthand(styleValue) {
-    if (typeof styleValue === "number") {
-      return String(styleValue);
-    }
-    const src = styleValue;
-    let i = 0;
-    function consumeChar(expected) {
-      if (src[i] === expected) {
-        i++;
-        return true;
-      }
-      return false;
-    }
-    function consumeWord() {
-      let j = i;
-      for (; i < src.length; i++) {
-        const character = src[i];
-        if (!isWordCharacter(character)) {
-          break;
-        }
-      }
-      return src.slice(j, i);
-    }
-    function consumeWhitespace() {
-      let result = "";
-      while (i < src.length && isWhitespaceCharacter(src[i])) {
-        result += src[i++];
-      }
-      return result;
-    }
-    let awaitingClosingBrace = 0;
-    function consumeVariableAccess() {
-      const restorePoint = i;
-      if (!consumeChar("$")) {
-        return void 0;
-      }
-      if (!consumeChar("{")) {
-        const variableName2 = consumeWord();
-        if (!variableName2) {
-          i = restorePoint;
-          return void 0;
-        }
-        return `var(${toCssPropertyName(`$${variableName2}`)})`;
-      }
-      consumeWhitespace();
-      const variableName = consumeWord();
-      if (!variableName) {
-        i = restorePoint;
-        return void 0;
-      }
-      consumeWhitespace();
-      if (!consumeChar(":")) {
-        i = restorePoint;
-        return void 0;
-      }
-      consumeWhitespace();
-      awaitingClosingBrace++;
-      const fallbackValue = consumeStyleValue();
-      consumeWhitespace();
-      if (!consumeChar("}")) {
-        i = restorePoint;
-        return void 0;
-      }
-      return `var(${toCssPropertyName(`$${variableName}`)}, ${fallbackValue})`;
-    }
-    function consumeStyleValue() {
-      let result = "";
-      do {
-        if (awaitingClosingBrace && src[i] === "}") {
-          awaitingClosingBrace--;
-          return result;
-        }
-        result += consumeWhitespace() || consumeVariableAccess() || src[i++];
-      } while (i < src.length);
-      return result;
-    }
-    return consumeStyleValue();
   }
   function getStyleElement() {
     if (typeof document === "undefined") {
@@ -2249,8 +2287,132 @@ ${innerRules}
     }
   };
 
-  // src/component/TextManipulator.ts
+  // src/component/StyleManipulator.ts
   var noop6 = () => {
+  };
+  function isStateSource2(value) {
+    return value instanceof State;
+  }
+  function toStyleAttributeSource(value) {
+    if (isStateSource2(value)) {
+      return value;
+    }
+    return State.Readonly(value);
+  }
+  function toStyleValueSource(value) {
+    if (isStateSource2(value)) {
+      return value;
+    }
+    return State.Readonly(value);
+  }
+  function serializeStyleValue(value) {
+    if (value === null || value === void 0) {
+      return null;
+    }
+    return expandVariableAccessShorthand(value);
+  }
+  var StyleManipulator = class {
+    /**
+     * @param owner The component owner managing this manipulator's lifecycle.
+     * @param element The element whose inline styles are controlled.
+     */
+    constructor(owner, element) {
+      this.owner = owner;
+      this.element = element;
+      __publicField(this, "determiner", null);
+    }
+    /**
+     * Sets inline styles from a direct definition or a subscribable definition source.
+     * Each property can also be driven by its own subscribable value.
+     * Nullish property values remove that property from the inline style attribute.
+     * @param value Direct or reactive inline style definition.
+     * @returns The owning component for fluent chaining.
+     */
+    set(value) {
+      this.ensureActive();
+      const definitionSource = toStyleAttributeSource(value);
+      this.replaceDeterminer((applyIfCurrent) => {
+        let releaseDefinition = noop6;
+        const applyDefinition = (definition) => {
+          releaseDefinition();
+          releaseDefinition = this.installDefinition(definition, applyIfCurrent);
+        };
+        applyDefinition(definitionSource.value);
+        const releaseSource = definitionSource.subscribe(this.owner, (nextValue) => {
+          applyDefinition(nextValue);
+        });
+        return () => {
+          releaseSource();
+          releaseDefinition();
+        };
+      });
+      return this.owner;
+    }
+    installDefinition(definition, applyIfCurrent) {
+      if (!definition) {
+        return noop6;
+      }
+      const cleanups = [];
+      const activeProperties = /* @__PURE__ */ new Set();
+      for (const [propertyName, input] of Object.entries(definition)) {
+        activeProperties.add(propertyName);
+        const valueSource = toStyleValueSource(input);
+        applyIfCurrent(propertyName, valueSource.value);
+        cleanups.push(valueSource.subscribe(this.owner, (nextValue) => {
+          applyIfCurrent(propertyName, nextValue);
+        }));
+      }
+      return () => {
+        for (const cleanup of cleanups) {
+          cleanup();
+        }
+        for (const propertyName of activeProperties) {
+          this.writeProperty(propertyName, null);
+        }
+      };
+    }
+    replaceDeterminer(createCleanup) {
+      this.determiner?.cleanup();
+      const token = /* @__PURE__ */ Symbol("style");
+      let active = true;
+      let cleanup = noop6;
+      const applyIfCurrent = (propertyName, value) => {
+        if (this.determiner?.token !== token) {
+          return;
+        }
+        this.writeProperty(propertyName, value);
+      };
+      const trackedCleanup = () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        if (this.determiner?.token === token) {
+          this.determiner = null;
+        }
+        cleanup();
+      };
+      this.determiner = { cleanup: trackedCleanup, token };
+      cleanup = createCleanup(applyIfCurrent);
+    }
+    writeProperty(propertyName, value) {
+      const cssPropertyName = toCssPropertyName(propertyName);
+      const serialized = serializeStyleValue(value);
+      if (serialized === null) {
+        this.element.style.removeProperty(cssPropertyName);
+        return;
+      }
+      this.element.style.setProperty(cssPropertyName, serialized);
+    }
+    ensureActive() {
+      if (this.owner.disposed) {
+        throw new Error("Disposed components cannot be modified.");
+      }
+    }
+  };
+
+  // src/component/TextManipulator.ts
+  var noop7 = () => {
   };
   function toTextSource(value) {
     if (value instanceof State) {
@@ -2315,7 +2477,7 @@ ${innerRules}
       this.determiner?.cleanup();
       const token = /* @__PURE__ */ Symbol("text");
       let active = true;
-      let cleanup = noop6;
+      let cleanup = noop7;
       const applyIfCurrent = (value) => {
         if (this.determiner?.token !== token) {
           return;
@@ -2345,7 +2507,7 @@ ${innerRules}
   };
 
   // src/component/Component.ts
-  var noop7 = () => {
+  var noop8 = () => {
   };
   var orphanedComponentErrorMessage = "Components must be connected to the document or have a managed owner before the next tick.";
   var recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
@@ -2444,7 +2606,7 @@ ${innerRules}
        */
       __publicField(this, "element");
       __publicField(this, "explicitOwner", null);
-      __publicField(this, "releaseExplicitOwner", noop7);
+      __publicField(this, "releaseExplicitOwner", noop8);
       __publicField(this, "structuralCleanups", /* @__PURE__ */ new Set());
       __publicField(this, "mounted", false);
       __publicField(this, "onBeforeMove", null);
@@ -2478,6 +2640,20 @@ ${innerRules}
       this.ensureActive();
       const manipulator = new AttributeManipulator(this, this.element);
       Object.defineProperty(this, "attribute", {
+        configurable: true,
+        enumerable: true,
+        value: manipulator,
+        writable: false
+      });
+      return manipulator;
+    }
+    /**
+     * Lazily creates and memoizes a StyleManipulator for managing inline styles.
+     */
+    get style() {
+      this.ensureActive();
+      const manipulator = new StyleManipulator(this, this.element);
+      Object.defineProperty(this, "style", {
         configurable: true,
         enumerable: true,
         value: manipulator,
@@ -2857,7 +3033,7 @@ ${innerRules}
         return this;
       }
       this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop7;
+      this.releaseExplicitOwner = noop8;
       this.explicitOwner = owner;
       if (owner) {
         this.releaseExplicitOwner = owner.onCleanup(() => {
@@ -2879,7 +3055,7 @@ ${innerRules}
       this.clearOrphanCheck();
       this.releaseStructuralCleanups();
       this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop7;
+      this.releaseExplicitOwner = noop8;
       this.explicitOwner = null;
       if (getLiveComponent(this.element) === this) {
         elementComponents.delete(this.element);
@@ -2915,7 +3091,7 @@ ${innerRules}
       if (this.orphanCheckId === null) {
         return;
       }
-      clearTimeout(this.orphanCheckId);
+      this.orphanCheckId.cancel();
       this.orphanCheckId = null;
     }
     refreshOrphanCheck() {
@@ -2926,7 +3102,7 @@ ${innerRules}
       if (this.orphanCheckId !== null) {
         return;
       }
-      this.orphanCheckId = setTimeout(() => {
+      this.orphanCheckId = scheduleTimeoutPromise(() => {
         this.orphanCheckId = null;
         if (this.disposed) {
           return;
@@ -2936,7 +3112,7 @@ ${innerRules}
           return;
         }
         throw new Error(orphanedComponentErrorMessage);
-      }, 0);
+      });
     }
     isManaged() {
       if (this.element.isConnected) {
@@ -3000,7 +3176,7 @@ ${innerRules}
     }
     trackStructuralCleanup(cleanup) {
       let active = true;
-      let releaseOwnerCleanup = noop7;
+      let releaseOwnerCleanup = noop8;
       const trackedCleanup = () => {
         if (!active) {
           return;
@@ -3022,14 +3198,14 @@ ${innerRules}
     }
     attachConditionalNode(state2, node, options) {
       if (!node && node !== "") {
-        return noop7;
+        return noop8;
       }
       const resolvedNode = this.resolveNode(node);
       const placeholder = Marker("kitsui:conditional").setOwner(this);
       const storage = createStorageElement(this.element.ownerDocument);
       const childComponent = node instanceof _ComponentClass ? node : null;
       let active = true;
-      let releaseChildCleanup = noop7;
+      let releaseChildCleanup = noop8;
       let placeholderWasInserted = false;
       if (childComponent && childComponent.getOwner() === null) {
         childComponent.setOwner(this);
@@ -3266,7 +3442,7 @@ ${innerRules}
   };
 
   // src/component/extensions/placeExtension.ts
-  var noop8 = () => {
+  var noop9 = () => {
   };
   var PlacementLifecycleOwner = class extends Owner {
     // Uses Owner's default lifecycle hooks.
@@ -3337,7 +3513,7 @@ ${innerRules}
   function setPlacementController(component, cleanup) {
     clearPlacement(component);
     let active = true;
-    let releaseDisposeCleanup = noop8;
+    let releaseDisposeCleanup = noop9;
     const trackedCleanup = () => {
       if (!active) {
         return;
@@ -3591,8 +3767,8 @@ ${innerRules}
       };
       Place.prototype = PlaceClass.prototype;
       const placeState = placer(Place);
-      let releaseOwnerCleanup = noop8;
-      let releaseStateCleanup = noop8;
+      let releaseOwnerCleanup = noop9;
+      let releaseStateCleanup = noop9;
       let blockedByRecursivePlacement = false;
       const cleanup = setPlacementController(this, () => {
         releaseOwnerCleanup();
