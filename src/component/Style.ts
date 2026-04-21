@@ -27,6 +27,7 @@ export type KeyframesDefinition = Record<string, StyleDefinition | null | undefi
 export type StyleDefinition = (
 	& { [KEY in keyof CSSStyleDeclaration as CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never]?: StyleValue | null | undefined }
 	& { [KEY in `$${string}`]?: StyleValue | null | undefined }
+	& { [KEY in `{${string}}`]?: StyleDefinition | null | undefined }
 	& { animationName?: readonly AnimationMarker[] | AnimationMarker | "none" | null | undefined }
 );
 

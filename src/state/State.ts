@@ -1,6 +1,8 @@
 /**
  * Function invoked during cleanup to release resources.
  */
+import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
+
 export type CleanupFunction = () => void;
 
 /**
@@ -256,7 +258,7 @@ class StateClass<T> extends Owner {
 	private isImplicitOwner = false;
 	private requiresExplicitOwner = false;
 	private readonly implicitOwnerDependents = new Set<StateClass<unknown>>();
-	private orphanCheckId: ReturnType<typeof setTimeout> | null = null;
+	private orphanCheckId: DeferredTimeoutHandle | null = null;
 	private currentValue: T;
 	/** @deprecated Use getEqualityFunction(this) */
 	private equalityFunction: StateEqualityFunction<any>;
@@ -556,7 +558,7 @@ class StateClass<T> extends Owner {
 			return;
 		}
 
-		clearTimeout(this.orphanCheckId);
+		this.orphanCheckId.cancel();
 		this.orphanCheckId = null;
 	}
 
@@ -570,7 +572,7 @@ class StateClass<T> extends Owner {
 			return;
 		}
 
-		this.orphanCheckId = setTimeout(() => {
+		this.orphanCheckId = scheduleTimeoutPromise(() => {
 			this.orphanCheckId = null;
 
 			if (this.disposed || this.owner !== null) {
@@ -578,7 +580,7 @@ class StateClass<T> extends Owner {
 			}
 
 			throw new Error(orphanedStateErrorMessage);
-		}, 0);
+		});
 	}
 
 	private setImplicitOwnerCandidate (candidate: Owner): void {

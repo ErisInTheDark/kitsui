@@ -56,6 +56,57 @@ function captureTimeoutCallbacks (): {
 	};
 }
 
+function captureOrphanCheck (): {
+	timeoutHandler: (() => void) | null;
+	orphanCheck: (() => void) | null;
+	queuedError: (() => void) | null;
+	restore: () => void;
+} {
+	let timeoutHandler: (() => void) | null = null;
+	let orphanCheck: (() => void) | null = null;
+	let queuedError: (() => void) | null = null;
+	const originalThen = Promise.prototype.then;
+	const patchedThen: typeof Promise.prototype.then = function patchedThen<TResult1 = any, TResult2 = never> (
+		this: Promise<any>,
+		onFulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+		onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+	): Promise<TResult1 | TResult2> {
+		if (typeof onFulfilled === "function") {
+			orphanCheck = onFulfilled as unknown as () => void;
+		}
+
+		return originalThen.call(this, onFulfilled, onRejected) as Promise<TResult1 | TResult2>;
+	};
+	Promise.prototype.then = patchedThen;
+	const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback: VoidFunction) => {
+		queuedError = callback as () => void;
+	});
+	const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler) => {
+		if (typeof handler === "function") {
+			timeoutHandler = handler as unknown as () => void;
+		}
+
+		return 0 as unknown as ReturnType<typeof setTimeout>;
+	}) as unknown as typeof setTimeout);
+
+	return {
+		get timeoutHandler (): (() => void) | null {
+			return timeoutHandler;
+		},
+		get orphanCheck (): (() => void) | null {
+			return orphanCheck;
+		},
+		get queuedError (): (() => void) | null {
+			return queuedError;
+		},
+		restore (): void {
+			Promise.prototype.then = originalThen;
+			queueMicrotaskSpy.mockRestore();
+			setTimeoutSpy.mockRestore();
+		},
+	};
+}
+
 function nonCommentNodes (element: HTMLElement): Node[] {
 	return Array.from(element.childNodes).filter((node) => !(node instanceof Comment));
 }
@@ -1345,7 +1396,24 @@ describe("Component", () => {
 	});
 
 	describe("lifecycle mounting", () => {
-		it("Component inside a raw DOM element knows it's mounted when the container enters the document", () => {
+		/** Verifies unmanaged components still defer orphan validation to a timeout tick, then run the check through Promise.then. */
+		it("runs unmanaged orphan validation through Promise.then", () => {
+			const orphanCheckSpy = captureOrphanCheck();
+
+			try {
+				Component("div");
+
+				expect(orphanCheckSpy.timeoutHandler, "unmanaged components should still arm a timeout-backed orphan tick").toBeTypeOf("function");
+				expect(orphanCheckSpy.orphanCheck, "the orphan check should be attached through Promise.then").toBeTypeOf("function");
+				expect(() => orphanCheckSpy.orphanCheck?.(), "the Promise.then orphan callback should defer its uncaught rethrow").not.toThrow();
+				expect(orphanCheckSpy.queuedError, "the orphan callback should queue an uncaught rethrow").toBeTypeOf("function");
+				expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the orphan error").toThrow("Components must be connected to the document or have a managed owner before the next tick.");
+			} finally {
+				orphanCheckSpy.restore();
+			}
+		});
+
+		it("Component inside a raw DOM element knows it's mounted when the container enters the document", async () => {
 			vi.useFakeTimers();
 
 			const container = document.createElement("div");
@@ -1363,6 +1431,7 @@ describe("Component", () => {
 				expect(() => {
 					vi.advanceTimersByTime(0);
 				}, "the orphan check should not throw once the raw container is in the document").not.toThrow();
+				await flushEffects();
 				expect(component.disposed, "a connected component should not be disposed by the orphan check").toBe(false);
 				expect(mountCallback, "Mount event should fire as a self-healing operation when the orphan check finds isConnected").toHaveBeenCalledTimes(1);
 			} finally {
@@ -1398,7 +1467,7 @@ describe("Component", () => {
 			expect(child.element.isConnected, "disposed descendants should no longer be connected").toBe(false);
 		});
 
-		it("removing a parent Component disposes descendant Components inside intermediate non-wrapped elements", () => {
+		it("removing a parent Component disposes descendant Components inside intermediate non-wrapped elements", async () => {
 			vi.useFakeTimers();
 
 			const parent = mountedComponent("section");
@@ -1419,6 +1488,7 @@ describe("Component", () => {
 				expect(() => {
 					vi.advanceTimersByTime(0);
 				}, "the orphan check should not throw while the raw DOM child is connected").not.toThrow();
+				await flushEffects();
 				expect(mountCallback, "Mount event should fire as a self-healing operation").toHaveBeenCalledTimes(1);
 
 				parent.remove();

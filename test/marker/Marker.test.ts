@@ -34,23 +34,51 @@ async function flushLifecycle (): Promise<void> {
 }
 
 function captureOrphanCheck (): {
+	timeoutHandler: (() => void) | null;
 	orphanCheck: (() => void) | null;
+	queuedError: (() => void) | null;
 	restore: () => void;
 } {
+	let timeoutHandler: (() => void) | null = null;
 	let orphanCheck: (() => void) | null = null;
+	let queuedError: (() => void) | null = null;
+	const originalThen = Promise.prototype.then;
+	const patchedThen: typeof Promise.prototype.then = function patchedThen<TResult1 = any, TResult2 = never> (
+		this: Promise<any>,
+		onFulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+		onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+	): Promise<TResult1 | TResult2> {
+		if (typeof onFulfilled === "function") {
+			orphanCheck = onFulfilled as unknown as () => void;
+		}
+
+		return originalThen.call(this, onFulfilled, onRejected) as Promise<TResult1 | TResult2>;
+	};
+	Promise.prototype.then = patchedThen;
+	const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback: VoidFunction) => {
+		queuedError = callback as () => void;
+	});
 	const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler) => {
 		if (typeof handler === "function") {
-			orphanCheck = handler as unknown as () => void;
+			timeoutHandler = handler as unknown as () => void;
 		}
 
 		return 0 as unknown as ReturnType<typeof setTimeout>;
 	}) as unknown as typeof setTimeout);
 
 	return {
+		get timeoutHandler (): (() => void) | null {
+			return timeoutHandler;
+		},
 		get orphanCheck (): (() => void) | null {
 			return orphanCheck;
 		},
+		get queuedError (): (() => void) | null {
+			return queuedError;
+		},
 		restore (): void {
+			Promise.prototype.then = originalThen;
+			queueMicrotaskSpy.mockRestore();
 			setTimeoutSpy.mockRestore();
 		},
 	};
@@ -179,8 +207,11 @@ describe("Marker", () => {
 
 		try {
 			Marker("orphan");
+			expect(orphanCapture.timeoutHandler).toBeTypeOf("function");
 			expect(orphanCapture.orphanCheck).toBeTypeOf("function");
-			expect(() => orphanCapture.orphanCheck?.()).toThrow("Markers must be connected to the document or have a managed owner before the next tick.");
+			expect(() => orphanCapture.orphanCheck?.()).not.toThrow();
+			expect(orphanCapture.queuedError).toBeTypeOf("function");
+			expect(() => orphanCapture.queuedError?.()).toThrow("Markers must be connected to the document or have a managed owner before the next tick.");
 		} finally {
 			orphanCapture.restore();
 		}

@@ -1,4 +1,5 @@
 import { Owner, type CleanupFunction } from "../state/State";
+import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
 import { EventManipulator } from "./EventManipulator";
 
 declare global {
@@ -187,7 +188,7 @@ class MarkerClass extends Owner {
 	private explicitOwner: Owner | null = null;
 	private releaseExplicitOwner: CleanupFunction = noop;
 	private mounted = false;
-	private orphanCheckId: ReturnType<typeof setTimeout> | null = null;
+	private orphanCheckId: DeferredTimeoutHandle | null = null;
 
 	/**
 	 * Creates a new marker comment with the given identifier text.
@@ -312,7 +313,7 @@ class MarkerClass extends Owner {
 			return;
 		}
 
-		clearTimeout(this.orphanCheckId);
+		this.orphanCheckId.cancel();
 		this.orphanCheckId = null;
 	}
 
@@ -327,7 +328,7 @@ class MarkerClass extends Owner {
 			return;
 		}
 
-		this.orphanCheckId = setTimeout(() => {
+		this.orphanCheckId = scheduleTimeoutPromise(() => {
 			this.orphanCheckId = null;
 
 			if (this.disposed) {
@@ -340,7 +341,7 @@ class MarkerClass extends Owner {
 			}
 
 			throw new Error(orphanedMarkerErrorMessage);
-		}, 0);
+		});
 	}
 
 	private isManaged (): boolean {

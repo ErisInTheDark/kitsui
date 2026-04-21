@@ -7,6 +7,7 @@ import type { ComponentHTMLElementEventMap } from "./EventManipulator";
 import { EventManipulator } from "./EventManipulator";
 import { Marker } from "./Marker";
 import { TextManipulator } from "./TextManipulator";
+import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
 
 declare global {
 	interface Node {
@@ -287,7 +288,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	private readonly structuralCleanups = new Set<CleanupFunction>();
 	private mounted = false;
 	private onBeforeMove: (() => void) | null = null;
-	private orphanCheckId: ReturnType<typeof setTimeout> | null = null;
+	private orphanCheckId: DeferredTimeoutHandle | null = null;
 
 	constructor (tagNameOrElement: string | HTMLElement) {
 		super();
@@ -888,7 +889,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			return;
 		}
 
-		clearTimeout(this.orphanCheckId);
+		this.orphanCheckId.cancel();
 		this.orphanCheckId = null;
 	}
 
@@ -902,7 +903,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			return;
 		}
 
-		this.orphanCheckId = setTimeout(() => {
+		this.orphanCheckId = scheduleTimeoutPromise(() => {
 			this.orphanCheckId = null;
 
 			if (this.disposed) {
@@ -915,7 +916,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			}
 
 			throw new Error(orphanedComponentErrorMessage);
-		}, 0);
+		});
 	}
 
 	private isManaged (): boolean {

@@ -37,23 +37,51 @@ async function flushEffects (): Promise<void> {
 }
 
 function captureOrphanCheck (): {
+	timeoutHandler: (() => void) | null;
 	orphanCheck: (() => void) | null;
+	queuedError: (() => void) | null;
 	restore: () => void;
 } {
+	let timeoutHandler: (() => void) | null = null;
 	let orphanCheck: (() => void) | null = null;
+	let queuedError: (() => void) | null = null;
+	const originalThen = Promise.prototype.then;
+	const patchedThen: typeof Promise.prototype.then = function patchedThen<TResult1 = any, TResult2 = never> (
+		this: Promise<any>,
+		onFulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+		onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+	): Promise<TResult1 | TResult2> {
+		if (typeof onFulfilled === "function") {
+			orphanCheck = onFulfilled as unknown as () => void;
+		}
+
+		return originalThen.call(this, onFulfilled, onRejected) as Promise<TResult1 | TResult2>;
+	};
+	Promise.prototype.then = patchedThen;
+	const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback: VoidFunction) => {
+		queuedError = callback as () => void;
+	});
 	const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler) => {
 		if (typeof handler === "function") {
-			orphanCheck = handler as unknown as () => void;
+			timeoutHandler = handler as unknown as () => void;
 		}
 
 		return 0 as unknown as ReturnType<typeof setTimeout>;
 	}) as unknown as typeof setTimeout);
 
 	return {
+		get timeoutHandler (): (() => void) | null {
+			return timeoutHandler;
+		},
 		get orphanCheck (): (() => void) | null {
 			return orphanCheck;
 		},
+		get queuedError (): (() => void) | null {
+			return queuedError;
+		},
 		restore (): void {
+			Promise.prototype.then = originalThen;
+			queueMicrotaskSpy.mockRestore();
 			setTimeoutSpy.mockRestore();
 		},
 	};
@@ -371,7 +399,7 @@ describe("State", () => {
 		expect(listener).toHaveBeenCalledTimes(1);
 	});
 
-	/** Verifies ownerless construction preserves the value and reports no owner. */
+	/** Verifies ownerless construction preserves the value, reports no owner, and schedules orphan validation through Promise.then. */
 	it("can be constructed without an owner", () => {
 		const orphanCheckSpy = captureOrphanCheck();
 
@@ -380,7 +408,8 @@ describe("State", () => {
 
 			expect(state.value, "ownerless state should preserve its initial value").toBe(5);
 			expect(state.getOwner(), "ownerless state should report a null owner").toBeNull();
-			expect(orphanCheckSpy.orphanCheck, "ownerless state should schedule an orphan check").not.toBeNull();
+			expect(orphanCheckSpy.timeoutHandler, "ownerless state should still arm a timeout-backed tick").toBeTypeOf("function");
+			expect(orphanCheckSpy.orphanCheck, "ownerless state should schedule the orphan check through Promise.then").not.toBeNull();
 		}
 		finally {
 			orphanCheckSpy.restore();
@@ -394,8 +423,11 @@ describe("State", () => {
 		try {
 			State(1);
 
-			expect(orphanCheckSpy.orphanCheck, "ownerless state should register an orphan check callback").not.toBeNull();
-			expect(() => orphanCheckSpy.orphanCheck!(), "ownerless state should throw if it remains ownerless on the next tick").toThrowError("States must have an owner before the next tick.");
+			expect(orphanCheckSpy.timeoutHandler, "ownerless state should still arm a timeout-backed tick").toBeTypeOf("function");
+			expect(orphanCheckSpy.orphanCheck, "ownerless state should register the orphan check through Promise.then").not.toBeNull();
+			expect(() => orphanCheckSpy.orphanCheck!(), "ownerless state should defer its uncaught rethrow").not.toThrow();
+			expect(orphanCheckSpy.queuedError, "ownerless state should queue an uncaught rethrow").toBeTypeOf("function");
+			expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the orphan error").toThrowError("States must have an owner before the next tick.");
 		}
 		finally {
 			orphanCheckSpy.restore();
@@ -414,6 +446,7 @@ describe("State", () => {
 
 			expect(orphanCheckSpy.orphanCheck, "ownerless state should schedule an orphan check before gaining an owner").not.toBeNull();
 			expect(() => orphanCheckSpy.orphanCheck!(), "the orphan check should not throw after an implicit owner is assigned").not.toThrow();
+			expect(orphanCheckSpy.queuedError, "the orphan check should not queue an error after ownership is assigned").toBeNull();
 
 			owner.remove();
 		}
@@ -515,7 +548,9 @@ describe("State", () => {
 			state.subscribe(secondOwner, () => undefined);
 
 			expect(orphanCheckSpy.orphanCheck, "a conflicted ownerless state should reschedule its orphan check").not.toBeNull();
-			expect(() => orphanCheckSpy.orphanCheck!(), "a conflicted ownerless state should still throw if it has no explicit owner by the next tick").toThrowError("States must have an owner before the next tick.");
+			expect(() => orphanCheckSpy.orphanCheck!(), "a conflicted ownerless state should defer its uncaught rethrow").not.toThrow();
+			expect(orphanCheckSpy.queuedError, "a conflicted ownerless state should queue an uncaught rethrow").toBeTypeOf("function");
+			expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the orphan error").toThrowError("States must have an owner before the next tick.");
 
 			firstOwner.remove();
 			secondOwner.remove();
@@ -541,7 +576,9 @@ describe("State", () => {
 
 			expect(state.getOwner(), "a third Component should not be able to restore implicit ownership after a conflict").toBeNull();
 			expect(orphanCheckSpy.orphanCheck, "the conflicted state should still have an orphan check scheduled").not.toBeNull();
-			expect(() => orphanCheckSpy.orphanCheck!(), "the conflicted state should still fail if no explicit owner is assigned").toThrowError("States must have an owner before the next tick.");
+			expect(() => orphanCheckSpy.orphanCheck!(), "the conflicted state should defer its uncaught rethrow").not.toThrow();
+			expect(orphanCheckSpy.queuedError, "the conflicted state should queue an uncaught rethrow").toBeTypeOf("function");
+			expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the orphan error").toThrowError("States must have an owner before the next tick.");
 
 			firstOwner.remove();
 			secondOwner.remove();

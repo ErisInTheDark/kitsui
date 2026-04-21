@@ -70,9 +70,12 @@ describe("build:docs pipeline", () => {
 	it("emits the docs site, the typedoc json model, and every expected page", async () => {
 		const docsJsonPath = path.join(docsDirectory, "kitsui.json");
 		const kitsuiDeclarationPath = path.join(docsDirectory, "kitsui.d.ts");
+		const exampleSourcePath = path.join(docsDirectory, "examples", "cookie-clicker.ts");
+		const examplesJsonPath = path.join(docsDirectory, "examples", "examples.json");
 		await expect(access(docsDirectory)).resolves.toBeUndefined();
 		await expect(access(docsJsonPath)).resolves.toBeUndefined();
 		await expect(access(kitsuiDeclarationPath)).resolves.toBeUndefined();
+		await expect(access(exampleSourcePath)).resolves.toBeUndefined();
 
 		const expectedPages = await listPublicPages(docsPublicDirectory);
 		for (const page of expectedPages) {
@@ -80,6 +83,7 @@ describe("build:docs pipeline", () => {
 		}
 
 		const docsJson = JSON.stringify(JSON.parse(await readFile(docsJsonPath, "utf8")));
+		const examplesJson = await readFile(examplesJsonPath, "utf8");
 		const clientJs = await readFile(path.join(docsDirectory, "client.js"), "utf8");
 		const kitsuiDeclaration = await readFile(kitsuiDeclarationPath, "utf8");
 		const docsModel = JSON.parse(await readFile(docsJsonPath, "utf8")) as {
@@ -111,6 +115,7 @@ describe("build:docs pipeline", () => {
 		const firstManipulator = manipulatorModules[0];
 		const firstManipulatorHtml = await readFile(path.join(docsDirectory, `${firstManipulator}.html`), "utf8");
 		expect(indexHtml.includes('<html lang="en">'), "Missing html element with lang attribute").toBe(true);
+		expect(examplesJson.includes("cookie-clicker.ts"), "Expected docs/examples/examples.json to list cookie-clicker.ts").toBe(true);
 		expect(kitsuiDeclaration.includes('declare module "kitsui" {'), "Missing kitsui module declaration bundle for Monaco").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface ComponentExtensions {'), "Missing flattened ComponentExtensions interface in the main kitsui module").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface StateExtensions<T> {'), "Missing flattened StateExtensions interface in the main kitsui module").toBe(true);
