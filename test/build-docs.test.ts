@@ -70,7 +70,7 @@ describe("build:docs pipeline", () => {
 	it("emits the docs site, the typedoc json model, and every expected page", async () => {
 		const docsJsonPath = path.join(docsDirectory, "kitsui.json");
 		const kitsuiDeclarationPath = path.join(docsDirectory, "kitsui.d.ts");
-		const exampleSourcePath = path.join(docsDirectory, "examples", "cookie-clicker.ts");
+		const exampleSourcePath = path.join(docsDirectory, "examples", "highly-accurate-fishing-simulator.ts");
 		const examplesJsonPath = path.join(docsDirectory, "examples", "examples.json");
 		await expect(access(docsDirectory)).resolves.toBeUndefined();
 		await expect(access(docsJsonPath)).resolves.toBeUndefined();
@@ -115,7 +115,7 @@ describe("build:docs pipeline", () => {
 		const firstManipulator = manipulatorModules[0];
 		const firstManipulatorHtml = await readFile(path.join(docsDirectory, `${firstManipulator}.html`), "utf8");
 		expect(indexHtml.includes('<html lang="en">'), "Missing html element with lang attribute").toBe(true);
-		expect(examplesJson.includes("cookie-clicker.ts"), "Expected docs/examples/examples.json to list cookie-clicker.ts").toBe(true);
+		expect(examplesJson.includes("highly-accurate-fishing-simulator.ts"), "Expected docs/examples/examples.json to list highly-accurate-fishing-simulator.ts").toBe(true);
 		expect(kitsuiDeclaration.includes('declare module "kitsui" {'), "Missing kitsui module declaration bundle for Monaco").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface ComponentExtensions {'), "Missing flattened ComponentExtensions interface in the main kitsui module").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface StateExtensions<T> {'), "Missing flattened StateExtensions interface in the main kitsui module").toBe(true);
@@ -223,6 +223,7 @@ describe("build:docs pipeline", () => {
 		expect(/class="docs-declaration-anchor" href="#[^"]+"/u.test(componentHtml), "Missing declaration # quick-link anchors").toBe(true);
 		expect(/class="docs-type-reference-link" href="Component\.html#[^"]+"/u.test(componentHtml), "Missing internal type reference links").toBe(true);
 		expect(componentHtml.includes('id="Component.attribute"'), "Missing semantic Component.attribute anchor").toBe(true);
+		expect(componentHtml.includes('id="Component.style"'), "Missing semantic Component.style anchor").toBe(true);
 		expect(componentHtml.includes('id="ComponentExtensions.appendTo"'), "Missing semantic ComponentExtensions.appendTo anchor").toBe(true);
 		expect(stateHtml.includes('<title>State - kitsui</title>'), "Missing State page title").toBe(true);
 		expect(stateHtml.includes('<h1 class="docs-component-title">State</h1>'), "Missing State page heading").toBe(true);

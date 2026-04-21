@@ -1,4 +1,5 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
+import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
 import { AriaManipulator } from "./AriaManipulator";
 import { AttributeManipulator } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
@@ -6,8 +7,8 @@ import { ClassManipulator } from "./ClassManipulator";
 import type { ComponentHTMLElementEventMap } from "./EventManipulator";
 import { EventManipulator } from "./EventManipulator";
 import { Marker } from "./Marker";
+import { StyleManipulator } from "./StyleManipulator";
 import { TextManipulator } from "./TextManipulator";
-import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
 
 declare global {
 	interface Node {
@@ -333,6 +334,23 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 
 		const manipulator = new AttributeManipulator(this, this.element);
 		Object.defineProperty(this, "attribute", {
+			configurable: true,
+			enumerable: true,
+			value: manipulator,
+			writable: false,
+		});
+
+		return manipulator;
+	}
+
+	/**
+	 * Lazily creates and memoizes a StyleManipulator for managing inline styles.
+	 */
+	get style (): StyleManipulator<this> {
+		this.ensureActive();
+
+		const manipulator = new StyleManipulator(this, this.element);
+		Object.defineProperty(this, "style", {
 			configurable: true,
 			enumerable: true,
 			value: manipulator,

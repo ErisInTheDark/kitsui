@@ -191,18 +191,14 @@ function mountPreviewFrame (runtime: EditorRuntime, js: string): void {
 	<meta charset="utf-8">
 	${previewGlobalMarkup}
 	<style>
-		html, body { margin: 0; min-height: 100%; }
 		body {
 			background: var(--bg-page, transparent);
 			color: var(--text-primary, inherit);
-			min-height: 100vh;
 			font-size: 13px;
 			line-height: 1.5;
-			white-space: pre-wrap;
 		}
 		#preview-root-shell {
 			background: var(--bg-page, transparent);
-			min-height: 100vh;
 			font-family: var(--font-sans);
 		}
 		pre {

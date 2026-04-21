@@ -5,7 +5,7 @@ kitsui is a DOM-first UI library built around owned `Component` and `State` obje
 ## Preferred Style
 
 - Write small factory functions that return a `Component`.
-- Build most structure in one fluent chain, then use targeted manipulators for classes, attributes, and ARIA.
+- Build most structure in one fluent chain, then use targeted manipulators for classes, inline styles, attributes, and ARIA.
 - Create `State` inside the component or owner that should dispose it.
 - Use derived state and conditional helpers instead of manual DOM bookkeeping.
 - Prefer `Style` objects over raw class strings once styling becomes reusable.
@@ -97,7 +97,7 @@ badge.place(root, (Place) => {
 
 ## Styles, Classes, Attributes
 
-`Style` registers reusable CSS classes. `Style({ ... })` creates reusable style definition fragments that can be spread into multiple class definitions to reduce duplication. `component.class` applies and removes those `Style` objects, including reactive style selections. `component.attribute` manages both valueless and valued attributes, including reactive names and values.
+`Style` registers reusable CSS classes. `Style({ ... })` creates reusable style definition fragments that can be spread into multiple class definitions to reduce duplication. `component.class` applies and removes those `Style` objects, including reactive style selections. `component.style` manages inline style properties with direct values, whole-definition state, or per-property state. `component.attribute` manages both valueless and valued attributes, including reactive names and values.
 
 ```js
 const baseCard = Style({
@@ -118,16 +118,27 @@ const raised = Style.after(card).Class("card-raised", {
 
 const panel = Component("section")
 	.class.add(card)
+	.style.set({
+		$panelAccent: "#0a7",
+		borderColor: "$panelAccent",
+	})
 	.use((panel) => {
 		const elevated = State(panel, false)
 		const selected = State(panel, false)
+		const gap = State<string | null | undefined>(panel, "12px")
 
 		panel
 			.class.bind(elevated, raised)
+			.style.set({
+				gap,
+				opacity: selected.map(panel, (value) => value ? 1 : 0.85),
+			})
 			.attribute.set("data-kind", "card")
 			.attribute.bind(selected, { name: "aria-selected", value: "true" })
 	});
 ```
+
+Use `component.style` for one-off or reactive inline properties. Use `Style.Class` when the styling should be reusable, selectable, or shared across multiple components.
 
 If you need ARIA-specific helpers, `component.aria` provides typed wrappers around common ARIA attributes such as role, label, references, booleans, `current`, and `live`.
 
@@ -160,7 +171,7 @@ label.set("one")
 - `Component(tagNameOrElement)`, `Component.wrap(element)`, `Component.extend()`
 - Instance methods: `append`, `prepend`, `insert`, `appendWhen`, `prependWhen`, `insertWhen`, `clear`, `setAttribute`, `use`, `setOwner`, `getOwner`, `remove`
 - Extension methods: `appendTo`, `prependTo`, `insertTo`, `appendToWhen`, `prependToWhen`, `insertToWhen`, `place`
-- Accessors: `class`, `attribute`, `aria`, `text`, `event`
+- Accessors: `class`, `style`, `attribute`, `aria`, `text`, `event`
 
 `State` and `Owner`
 
@@ -174,6 +185,7 @@ label.set("one")
 
 - `Style(definition)` (reusable fragment), `Style.Class(className, definition)`, `Style.after(...styles).Class(className, definition)`
 - `ClassManipulator`: `add`, `remove`, `bind`, `addFrom`
+- `StyleManipulator`: `set`
 - `AttributeManipulator`: `add`, `set`, `remove`, `bind`
 - `TextManipulator`: `set`, `bind`
 - `EventManipulator`: `on`, `off`, `owned`
@@ -184,7 +196,7 @@ label.set("one")
 - Components: `ComponentRender`, `ComponentChild`, `AppendableComponentChild`, `ComponentSelection`, `ComponentSelectionState`, `InsertWhere`, `InsertableNode`, `InsertableSelection`, `InsertableComponentChild`, `ExtendableComponentClass`
 - Text: `TextValue`, `TextSelection`, `TextInput`, `TextSource`
 - State: `CleanupFunction`, `StateOptions`, `StateListener`, `StateUpdater`, `StateEqualityFunction`, `ExtendableStateClass`
-- Styling and attributes: `StyleDefinition`, `StyleValue`, `StyleInput`, `StyleSelection`, `Falsy`, `AttributeEntry`, `AttributeNameInput`, `AttributeNameSelection`, `AttributeValue`, `AttributeValueInput`, `AttributeValueSelection`
+- Styling and attributes: `StyleDefinition`, `StyleValue`, `StyleInput`, `StyleSelection`, `StyleAttributeDefinition`, `StyleAttributeInput`, `StyleAttributeValue`, `StyleAttributeValueInput`, `Falsy`, `AttributeEntry`, `AttributeNameInput`, `AttributeNameSelection`, `AttributeValue`, `AttributeValueInput`, `AttributeValueSelection`
 - Placement: `Place`, `PlaceSource`, `PlacementTarget`, `PlacerFunction`
 - ARIA: the entrypoint also re-exports the typed ARIA unions and inputs used by `AriaManipulator`, including roles, booleans, references, `current`, and `live`
 

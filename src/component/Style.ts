@@ -1,6 +1,7 @@
 import { Marker } from "../component/Marker";
 import { Owner } from "../state/State";
 import Arrays from "../utility/Arrays";
+import { expandVariableAccessShorthand, toCssPropertyName } from "./styleValue";
 
 /**
  * A CSS property value that can be a string or number.
@@ -53,18 +54,6 @@ const resetRules: string[] = [];
 const rootRules: string[] = [];
 let styleElement: HTMLStyleElement | null = null;
 const animationMarkerOwner = new class StyleAnimationOwner extends Owner { }();
-
-function toCssPropertyName (propertyName: string): string {
-	if (propertyName.startsWith("--")) {
-		return propertyName;
-	}
-
-	if (propertyName.startsWith("$")) {
-		propertyName = `--${propertyName.slice(1)}`;
-	}
-
-	return propertyName.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
-}
 
 function isNestedDefinition (key: string, value: unknown): value is StyleDefinition {
 	return typeof value === "object" && value !== null && key.startsWith("{");
@@ -191,122 +180,6 @@ function serializeRules (selector: string, definition: StyleDefinition): string[
 
 function serializeDefinition (className: string, definition: StyleDefinition): string {
 	return serializeRules(`.${className}`, definition).join("\n");
-}
-
-function isWordCharacter (character: string): boolean {
-	const charCode = character.charCodeAt(0);
-	return (false
-		|| (charCode >= 48 && charCode <= 57) // 0-9
-		|| (charCode >= 65 && charCode <= 90) // A-Z
-		|| (charCode >= 97 && charCode <= 122) // a-z
-		|| charCode === 45 // -
-		|| charCode === 95 // _
-	);
-}
-
-function isWhitespaceCharacter (character: string): boolean {
-	const charCode = character.charCodeAt(0);
-	return (false
-		|| charCode === 32 // space
-		|| charCode === 9 // tab
-		|| charCode === 10 // newline
-		|| charCode === 13 // carriage return
-	);
-}
-
-function expandVariableAccessShorthand (styleValue: StyleValue): StyleValue {
-	if (typeof styleValue === "number") {
-		return String(styleValue);
-	}
-
-	const src = styleValue;
-
-	let i = 0;
-	function consumeChar (expected: string): boolean {
-		if (src[i] === expected) {
-			i++;
-			return true;
-		}
-
-		return false;
-	}
-
-	function consumeWord (): string {
-		let j = i;
-		for (; i < src.length; i++) {
-			const character = src[i];
-			if (!isWordCharacter(character)) {
-				break;
-			}
-		}
-
-		return src.slice(j, i);
-	}
-
-	function consumeWhitespace (): string {
-		let result = "";
-		while (i < src.length && isWhitespaceCharacter(src[i])) {
-			result += src[i++];
-		}
-		return result;
-	}
-
-	let awaitingClosingBrace = 0;
-	function consumeVariableAccess (): string | undefined {
-		const restorePoint = i;
-		if (!consumeChar("$")) {
-			return undefined;
-		}
-
-		if (!consumeChar("{")) {
-			const variableName = consumeWord();
-			if (!variableName) {
-				i = restorePoint;
-				return undefined;
-			}
-
-			return `var(${toCssPropertyName(`$${variableName}`)})`;
-		}
-
-		consumeWhitespace();
-		const variableName = consumeWord();
-		if (!variableName) {
-			i = restorePoint;
-			return undefined;
-		}
-
-		consumeWhitespace();
-		if (!consumeChar(":")) {
-			i = restorePoint;
-			return undefined;
-		}
-
-		consumeWhitespace();
-		awaitingClosingBrace++;
-		const fallbackValue = consumeStyleValue();
-		consumeWhitespace();
-		if (!consumeChar("}")) {
-			i = restorePoint;
-			return undefined;
-		}
-
-		return `var(${toCssPropertyName(`$${variableName}`)}, ${fallbackValue})`;
-	}
-
-	function consumeStyleValue (): string {
-		let result = "";
-		do {
-			if (awaitingClosingBrace && src[i] === "}") {
-				awaitingClosingBrace--;
-				return result;
-			}
-
-			result += consumeWhitespace() || consumeVariableAccess() || src[i++];
-		} while (i < src.length);
-		return result;
-	}
-
-	return consumeStyleValue();
 }
 
 function getStyleElement (): HTMLStyleElement | null {

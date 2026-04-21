@@ -72,6 +72,8 @@ export {
     whenStuck
 } from "./component/Style";
 export type { AnimationMarker, FontFaceDefinition, KeyframesDefinition, StyleDefinition, StyleValue } from "./component/Style";
+export { StyleManipulator } from "./component/StyleManipulator";
+export type { StyleAttributeDefinition, StyleAttributeInput, StyleAttributeValue, StyleAttributeValueInput } from "./component/StyleManipulator";
 export { TextManipulator } from "./component/TextManipulator";
 export type { TextInput, TextSelection, TextValue } from "./component/TextManipulator";
 export type { Mapper } from "./state/extensions/mappingExtension";
