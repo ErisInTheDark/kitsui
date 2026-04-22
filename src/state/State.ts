@@ -357,6 +357,17 @@ class StateClass<T> extends Owner {
 	}
 
 	/**
+	 * Replaces the internal state value without checking disposal or notifying listeners.
+	 * This is intended for silent state resets during disposal and cleanup flows.
+	 * @param nextValue The new value for this state.
+	 * @returns The stored state value.
+	 */
+	clear (nextValue: T): T {
+		this.currentValue = nextValue;
+		return this.currentValue;
+	}
+
+	/**
 	 * Updates the state by applying a function to the current value.
 	 * @param updater Function that transforms the current value to a new value.
 	 * @returns The new state value.
@@ -773,6 +784,7 @@ State.extend = function extend (): ExtendableStateClass {
 State.Readonly = function Readonly<T> (value: T): State<T> {
 	const readonlyState = new StateClass(null, value);
 	readonlyState["clearOrphanCheck"]();
+	readonlyState.clear = () => readonlyState.value;
 	readonlyState.set = ident;
 	readonlyState.update = () => readonlyState.value;
 	return readonlyState;

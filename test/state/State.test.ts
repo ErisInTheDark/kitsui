@@ -125,6 +125,25 @@ describe("State", () => {
 		expect(state.value).toBe(2);
 	});
 
+	/** Verifies clear updates the stored value without notifying immediate or queued listeners. */
+	it("clears values without notifying listeners", async () => {
+		const state = State(mountedOwner(), "idle");
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		state.clear("done");
+
+		expect(state.value, "clear should replace the current value immediately").toBe("done");
+		expect(immediateListener, "clear should not notify immediate listeners").not.toHaveBeenCalled();
+
+		await flushEffects();
+
+		expect(queuedListener, "clear should not notify queued listeners").not.toHaveBeenCalled();
+	});
+
 	it("batches queued subscribers with the original and final values", async () => {
 		const state = State(mountedOwner(), "idle");
 		const calls: Array<[string, string]> = [];
@@ -375,6 +394,30 @@ describe("State", () => {
 		owner.remove();
 
 		expect(state.disposed).toBe(true);
+	});
+
+	/** Verifies clear can run from a state cleanup handler during disposal after disposed becomes true. */
+	it("allows clear during cleanup while disposing", () => {
+		const state = State(mountedOwner(), 1);
+		const clearDuringCleanup = vi.fn(() => {
+			expect(state.disposed, "the state should already be marked disposed inside cleanup").toBe(true);
+			state.clear(2);
+		});
+
+		state.onCleanup(clearDuringCleanup);
+
+		expect(() => state.dispose(), "clear should be allowed during state cleanup").not.toThrow();
+		expect(clearDuringCleanup, "state cleanup should run during disposal").toHaveBeenCalledOnce();
+		expect(state.value, "clear during cleanup should update the internal value").toBe(2);
+	});
+
+	/** Verifies readonly states ignore clear to preserve immutability. */
+	it("ignores clear on readonly states", () => {
+		const readonlyState = State.Readonly(1);
+
+		expect(readonlyState.clear(2), "clear should return the retained readonly value").toBe(1);
+
+		expect(readonlyState.value, "clear should not mutate readonly states").toBe(1);
 	});
 
 	it("supports custom equality functions", async () => {

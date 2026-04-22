@@ -17,3 +17,4 @@ yarn-error.log*
 pnpm-debug.log*
 /dist/
 /docs/
+/test/.tmp/

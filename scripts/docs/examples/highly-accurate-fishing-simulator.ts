@@ -19,6 +19,7 @@ interface UpgradeDefinition {
 	cost: State<number>;
 	description: string;
 	effect: string;
+	levelLabel: State<string>;
 	name: string;
 	onBuy (): void;
 	unlocked: State<boolean>;
@@ -131,6 +132,11 @@ const summaryStyle = Style.Class("fish-sim-summary", {
 	fontSize: "14px",
 	lineHeight: 1.5,
 	margin: 0,
+})
+
+const summaryPrimaryStatStyle = Style.Class("fish-sim-summary-primary-stat", {
+	color: "$textBright",
+	fontWeight: 800,
 })
 
 const columnsStyle = Style.Class("fish-sim-columns", {
@@ -837,34 +843,92 @@ function formatFish (value: number): string {
 	return Math.floor(value).toLocaleString("en-US")
 }
 
+function formatMoney (value: number): string {
+	return `$${formatFish(value)}`
+}
+
+function formatMoneyRate (value: number): string {
+	return `$${value.toFixed(2)}`
+}
+
+function toRomanNumeral (value: number): string {
+	const numerals = [
+		{ value: 1000, symbol: "M" },
+		{ value: 900, symbol: "CM" },
+		{ value: 500, symbol: "D" },
+		{ value: 400, symbol: "CD" },
+		{ value: 100, symbol: "C" },
+		{ value: 90, symbol: "XC" },
+		{ value: 50, symbol: "L" },
+		{ value: 40, symbol: "XL" },
+		{ value: 10, symbol: "X" },
+		{ value: 9, symbol: "IX" },
+		{ value: 5, symbol: "V" },
+		{ value: 4, symbol: "IV" },
+		{ value: 1, symbol: "I" },
+	] as const
+
+	let remaining = Math.max(1, Math.floor(value))
+	let result = ""
+
+	for (const numeral of numerals) {
+		while (remaining >= numeral.value) {
+			result += numeral.symbol
+			remaining -= numeral.value
+		}
+	}
+
+	return result
+}
+
+function formatCatchSummary (catchTotals: Record<FishMultiplier, number>): string {
+	const parts: string[] = []
+
+	let skippedZero = false
+	for (const multiplier of fishMultipliers) {
+		const count = catchTotals[multiplier]
+		if (count > 0 || !skippedZero) {
+			parts.push(`${formatFish(count)} ${fishTierSpecies[multiplier - 1]}`)
+			skippedZero = true
+		}
+	}
+
+	while (parts.length < fishMultipliers.length) {
+		parts.push("0 ❓")
+	}
+
+	return parts.join(", ")
+}
+
 function createUpgradeDefinition (
 	root: Component,
 	purchaseCount: State<number>,
 	blueprint: UpgradeBlueprint,
 	resources: {
-		fishCount: State<number>;
+		money: State<number>;
 		unlockProgress: State<number>;
 	},
 ): UpgradeDefinition {
-	const cost = purchaseCount.map(currentCount => Math.round(blueprint.baseCost * blueprint.growth ** currentCount))
+	const cost = purchaseCount.map(root, currentCount => Math.round(blueprint.baseCost * blueprint.growth ** currentCount))
 	const budget = State.Group(root, {
 		cost,
-		fishCount: resources.fishCount,
+		money: resources.money,
 	})
-	const canAfford = budget.map(({ cost, fishCount }) => fishCount >= cost)
+	const canAfford = budget.map(({ cost, money }) => money >= cost)
 	const unlocked = blueprint.unlockAt <= 0
 		? State.Readonly(true)
 		: resources.unlockProgress.map(progress => progress >= blueprint.unlockAt)
+	const levelLabel = purchaseCount.map(root, currentCount => toRomanNumeral(currentCount + 1))
 	const buttonLabel = State.Group(root, {
 		cost,
-		fishCount: resources.fishCount,
+		money: resources.money,
 		unlocked,
-	}).map(({ cost, fishCount, unlocked }) => {
+	}).map(({ cost, money, unlocked }) => {
 		if (!unlocked) {
 			return "Unavailable"
 		}
 
-		return fishCount >= cost ? `${blueprint.action} (${formatFish(cost)})` : `Need ${formatFish(cost)}`
+		return money >= cost ? `${blueprint.action} (${formatMoney(cost)})` : `Need ${formatMoney(cost)}`
 	})
 
 	return {
@@ -873,6 +937,7 @@ function createUpgradeDefinition (
 		cost,
 		description: blueprint.description,
 		effect: blueprint.effect,
+		levelLabel,
 		name: blueprint.name,
 		onBuy () {
 			blueprint.onBuy(cost.value)
@@ -881,7 +946,7 @@ function createUpgradeDefinition (
 	}
 }
 
-function DockWorker (autoFish: State<number>, fishCount: State<number>, captainLog: State<string>): Component {
+function DockWorker (autoFish: State<number>, money: State<number>, captainLog: State<string>): Component {
 	const worker = Component("div")
 		.attribute.add("hidden")
 		.aria.hidden(true)
@@ -913,8 +978,8 @@ function DockWorker (autoFish: State<number>, fishCount: State<number>, captainL
 				return
 			}
 
-			fishCount.update(total => total + autoFish.value)
-			captainLog.set(`Your side crew quietly hauled in ${formatFish(autoFish.value)} fish while you maintained strong clipboard energy.`)
+			money.update(total => total + autoFish.value)
+			captainLog.set(`Your side crew quietly hauled in ${formatMoney(autoFish.value)} while you maintained strong clipboard energy.`)
 		}, 1000)
 	}
 
@@ -943,7 +1008,10 @@ function UpgradeCard (root: Component, definition: UpgradeDefinition): Component
 
 	const title = Component("h3")
 		.class.add(upgradeNameStyle)
-		.text.set(definition.unlocked.map(root, unlocked => unlocked ? definition.name : "???"))
+			.text.set(State.Group(root, {
+				levelLabel: definition.levelLabel,
+				unlocked: definition.unlocked,
+			}).map(({ levelLabel, unlocked }) => unlocked ? `${definition.name} ${levelLabel}` : "???"))
 
 	const detail = Component("p")
 		.class.add(upgradeMetaStyle)
@@ -1066,7 +1134,7 @@ function FishSchool (
 				template: fishState.template,
 			}).map(({ mutated, power, template }) => {
 				const valueMultiplier = template.multiplier * (mutated ? 3 : 1)
-				return `Catch ${mutated ? `radioactive ${template.name}` : template.name}. Worth ${valueMultiplier}x for +${formatFish(power * valueMultiplier)} fish.`
+				return `Catch ${mutated ? `radioactive ${template.name}` : template.name}. Worth ${valueMultiplier}x for +${formatMoney(power * valueMultiplier)}.`
 			}))
 			.style.set(style)
 			.event.owned.on.mousedown(onClickCatch)
@@ -1455,7 +1523,7 @@ function FishMagnetActor (
 	magnet.event.owned.on.Dispose(() => {
 		active = false
 		clearTimers()
-		magnetTarget.set(null)
+		magnetTarget.clear(null)
 	})
 
 	return magnet
@@ -1607,44 +1675,105 @@ function GullFleet (
 	return fleet
 }
 
+function RollingIncomeTracker (money: State<number>, rollingIncome: State<number>, resetVersion: State<number>): Component {
+	const tracker = Component("div")
+		.attribute.add("hidden")
+		.aria.hidden(true)
+
+	const windowMs = 10_000
+	const updateIntervalMs = 250
+	const samples: { amount: number; time: number }[] = []
+	let lastMoney = money.value
+	let intervalId: number | null = null
+
+	const pruneSamples = (): void => {
+		const cutoff = Date.now() - windowMs
+		while (samples.length > 0 && samples[0].time < cutoff) {
+			samples.shift()
+		}
+	}
+
+	const syncRollingIncome = (): void => {
+		pruneSamples()
+		const income = samples.reduce((total, sample) => total + sample.amount, 0)
+		rollingIncome.set(income / (windowMs / 1000))
+		if (samples.length === 0 && intervalId !== null) {
+			intervalId = clearScheduledInterval(intervalId)
+		}
+	}
+
+	const ensureTimer = (): void => {
+		if (intervalId !== null) {
+			return
+		}
+
+		intervalId = scheduleInterval(intervalId, syncRollingIncome, updateIntervalMs)
+	}
+
+	money.subscribe(tracker, nextMoney => {
+		const delta = nextMoney - lastMoney
+		lastMoney = nextMoney
+
+		if (delta > 0) {
+			samples.push({ amount: delta, time: Date.now() })
+			ensureTimer()
+		}
+
+		syncRollingIncome()
+	})
+
+	resetVersion.subscribe(tracker, () => {
+		samples.length = 0
+		lastMoney = money.value
+		rollingIncome.set(0)
+	})
+
+	tracker.event.owned.on.Dispose(() => {
+		intervalId = clearScheduledInterval(intervalId)
+	})
+
+	return tracker
+}
+
 export default function FishingSimExample (): Component {
 	const root = Component("div")
 		.class.add(shellStyle)
 
-	const fishCount = new State(root, 0)
+	const money = new State(root, 0)
 	const catchPower = new State(root, 1)
 	const autoFish = new State(root, 0)
 	const fishMagnetPurchases = new State(root, 0)
 	const internGulls = new State(root, 0)
 	const magnetTarget = new State<{ left: number; top: number } | null>(root, null)
 	const radioactiveWasteDump = new State(root, 0)
-	const totalCatches = new State(root, 0)
+	const resetVersion = new State(root, 0)
+	const rollingIncome = new State(root, 0)
+	const catchTotals = new State<Record<FishMultiplier, number>>(root, {
+		1: 0,
+		2: 0,
+		3: 0,
+		4: 0,
+	})
 	const pondFishAdded = new State(root, 0)
 	const captainLog = new State(root, "The pond is calm. That usually means the fish are plotting.")
-	const fishTier = pondFishAdded.map(root, fishAdded => getFishTier(fishAdded))
 	const fishHandles: PondFishHandle[] = []
 
-	const fishEmoji = fishTier.map(root, tier => fishTierSpecies[tier])
-
-	const situationReport = State.Group(root, {
-		autoFish,
-		catchPower,
-		fishCount,
-		fishEmoji,
-		fishTier,
-	}).map(({ autoFish, catchPower, fishCount, fishEmoji, fishTier }) => `${fishEmoji} ${formatFish(fishCount)} fish · ${formatFish(catchPower)}/base click · ${formatFish(autoFish)}/sec`)
+	const catchSummary = catchTotals.map(totals => `All catches: ${formatCatchSummary(totals)}`)
 
 	function catchFish (fish: FishTemplate, source: "click" | "gull", valueMultiplier: number, mutated: boolean): void {
 		const haul = catchPower.value * valueMultiplier
 		const fishLabel = mutated ? `radioactive ${fish.name}` : fish.name
-		fishCount.update(total => total + haul)
+		money.update(total => total + haul)
+		catchTotals.update(totals => ({
+			...totals,
+			[fish.multiplier]: totals[fish.multiplier as FishMultiplier] + 1,
+		}))
 		if (source === "click") {
-			totalCatches.update(total => total + 1)
-			captainLog.set(`You hooked a ${fishLabel} for +${formatFish(haul)} fish. The rest of the school took that personally.`)
+			captainLog.set(`You hooked a ${fishLabel} for +${formatMoney(haul)}. The rest of the school took that personally.`)
 			return
 		}
 
-		captainLog.set(`An intern gull stole a ${fishLabel} for +${formatFish(haul)} fish and refused to file paperwork.`)
+		captainLog.set(`An intern gull stole a ${fishLabel} for +${formatMoney(haul)} and refused to file paperwork.`)
 	}
 
 	const upgradePurchases = [
@@ -1655,7 +1784,7 @@ export default function FishingSimExample (): Component {
 	]
 
 	function resetGame (): void {
-		fishCount.set(0)
+		money.set(0)
 		catchPower.set(1)
 		autoFish.set(0)
 		fishMagnetPurchases.set(0)
@@ -1663,7 +1792,14 @@ export default function FishingSimExample (): Component {
 		magnetTarget.set(null)
 		radioactiveWasteDump.set(0)
 		pondFishAdded.set(0)
-		totalCatches.set(0)
+		rollingIncome.set(0)
+		catchTotals.set({
+			1: 0,
+			2: 0,
+			3: 0,
+			4: 0,
+		})
+		resetVersion.update(version => version + 1)
 		captainLog.set("Everything is reset. The fish insist the previous round should not be admissible.")
 		for (const purchaseCount of upgradePurchases) {
 			purchaseCount.set(0)
@@ -1688,7 +1824,15 @@ export default function FishingSimExample (): Component {
 				.text.set("Reactive state, ARIA, placement, lifecycle, and one increasingly suspicious fish."),
 			Component("p")
 				.class.add(summaryStyle)
-				.text.set(situationReport),
+				.append(
+					Component("strong")
+						.class.add(summaryPrimaryStatStyle)
+						.text.set(money.map(value => formatMoney(value))),
+					Component("span")
+						.text.set(rollingIncome.map(value => ` (${formatMoneyRate(value)}/s)`)),
+					Component("span")
+						.text.set(catchSummary.map(summary => ` · ${summary}`)),
+				),
 		)
 		.appendTo(root)
 
@@ -1753,7 +1897,7 @@ export default function FishingSimExample (): Component {
 			growth: 1.2,
 			name: "Restock pond",
 			onBuy (cost) {
-				fishCount.update(total => total - cost)
+				money.update(total => total - cost)
 				pondFishAdded.update(total => total + 1)
 				upgradePurchases[0].update(count => count + 1)
 				captainLog.set("You added another fish to the pond. The population immediately got ideas.")
@@ -1768,7 +1912,7 @@ export default function FishingSimExample (): Component {
 			growth: 2,
 			name: "Sticky-fingered intern",
 			onBuy (cost) {
-				fishCount.update(total => total - cost)
+				money.update(total => total - cost)
 				internGulls.update(total => total + 1)
 				upgradePurchases[1].update(count => count + 1)
 				captainLog.set("You hired a sticky-fingered intern. It did not bring doughnuts to the office.")
@@ -1783,7 +1927,7 @@ export default function FishingSimExample (): Component {
 			growth: 1.5,
 			name: "Fish magnet",
 			onBuy (cost) {
-				fishCount.update(total => total - cost)
+				money.update(total => total - cost)
 				fishMagnetPurchases.update(total => total + 1)
 				upgradePurchases[2].update(count => count + 1)
 				captainLog.set("The fish magnet is online. No one has checked whether that should be legal.")
@@ -1798,7 +1942,7 @@ export default function FishingSimExample (): Component {
 			growth: 1.2,
 			name: "Radioactive waste dump",
 			onBuy (cost) {
-				fishCount.update(total => total - cost)
+				money.update(total => total - cost)
 				radioactiveWasteDump.update(total => total + 1)
 				upgradePurchases[3].update(count => count + 1)
 				captainLog.set("You approved a radioactive waste dump. The fish are handling it in a way that should concern everyone.")
@@ -1808,7 +1952,7 @@ export default function FishingSimExample (): Component {
 	]
 
 	const upgradeDefinitions = upgradePurchases.map((purchaseCount, index) => createUpgradeDefinition(root, purchaseCount, upgradeBlueprints[index], {
-		fishCount,
+		money,
 		unlockProgress: pondFishAdded,
 	}))
 
@@ -1817,7 +1961,8 @@ export default function FishingSimExample (): Component {
 			.appendTo(upgradesWrap)
 	}
 
-	root.append(DockWorker(autoFish, fishCount, captainLog))
+	root.append(DockWorker(autoFish, money, captainLog))
+	root.append(RollingIncomeTracker(money, rollingIncome, resetVersion))
 
 	return root
 }
