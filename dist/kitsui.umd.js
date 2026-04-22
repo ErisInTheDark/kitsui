@@ -59,6 +59,7 @@ var __kitsui_factory__ = (() => {
     whenActive: () => whenActive,
     whenActiveSelf: () => whenActiveSelf,
     whenClosed: () => whenClosed,
+    whenDisabled: () => whenDisabled,
     whenEmpty: () => whenEmpty,
     whenEven: () => whenEven,
     whenFirst: () => whenFirst,
@@ -325,6 +326,16 @@ var __kitsui_factory__ = (() => {
       return this.currentValue;
     }
     /**
+     * Replaces the internal state value without checking disposal or notifying listeners.
+     * This is intended for silent state resets during disposal and cleanup flows.
+     * @param nextValue The new value for this state.
+     * @returns The stored state value.
+     */
+    clear(nextValue) {
+      this.currentValue = nextValue;
+      return this.currentValue;
+    }
+    /**
      * Updates the state by applying a function to the current value.
      * @param updater Function that transforms the current value to a new value.
      * @returns The new state value.
@@ -569,6 +580,7 @@ var __kitsui_factory__ = (() => {
   State.Readonly = function Readonly(value) {
     const readonlyState = new StateClass(null, value);
     readonlyState["clearOrphanCheck"]();
+    readonlyState.clear = () => readonlyState.value;
     readonlyState.set = ident;
     readonlyState.update = () => readonlyState.value;
     return readonlyState;
@@ -1954,6 +1966,7 @@ ${innerRules}
   var whenHoverSelf = state("hover:not(:has(:hover))");
   var whenActive = state("active");
   var whenActiveSelf = state("active:not(:has(:active))");
+  var whenDisabled = state("disabled");
   var whenFocus = state("has(:focus-visible)");
   var whenFocusSelf = state("focus-visible:not(:has(:focus-visible))");
   var whenFocusAny = state("has(:focus)");

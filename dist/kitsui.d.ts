@@ -949,6 +949,8 @@ export const whenActive: (definition: StyleDefinition) => StyleDefinition;
 
 export const whenActiveSelf: (definition: StyleDefinition) => StyleDefinition;
 
+export const whenDisabled: (definition: StyleDefinition) => StyleDefinition;
+
 export const whenFocus: (definition: StyleDefinition) => StyleDefinition;
 
 export const whenFocusSelf: (definition: StyleDefinition) => StyleDefinition;
@@ -1211,6 +1213,13 @@ class StateClass<T> extends Owner {
      * @throws If the state has been disposed.
      */
     set(nextValue: T): T;
+    /**
+     * Replaces the internal state value without checking disposal or notifying listeners.
+     * This is intended for silent state resets during disposal and cleanup flows.
+     * @param nextValue The new value for this state.
+     * @returns The stored state value.
+     */
+    clear(nextValue: T): T;
     /**
      * Updates the state by applying a function to the current value.
      * @param updater Function that transforms the current value to a new value.
