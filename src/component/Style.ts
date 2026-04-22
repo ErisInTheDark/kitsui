@@ -858,6 +858,21 @@ export const whenActive = state("active");
 export const whenActiveSelf = state("active:not(:has(:active))");
 
 /**
+ * Creates a spreadable pseudo-class selector that matches disabled form controls.
+ * Produces the CSS pseudo-class `:disabled`.
+ *
+ * @param definition - CSS properties to apply while the element is disabled.
+ * @returns A spreadable `StyleDefinition` entry.
+ *
+ * @example
+ * Style.Class("button", {
+ *   ...whenDisabled({ opacity: "0.4" }),
+ * });
+ * // .button:disabled { opacity: 0.4 }
+ */
+export const whenDisabled = state("disabled");
+
+/**
  * Creates a spreadable pseudo-class selector that matches when the element contains
  * a keyboard-focused (`:focus-visible`) descendant.
  * Produces `:has(:focus-visible)`.

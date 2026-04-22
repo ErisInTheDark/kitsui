@@ -62,6 +62,7 @@ export {
     pseudoAfter, pseudoBefore,
     whenActive, whenActiveSelf,
     whenClosed,
+    whenDisabled,
     whenEmpty, whenEven,
     whenFirst, whenFocus, whenFocusAny, whenFocusAnySelf, whenFocusSelf, whenFull,
     whenHover, whenHoverSelf,

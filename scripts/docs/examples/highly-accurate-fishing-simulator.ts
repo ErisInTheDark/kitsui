@@ -1,17 +1,3 @@
-/*
-TODO
-- Replace manual inline style attribute writes with component.style.set() in PondBubble, FishButton, FishMagnetActor, GullFleet.spawnGull, and the pond radioactiveWasteDump binding.
-- Record the escape hatch selectors used here so Style.ts can support them directly: "{& #preview-root-shell}", "{& #preview-root}", and "{&[disabled]}".
-- Split the large style-definition block into clearer sections so the example reads top-down: app layout, pond/depth layers, fish/gulls/magnet, upgrades, and buttons.
-- Simplify FishSchool, especially the nested FishButton closure, by extracting smaller helpers for setup, movement, mutation, and the repeated offscreen/catch transition.
-- Deduplicate the repeated random position, rotation, and scale jitter logic used by the fish and magnet positioning helpers.
-- Deduplicate the repeated timer scheduling and cleanup patterns used by BubbleSpawner, DockWorker, FishButton, FishMagnetActor, and GullFleet.
-- Replace the unclear FishSchool.render() downscale branch with more explicit remove-all, shrink, and grow paths without changing behavior.
-- Extract the many tuning numbers for timings, offsets, rotation ranges, and scale adjustments into named constants with brief intent-revealing names.
-- Add short comments where this file is demonstrating non-obvious patterns: the depth-layer illusion, lifecycle-owned timers, and why fishHandles is mutated in place.
-- Remove or put to use currently unused styles/constants such as panelTextStyle, pondFooterStyle, and tinyNoteStyle.
-*/
-
 import {
     Component,
     elements,
@@ -22,6 +8,7 @@ import {
     StyleAnimation,
     StyleRoot,
     whenActive,
+    whenDisabled,
     whenFocusSelf,
     whenHover,
 } from "kitsui";
@@ -68,11 +55,13 @@ interface PondFishHandle {
 	intersectsGull (gullRect: DOMRect, pondRect: DOMRect): boolean;
 }
 
+type FishMultiplier = 1 | 2 | 3 | 4;
+
 StyleRoot({
 	display: "grid",
 	height: "100%",
 	userSelect: "none",
-	// escape hatch because this example doesn't control these
+	// Intentional escape hatches: the docs preview shell owns these ids.
 	"{& #preview-root-shell}": {
 		height: "100%",
 	},
@@ -110,6 +99,8 @@ const bubbleAnimation = StyleAnimation("fish-sim-bubbles", {
 		transform: "translate3d(0, -36px, ${bubbleDepth: 0px}) scale(1.04)",
 	},
 })
+
+// App layout styles.
 
 const shellStyle = Style.Class("fish-sim-shell", {
 	height: "100%",
@@ -168,12 +159,7 @@ const panelTitleStyle = Style.Class("fish-sim-panel-title", {
 	height: "fit-content",
 })
 
-const panelTextStyle = Style.Class("fish-sim-panel-text", {
-	color: "$textBody",
-	fontSize: "13px",
-	lineHeight: 1.5,
-	margin: 0,
-})
+// Pond and depth styles.
 
 const pondStyle = Style.Class("fish-sim-pond", {
 	background: "radial-gradient(circle at top, rgba(218, 236, 255, 0.22), rgba(163, 225, 124, ${pondWasteOpacity: 0}) 24%, rgba(255, 255, 255, 0) 38%), linear-gradient(180deg, rgba(126, 176, 84, calc(${pondWasteOpacity: 0} * 0.9)) 0%, rgba(87, 134, 55, calc(${pondWasteOpacity: 0} * 0.7)) 52%, rgba(58, 92, 39, calc(${pondWasteOpacity: 0} * 0.85)) 100%), linear-gradient(180deg, color-mix(in srgb, #6ea8cb 22%, $bgRaised) 0%, color-mix(in srgb, #4d87ad 14%, $bgRaised) 48%, color-mix(in srgb, #2f6185 22%, $bgRaised) 100%)",
@@ -236,6 +222,7 @@ const pondDepthLayerStyle = Style.Class("fish-sim-pond-depth-layer", {
 	position: "absolute",
 })
 
+// Layered translateZ offsets and opacity shifts fake pond depth without a full 3D scene.
 const pondDepthBackStyle = Style.Class("fish-sim-pond-depth-back", {
 	background: "radial-gradient(circle at 22% 18%, rgba(184, 230, 255, 0.18) 0%, rgba(235, 248, 255, 0.1) 26%, rgba(235, 248, 255, 0) 62%), radial-gradient(circle at 78% 72%, rgba(134, 194, 232, 0.1) 0%, rgba(134, 194, 232, 0) 48%), linear-gradient(180deg, rgba(125, 183, 223, 0.08) 0%, rgba(44, 102, 146, 0.02) 100%)",
 	opacity: 0.85,
@@ -270,6 +257,8 @@ const pondBubbleStyle = Style.Class("fish-sim-pond-bubble", {
 	height: "${bubbleSize: 16px}",
 	width: "${bubbleSize: 16px}",
 })
+
+// Fish, gull, and magnet styles.
 
 const fishSchoolStyle = Style.Class("fish-sim-fish-school", {
 	inset: 0,
@@ -306,24 +295,6 @@ const fishMagnetStyle = Style.Class("fish-sim-fish-magnet", {
 	transform: "rotate(-90deg) translate3d(-50%, -50%, ${magnetDepth: 0px})",
 	transformOrigin: "-20% 30%",
 	transition: "${magnetTransition: left 0ms linear, top 260ms ease, opacity 120ms ease, transform 260ms ease, scale 160ms ease}",
-})
-
-const pondFooterStyle = Style.Class("fish-sim-pond-footer", {
-	alignItems: "end",
-	bottom: "14px",
-	display: "flex",
-	justifyContent: "space-between",
-	left: "16px",
-	position: "absolute",
-	right: "16px",
-	zIndex: 1,
-})
-
-const tinyNoteStyle = Style.Class("fish-sim-tiny-note", {
-	color: "color-mix(in srgb, white 76%, $textSubtle)",
-	fontSize: "12px",
-	fontWeight: 700,
-	margin: 0,
 })
 
 const fishButtonStyle = Style.Class("fish-sim-fish-button", {
@@ -364,13 +335,15 @@ const fishButtonStyle = Style.Class("fish-sim-fish-button", {
 	}),
 })
 
+// Upgrade and control styles.
+
 const upgradesStyle = Style.Class("fish-sim-upgrades", {
 	position: "absolute",
 	inset: 0,
 	display: "grid",
 	gap: "10px",
 	overflowY: "scroll",
-    alignContent: "flex-start",
+	alignContent: "flex-start",
 })
 
 const upgradeCardStyle = Style.Class("fish-sim-upgrade-card", {
@@ -433,10 +406,10 @@ const buyButtonStyle = Style.Class("fish-sim-buy-button", {
 		outline: "2px solid $borderMuted",
 		outlineOffset: "2px",
 	}),
-	"{&[disabled]}": {
+	...whenDisabled({
 		cursor: "not-allowed",
 		opacity: 0.4,
-	},
+	}),
 })
 
 const liveStatusStyle = Style.Class("fish-sim-live-status", {
@@ -475,7 +448,14 @@ const resetButtonStyle = Style.Class("fish-sim-reset-button", {
 function PondBubble (left: number, bottom: number, size: number, duration: number, depth: number, blur: number): Component {
 	return Component("span")
 		.class.add(pondBubbleStyle)
-		.attribute.set("style", `--bubble-left:${left}%; --bubble-bottom:${bottom}%; --bubble-size:${size}px; --bubble-duration:${duration}ms; --bubble-depth:${depth}px; --bubble-blur:${blur}px;`)
+		.style.set({
+			$bubbleLeft: `${left}%`,
+			$bubbleBottom: `${bottom}%`,
+			$bubbleSize: `${size}px`,
+			$bubbleDuration: `${duration}ms`,
+			$bubbleDepth: `${depth}px`,
+			$bubbleBlur: `${blur}px`,
+		})
 		.aria.hidden(true)
 }
 
@@ -502,6 +482,88 @@ const fishTypeNames = ["Minnow", "Reef Snapper", "Puffer Menace", "Dock Whale"] 
 const fishTransitionValue = "left 420ms ease, top 420ms ease, transform 240ms ease, filter 240ms ease"
 const magnetTransitionValue = "left 0ms linear, top 260ms ease, opacity 120ms ease, transform 260ms ease, scale 160ms ease"
 const radioactiveFishFilter = "grayscale(1) sepia(1) saturate(6) hue-rotate(58deg)"
+const fishRotationOffset = -22
+const fishRotationRange = 44
+const fishScaleJitterBase = 0.96
+const fishScaleJitterRange = 0.12
+const offPondSideCount = 4
+const offPondHorizontalOffset = 10
+const offPondHorizontalRange = 80
+const offPondVerticalOffset = 16
+const offPondVerticalRange = 64
+const offPondDepthOffset = -50
+const offPondDepthRange = 110
+const fishAnchorLeftOffset = -5
+const fishAnchorLeftRange = 10
+const fishAnchorTopOffset = -6
+const fishAnchorTopRange = 12
+const fishRoamLeftOffset = 10
+const fishRoamLeftRange = 80
+const fishRoamTopOffset = 10
+const fishRoamTopRange = 80
+const fishDepthOffset = -260
+const fishDepthRange = 340
+const magnetDepthOffset = -60
+const magnetDepthRange = 140
+const magnetLeftOffset = 18
+const magnetLeftRange = 64
+const magnetTopOffset = 16
+const magnetTopRange = 68
+const fishNearMagnetOffset = -14
+const fishNearMagnetRange = 28
+const fishNearMagnetMin = 8
+const fishNearMagnetMax = 92
+const fishNearMagnetDepthOffset = -40
+const fishNearMagnetDepthRange = 120
+const fishMoveDelayBaseMs = 820
+const fishMoveDelayRangeMs = 680
+const fishRespawnDelayMs = 24
+const fishCatchableDelayMs = 460
+const fishMultipliers = [1, 2, 3, 4] as const
+
+function clearScheduledTimeout (timeoutId: number | null): null {
+	if (timeoutId !== null) {
+		clearTimeout(timeoutId)
+	}
+
+	return null
+}
+
+function clearScheduledInterval (intervalId: number | null): null {
+	if (intervalId !== null) {
+		clearInterval(intervalId)
+	}
+
+	return null
+}
+
+function scheduleTimeout (timeoutId: number | null, callback: () => void, delay: number): number {
+	if (timeoutId !== null) {
+		clearTimeout(timeoutId)
+	}
+
+	return window.setTimeout(callback, delay)
+}
+
+function scheduleInterval (intervalId: number | null, callback: () => void, delay: number): number {
+	if (intervalId !== null) {
+		clearInterval(intervalId)
+	}
+
+	return window.setInterval(callback, delay)
+}
+
+function randomRounded (offset: number, range: number): number {
+	return Math.round(offset + Math.random() * range)
+}
+
+function randomFishRotation (): number {
+	return randomRounded(fishRotationOffset, fishRotationRange)
+}
+
+function randomFishScale (baseScale: number): number {
+	return Number((baseScale * (fishScaleJitterBase + Math.random() * fishScaleJitterRange)).toFixed(2))
+}
 
 function shuffle<T> (items: readonly T[]): T[] {
 	const shuffled = [...items]
@@ -603,17 +665,17 @@ function buildFishTemplates (fishAdded: number): FishTemplate[] {
 }
 
 function randomOffPondPosition (baseScale = 1): FishPosition {
-	const side = Math.floor(Math.random() * 4)
-	const horizontal = Math.round(10 + Math.random() * 80)
-	const vertical = Math.round(16 + Math.random() * 64)
-	const depth = Math.round(-50 + Math.random() * 110)
+	const side = Math.floor(Math.random() * offPondSideCount)
+	const horizontal = randomRounded(offPondHorizontalOffset, offPondHorizontalRange)
+	const vertical = randomRounded(offPondVerticalOffset, offPondVerticalRange)
+	const depth = randomRounded(offPondDepthOffset, offPondDepthRange)
 
 	if (side === 0) {
 		return {
 			depth,
 			left: -28,
-			rotate: Math.round(-22 + Math.random() * 44),
-			scale: Number((baseScale * (0.96 + Math.random() * 0.12)).toFixed(2)),
+			rotate: randomFishRotation(),
+			scale: randomFishScale(baseScale),
 			top: vertical,
 		}
 	}
@@ -622,8 +684,8 @@ function randomOffPondPosition (baseScale = 1): FishPosition {
 		return {
 			depth,
 			left: 128,
-			rotate: Math.round(-22 + Math.random() * 44),
-			scale: Number((baseScale * (0.96 + Math.random() * 0.12)).toFixed(2)),
+			rotate: randomFishRotation(),
+			scale: randomFishScale(baseScale),
 			top: vertical,
 		}
 	}
@@ -632,8 +694,8 @@ function randomOffPondPosition (baseScale = 1): FishPosition {
 		return {
 			depth,
 			left: horizontal,
-			rotate: Math.round(-22 + Math.random() * 44),
-			scale: Number((baseScale * (0.96 + Math.random() * 0.12)).toFixed(2)),
+			rotate: randomFishRotation(),
+			scale: randomFishScale(baseScale),
 			top: -28,
 		}
 	}
@@ -641,8 +703,8 @@ function randomOffPondPosition (baseScale = 1): FishPosition {
 	return {
 		depth,
 		left: horizontal,
-		rotate: Math.round(-22 + Math.random() * 44),
-		scale: Number((baseScale * (0.96 + Math.random() * 0.12)).toFixed(2)),
+		rotate: randomFishRotation(),
+		scale: randomFishScale(baseScale),
 		top: 128,
 	}
 }
@@ -675,6 +737,7 @@ function BubbleSpawner (): Component {
 		.class.add(pondDepthFrontStyle)
 		.appendTo(field)
 
+	// Recurring actor timers in this example are owned by component lifecycle and cleared on Dispose.
 	let timeoutId: number | null = null
 	let active = false
 
@@ -707,7 +770,7 @@ function BubbleSpawner (): Component {
 			return
 		}
 
-		timeoutId = window.setTimeout(() => {
+		timeoutId = scheduleTimeout(timeoutId, () => {
 			spawnBubble()
 			if (Math.random() > 0.7) {
 				spawnBubble()
@@ -726,45 +789,46 @@ function BubbleSpawner (): Component {
 
 	field.event.owned.on.Dispose(() => {
 		active = false
-		if (timeoutId !== null) {
-			clearTimeout(timeoutId)
-			timeoutId = null
-		}
+		timeoutId = clearScheduledTimeout(timeoutId)
 	})
 
 	return field
 }
 
 function randomFishPosition (baseScale = 1, anchor?: { left: number; top: number }): FishPosition {
-	const left = anchor ? anchor.left + Math.round(-5 + Math.random() * 10) : Math.round(10 + Math.random() * 80)
-	const top = anchor ? anchor.top + Math.round(-6 + Math.random() * 12) : Math.round(10 + Math.random() * 80)
+	const left = anchor
+		? anchor.left + randomRounded(fishAnchorLeftOffset, fishAnchorLeftRange)
+		: randomRounded(fishRoamLeftOffset, fishRoamLeftRange)
+	const top = anchor
+		? anchor.top + randomRounded(fishAnchorTopOffset, fishAnchorTopRange)
+		: randomRounded(fishRoamTopOffset, fishRoamTopRange)
 
 	return {
-		depth: Math.round(-260 + Math.random() * 340),
+		depth: randomRounded(fishDepthOffset, fishDepthRange),
 		left,
-		rotate: Math.round(-22 + Math.random() * 44),
-		scale: Number((baseScale * (0.96 + Math.random() * 0.12)).toFixed(2)),
-		top: top,
+		rotate: randomFishRotation(),
+		scale: randomFishScale(baseScale),
+		top,
 	}
 }
 
 function randomMagnetPosition (): { depth: number; left: number; top: number } {
 	return {
-		depth: Math.round(-60 + Math.random() * 140),
-		left: Math.round(18 + Math.random() * 64),
-		top: Math.round(16 + Math.random() * 68),
+		depth: randomRounded(magnetDepthOffset, magnetDepthRange),
+		left: randomRounded(magnetLeftOffset, magnetLeftRange),
+		top: randomRounded(magnetTopOffset, magnetTopRange),
 	}
 }
 
 function randomFishPositionAroundMagnet (baseScale: number, magnet: { left: number; top: number }): FishPosition {
-	const left = Math.max(8, Math.min(92, magnet.left + Math.round(-14 + Math.random() * 28)))
-	const top = Math.max(8, Math.min(92, magnet.top + Math.round(-14 + Math.random() * 28)))
+	const left = Math.max(fishNearMagnetMin, Math.min(fishNearMagnetMax, magnet.left + randomRounded(fishNearMagnetOffset, fishNearMagnetRange)))
+	const top = Math.max(fishNearMagnetMin, Math.min(fishNearMagnetMax, magnet.top + randomRounded(fishNearMagnetOffset, fishNearMagnetRange)))
 
 	return {
-		depth: Math.round(-40 + Math.random() * 120),
+		depth: randomRounded(fishNearMagnetDepthOffset, fishNearMagnetDepthRange),
 		left,
-		rotate: Math.round(-22 + Math.random() * 44),
-		scale: Number((baseScale * (0.96 + Math.random() * 0.12)).toFixed(2)),
+		rotate: randomFishRotation(),
+		scale: randomFishScale(baseScale),
 		top,
 	}
 }
@@ -826,10 +890,7 @@ function DockWorker (autoFish: State<number>, fishCount: State<number>, captainL
 	let intervalId: number | null = null
 
 	const stopTimer = (): void => {
-		if (intervalId !== null) {
-			clearInterval(intervalId)
-			intervalId = null
-		}
+		intervalId = clearScheduledInterval(intervalId)
 	}
 
 	const syncTimer = (): void => {
@@ -846,7 +907,7 @@ function DockWorker (autoFish: State<number>, fishCount: State<number>, captainL
 			return
 		}
 
-		intervalId = window.setInterval(() => {
+		intervalId = scheduleInterval(intervalId, () => {
 			if (autoFish.value <= 0) {
 				stopTimer()
 				return
@@ -935,13 +996,25 @@ function FishSchool (
 		button: Component;
 		dispose (): void;
 		handle: PondFishHandle;
-		multiplier: 1 | 2 | 3 | 4;
+		multiplier: FishMultiplier;
+	}
+
+	type FishButtonState = {
+		catchable: State<boolean>;
+		facing: State<number>;
+		filter: State<string>;
+		mutated: State<boolean>;
+		mutationScale: State<number>;
+		offscreen: State<boolean>;
+		position: State<FishPosition>;
+		template: State<FishTemplate>;
+		transition: State<string>;
+		visible: State<boolean>;
 	}
 
 	let fish: FishInstance[] = []
-	let currentFishAdded = pondFishAdded.value
 
-	function getTargetTemplatesByMultiplier (fishAdded: number): Record<1 | 2 | 3 | 4, FishTemplate[]> {
+	function getTargetTemplatesByMultiplier (fishAdded: number): Record<FishMultiplier, FishTemplate[]> {
 		const templates = buildFishTemplates(fishAdded)
 
 		return {
@@ -952,12 +1025,80 @@ function FishSchool (
 		}
 	}
 
-	function countFishByMultiplier (multiplier: 1 | 2 | 3 | 4, excluding?: FishInstance): number {
+	function countFishByMultiplier (multiplier: FishMultiplier, excluding?: FishInstance): number {
 		return fish.filter(instance => instance !== excluding && instance.multiplier === multiplier).length
+	}
+
+	function createFishButtonState (button: Component, template: FishTemplate, anchor: { left: number; top: number }, spawnFromOffscreen: boolean): FishButtonState {
+		return {
+			catchable: new State(button, !spawnFromOffscreen),
+			facing: new State(button, 1),
+			filter: new State(button, "none"),
+			mutated: new State(button, false),
+			mutationScale: new State(button, 1),
+			offscreen: new State(button, spawnFromOffscreen),
+			position: new State<FishPosition>(button, spawnFromOffscreen ? randomOffPondPosition(template.scale) : randomFishPosition(template.scale, anchor)),
+			template: new State<FishTemplate>(button, template),
+			transition: new State(button, spawnFromOffscreen ? "none" : fishTransitionValue),
+			visible: new State(button, !spawnFromOffscreen),
+		}
+	}
+
+	function bindFishButtonPresentation (button: Component, fishState: FishButtonState, onClickCatch: () => void): void {
+		const style = State.Group(button, fishState).map(({ filter, visible, facing, mutationScale, position, transition }) => ({
+			$fishDepth: `${position.depth}px`,
+			$fishFacing: facing,
+			$fishFilter: filter,
+			$fishLeft: `${position.left}%`,
+			$fishMutationScale: mutationScale,
+			$fishOpacity: visible ? 1 : 0,
+			$fishTop: `${position.top}%`,
+			$fishTilt: `${position.rotate}deg`,
+			$fishScale: position.scale,
+			$fishTransition: transition,
+		}))
+
+		button
+			.text.set(fishState.template.map(nextTemplate => nextTemplate.emoji))
+			.aria.label(State.Group(button, {
+				mutated: fishState.mutated,
+				power: catchPower,
+				template: fishState.template,
+			}).map(({ mutated, power, template }) => {
+				const valueMultiplier = template.multiplier * (mutated ? 3 : 1)
+				return `Catch ${mutated ? `radioactive ${template.name}` : template.name}. Worth ${valueMultiplier}x for +${formatFish(power * valueMultiplier)} fish.`
+			}))
+			.style.set(style)
+			.event.owned.on.mousedown(onClickCatch)
+	}
+
+	function setFishMutation (fishState: FishButtonState, nextMutated: boolean): void {
+		fishState.mutated.set(nextMutated)
+		fishState.mutationScale.set(nextMutated ? 1.34 : 1)
+		fishState.filter.set(nextMutated ? radioactiveFishFilter : "none")
+	}
+
+	function moveFish (fishState: FishButtonState, nextPosition: FishPosition): void {
+		const currentPosition = fishState.position.value
+		if (nextPosition.left !== currentPosition.left) {
+			fishState.facing.set(nextPosition.left > currentPosition.left ? 1 : -1)
+		}
+
+		fishState.position.set(nextPosition)
+	}
+
+	function transitionFishOffscreen (fishState: FishButtonState, nextTemplate: FishTemplate, reschedule: () => void): void {
+		fishState.catchable.set(false)
+		fishState.visible.set(false)
+		fishState.transition.set("none")
+		moveFish(fishState, randomOffPondPosition(nextTemplate.scale))
+		fishState.offscreen.set(true)
+		reschedule()
 	}
 
 	function removeFishInstance (instance: FishInstance): void {
 		fish = fish.filter(existing => existing !== instance)
+		// fishHandles is shared with the gull actor, so mutate the shared array in place to keep both views synced.
 		const handleIndex = fishHandles.indexOf(instance.handle)
 		if (handleIndex >= 0) {
 			fishHandles.splice(handleIndex, 1)
@@ -970,50 +1111,68 @@ function FishSchool (
 		return countFishByMultiplier(instance.multiplier, instance) < targets[instance.multiplier].length
 	}
 
+	function clearAllFish (): void {
+		for (const fishInstance of fish) {
+			fishInstance.dispose()
+		}
+
+		fish = []
+		fishHandles.length = 0
+	}
+
+	function shrinkFishToTargets (targets: Record<FishMultiplier, FishTemplate[]>): void {
+		for (const multiplier of fishMultipliers) {
+			let extraFish = countFishByMultiplier(multiplier) - targets[multiplier].length
+
+			if (extraFish <= 0) {
+				continue
+			}
+
+			for (let index = fish.length - 1; index >= 0; index--) {
+				if (extraFish <= 0) {
+					break
+				}
+
+				const fishInstance = fish[index]
+
+				if (fishInstance.multiplier !== multiplier) {
+					continue
+				}
+
+				removeFishInstance(fishInstance)
+				extraFish -= 1
+			}
+		}
+	}
+
+	function growFishToTargets (targets: Record<FishMultiplier, FishTemplate[]>): void {
+		const slots = shuffle(pondSlots)
+		let slotIndex = 0
+
+		for (const multiplier of fishMultipliers) {
+			const targetTemplates = targets[multiplier]
+			const currentCount = countFishByMultiplier(multiplier)
+
+			for (let index = currentCount; index < targetTemplates.length; index++) {
+				const fishInstance = FishButton(targetTemplates[index], slots[slotIndex % pondSlots.length], true)
+				fish.push(fishInstance)
+				fishHandles.push(fishInstance.handle)
+				slotIndex += 1
+			}
+		}
+	}
+
 	function FishButton (template: FishTemplate, anchor: { left: number; top: number }, spawnFromOffscreen = false): FishInstance {
 		const button = Component("button")
 			.attribute.set("type", "button")
 			.class.add(fishButtonStyle)
 
-		const templateState = new State<FishTemplate>(button, template)
-		const catchable = new State(button, !spawnFromOffscreen)
-		const facing = new State(button, 1)
-		const filter = new State(button, "none")
-		const mutated = new State(button, false)
-		const mutationScale = new State(button, 1)
-		const offscreen = new State(button, spawnFromOffscreen)
-		const visible = new State(button, !spawnFromOffscreen)
-		const position = new State<FishPosition>(button, spawnFromOffscreen ? randomOffPondPosition(template.scale) : randomFishPosition(template.scale, anchor))
-		const transition = new State(button, spawnFromOffscreen ? "none" : fishTransitionValue)
+		const fishState = createFishButtonState(button, template, anchor, spawnFromOffscreen)
+		const { catchable, mutated, offscreen, position, template: templateState, transition } = fishState
 
-		button
-			.text.set(templateState.map(nextTemplate => nextTemplate.emoji))
-			.aria.label(State.Group(button, {
-				mutated,
-				power: catchPower,
-				template: templateState,
-			}).map(({ mutated, power, template }) => {
-				const valueMultiplier = template.multiplier * (mutated ? 3 : 1)
-				return `Catch ${mutated ? `radioactive ${template.name}` : template.name}. Worth ${valueMultiplier}x for +${formatFish(power * valueMultiplier)} fish.`
-			}))
-			.attribute.set("style", State.Group(button, {
-				filter,
-				visible,
-				facing,
-				mutationScale,
-				position,
-				transition,
-			}).map(({ filter, visible, facing, mutationScale, position, transition }) => `--fish-depth:${position.depth}px; --fish-facing:${facing}; --fish-filter:${filter}; --fish-left:${position.left}%; --fish-mutation-scale:${mutationScale}; --fish-opacity:${visible ? 1 : 0}; --fish-top:${position.top}%; --fish-tilt:${position.rotate}deg; --fish-scale:${position.scale}; --fish-transition:${transition};`))
-			.event.owned.on.mousedown(() => {
-				const nextTemplate = templateState.value
-				onCatch(nextTemplate, "click", nextTemplate.multiplier * (mutated.value ? 3 : 1), mutated.value)
-				catchable.set(false)
-				visible.set(false)
-				transition.set("none")
-				moveTo(randomOffPondPosition(nextTemplate.scale))
-				offscreen.set(true)
-				schedule()
-			})
+		bindFishButtonPresentation(button, fishState, () => {
+			catchFish("click")
+		})
 
 		let timeoutId: number | null = null
 		let catchableTimeoutId: number | null = null
@@ -1021,12 +1180,25 @@ function FishSchool (
 		let fishInstance!: FishInstance
 		let mutationExposure = 0
 
-		const getNextMoveDelay = (): number => Math.round(820 + Math.random() * 680)
+		const getNextMoveDelay = (): number => randomRounded(fishMoveDelayBaseMs, fishMoveDelayRangeMs)
+
+		const clearTimers = (): void => {
+			timeoutId = clearScheduledTimeout(timeoutId)
+			catchableTimeoutId = clearScheduledTimeout(catchableTimeoutId)
+		}
+
+		const transitionToCaught = (nextTemplate: FishTemplate): void => {
+			transitionFishOffscreen(fishState, nextTemplate, schedule)
+		}
+
+		const catchFish = (source: "click" | "gull"): void => {
+			const nextTemplate = templateState.value
+			onCatch(nextTemplate, source, nextTemplate.multiplier * (mutated.value ? 3 : 1), mutated.value)
+			transitionToCaught(nextTemplate)
+		}
 
 		const setMutation = (nextMutated: boolean): void => {
-			mutated.set(nextMutated)
-			mutationScale.set(nextMutated ? 1.34 : 1)
-			filter.set(nextMutated ? radioactiveFishFilter : "none")
+			setFishMutation(fishState, nextMutated)
 		}
 
 		const rollMutation = (): void => {
@@ -1047,21 +1219,14 @@ function FishSchool (
 			}
 		}
 
-		const moveTo = (nextPosition: FishPosition): void => {
-			const currentPosition = position.value
-			if (nextPosition.left !== currentPosition.left) {
-				facing.set(nextPosition.left > currentPosition.left ? 1 : -1)
-			}
-
-			position.set(nextPosition)
-		}
+		const moveTo = (nextPosition: FishPosition): void => moveFish(fishState, nextPosition)
 
 		const spawnIn = (): void => {
 			catchable.set(false)
 			transition.set(fishTransitionValue)
 			setMutation(false)
 			mutationExposure = 0
-			visible.set(true)
+			fishState.visible.set(true)
 			window.setTimeout(() => {
 				if (!button.disposed) {
 					moveTo(magnetTarget.value
@@ -1069,15 +1234,12 @@ function FishSchool (
 						: randomFishPosition(templateState.value.scale))
 					offscreen.set(false)
 				}
-			}, 24)
-			if (catchableTimeoutId !== null) {
-				clearTimeout(catchableTimeoutId)
-			}
-			catchableTimeoutId = window.setTimeout(() => {
+			}, fishRespawnDelayMs)
+			catchableTimeoutId = scheduleTimeout(catchableTimeoutId, () => {
 				if (!button.disposed) {
 					catchable.set(true)
 				}
-			}, 460)
+			}, fishCatchableDelayMs)
 		}
 
 		const schedule = (delay = getNextMoveDelay()): void => {
@@ -1085,12 +1247,7 @@ function FishSchool (
 				return
 			}
 
-			if (timeoutId !== null) {
-				clearTimeout(timeoutId)
-				timeoutId = null
-			}
-
-			timeoutId = window.setTimeout(() => {
+			timeoutId = scheduleTimeout(timeoutId, () => {
 				if (offscreen.value) {
 					if (shouldRespawnFish(fishInstance)) {
 						spawnIn()
@@ -1129,21 +1286,14 @@ function FishSchool (
 					if (!button.disposed) {
 						spawnIn()
 					}
-				}, 24)
+				}, fishRespawnDelayMs)
 			}
 			schedule()
 		})
 
 		button.event.owned.on.Dispose(() => {
 			active = false
-			if (timeoutId !== null) {
-				clearTimeout(timeoutId)
-				timeoutId = null
-			}
-			if (catchableTimeoutId !== null) {
-				clearTimeout(catchableTimeoutId)
-				catchableTimeoutId = null
-			}
+			clearTimers()
 		})
 
 		button.appendTo(layer)
@@ -1154,14 +1304,7 @@ function FishSchool (
 					return
 				}
 
-				const nextTemplate = templateState.value
-				onCatch(nextTemplate, "gull", nextTemplate.multiplier * (mutated.value ? 3 : 1), mutated.value)
-				catchable.set(false)
-				visible.set(false)
-				transition.set("none")
-				moveTo(randomOffPondPosition(nextTemplate.scale))
-				offscreen.set(true)
-				schedule()
+				catchFish("gull")
 			},
 			intersectsGull (gullRect: DOMRect, pondRect: DOMRect) {
 				if (offscreen.value || !catchable.value) {
@@ -1195,45 +1338,21 @@ function FishSchool (
 		fishInstance = {
 			button,
 			dispose () {
+				clearTimers()
 				button.remove()
 			},
 			handle,
-			multiplier: template.multiplier as 1 | 2 | 3 | 4,
+			multiplier: template.multiplier as FishMultiplier,
 		}
 
 		return fishInstance
-		}
+	}
 
 	const render = (nextFishAdded: number): void => {
 		const targets = getTargetTemplatesByMultiplier(nextFishAdded)
 
-		if (nextFishAdded < currentFishAdded) {
-			if (nextFishAdded === 0) {
-				for (const fishInstance of fish) {
-					fishInstance.dispose()
-				}
-				fish = []
-				fishHandles.length = 0
-			} else {
-			currentFishAdded = nextFishAdded
-			return
-			}
-		}
-
-		const slots = shuffle(pondSlots)
-		let slotIndex = 0
-		for (const multiplier of [1, 2, 3, 4] as const) {
-			const targetTemplates = targets[multiplier]
-			const currentCount = countFishByMultiplier(multiplier)
-			for (let index = currentCount; index < targetTemplates.length; index++) {
-				const fishInstance = FishButton(targetTemplates[index], slots[slotIndex % pondSlots.length], true)
-				fish.push(fishInstance)
-				fishHandles.push(fishInstance.handle)
-				slotIndex += 1
-			}
-		}
-
-		currentFishAdded = nextFishAdded
+		shrinkFishToTargets(targets)
+		growFishToTargets(targets)
 	}
 
 	render(pondFishAdded.value)
@@ -1259,15 +1378,23 @@ function FishMagnetActor (
 	const scale = new State(magnet, "0.7")
 	const top = new State(magnet, "50%")
 	const transition = new State(magnet, magnetTransitionValue)
-
-	magnet.attribute.set("style", State.Group(magnet, {
+	const style = State.Group(magnet, {
 		depth,
 		left,
 		opacity,
 		scale,
 		top,
 		transition,
-	}).map(({ depth, left, opacity, scale, top, transition }) => `--magnet-depth:${depth}; --magnet-left:${left}; --magnet-opacity:${opacity}; --magnet-scale:${scale}; --magnet-top:${top}; --magnet-transition:${transition};`))
+	}).map(({ depth, left, opacity, scale, top, transition }) => ({
+		$magnetDepth: depth,
+		$magnetLeft: left,
+		$magnetOpacity: opacity,
+		$magnetScale: scale,
+		$magnetTop: top,
+		$magnetTransition: transition,
+	}))
+
+	magnet.style.set(style)
 
 	let appearTimeoutId: number | null = null
 	let hideTimeoutId: number | null = null
@@ -1275,15 +1402,8 @@ function FishMagnetActor (
 	let previousPurchases = magnetPurchases.value
 
 	const clearTimers = (): void => {
-		if (appearTimeoutId !== null) {
-			clearTimeout(appearTimeoutId)
-			appearTimeoutId = null
-		}
-
-		if (hideTimeoutId !== null) {
-			clearTimeout(hideTimeoutId)
-			hideTimeoutId = null
-		}
+		appearTimeoutId = clearScheduledTimeout(appearTimeoutId)
+		hideTimeoutId = clearScheduledTimeout(hideTimeoutId)
 	}
 
 	const schedule = (): void => {
@@ -1300,7 +1420,7 @@ function FishMagnetActor (
 		const immediate = previousPurchases === 0 && magnetPurchases.value > 0
 		previousPurchases = magnetPurchases.value
 		const delay = immediate ? 0 : Math.max(2200, 6400 - magnetPurchases.value * 360 + Math.round(Math.random() * 900))
-		appearTimeoutId = window.setTimeout(() => {
+		appearTimeoutId = scheduleTimeout(appearTimeoutId, () => {
 			const position = randomMagnetPosition()
 			transition.set("none")
 			depth.set(`${position.depth}px`)
@@ -1321,7 +1441,7 @@ function FishMagnetActor (
 			})
 			captainLog.set("The fish magnet lit up. Every fish in the pond suddenly remembered an appointment nearby.")
 
-			hideTimeoutId = window.setTimeout(() => {
+			hideTimeoutId = scheduleTimeout(hideTimeoutId, () => {
 				magnetTarget.set(null)
 				opacity.set("0")
 				scale.set("0.7")
@@ -1366,26 +1486,39 @@ function GullFleet (
 		const depth = new State(gull, 0)
 		const duration = new State(gull, "1200ms")
 		const facing = new State(gull, 1)
-
-		gull.attribute.set("style", State.Group(gull, {
+		const style = State.Group(gull, {
 			depth,
 			duration,
 			facing,
 			left,
 			opacity,
 			top,
-		}).map(({ depth, duration, facing, left, opacity, top }) => `--gull-depth:${depth}px; --gull-duration:${duration}; --gull-facing:${facing}; --gull-left:${left}%; --gull-opacity:${opacity}; --gull-top:${top}%;`))
+		}).map(({ depth, duration, facing, left, opacity, top }) => ({
+			$gullDepth: `${depth}px`,
+			$gullDuration: duration,
+			$gullFacing: facing,
+			$gullLeft: `${left}%`,
+			$gullOpacity: opacity,
+			$gullTop: `${top}%`,
+		}))
+
+		gull.style.set(style)
 
 		let timeoutId: number | null = null
 		let checkIntervalId: number | null = null
 		let active = false
+
+		const clearTimers = (): void => {
+			timeoutId = clearScheduledTimeout(timeoutId)
+			checkIntervalId = clearScheduledInterval(checkIntervalId)
+		}
 
 		const schedule = (): void => {
 			if (!active) {
 				return
 			}
 
-			timeoutId = window.setTimeout(() => {
+			timeoutId = scheduleTimeout(timeoutId, () => {
 				const flyingRight = Math.random() > 0.5
 				const flightDepth = Math.round(-60 + Math.random() * 140)
 				const lane = Math.round(10 + Math.random() * 76)
@@ -1403,9 +1536,7 @@ function GullFleet (
 				left.set(startLeft)
 				opacity.set("1")
 
-				if (checkIntervalId !== null) {
-					clearInterval(checkIntervalId)
-				}
+				checkIntervalId = clearScheduledInterval(checkIntervalId)
 
 				window.setTimeout(() => {
 					if (!gull.disposed) {
@@ -1413,7 +1544,7 @@ function GullFleet (
 					}
 				}, 24)
 
-				checkIntervalId = window.setInterval(() => {
+				checkIntervalId = scheduleInterval(checkIntervalId, () => {
 					const elapsed = Math.max(0, Date.now() - flightStart)
 					const progress = Math.min(1, elapsed / sweepDuration)
 					const gullRect = gull.element.getBoundingClientRect()
@@ -1430,10 +1561,7 @@ function GullFleet (
 					}
 
 					if (progress >= 1) {
-						if (checkIntervalId !== null) {
-							clearInterval(checkIntervalId)
-							checkIntervalId = null
-						}
+						checkIntervalId = clearScheduledInterval(checkIntervalId)
 
 						if (!gull.disposed) {
 							opacity.set("0")
@@ -1452,14 +1580,7 @@ function GullFleet (
 
 		gull.event.owned.on.Dispose(() => {
 			active = false
-			if (timeoutId !== null) {
-				clearTimeout(timeoutId)
-				timeoutId = null
-			}
-			if (checkIntervalId !== null) {
-				clearInterval(checkIntervalId)
-				checkIntervalId = null
-			}
+			clearTimers()
 		})
 
 		gull.appendTo(fleet)
@@ -1587,7 +1708,9 @@ export default function FishingSimExample (): Component {
 
 	const pond = Component("section")
 		.class.add(pondStyle)
-		.attribute.set("style", radioactiveWasteDump.map(level => `--pond-waste-opacity:${Math.min(level * 0.055, 0.32).toFixed(2)};`))
+		.style.set(radioactiveWasteDump.map(level => ({
+			$pondWasteOpacity: Math.min(level * 0.055, 0.32).toFixed(2),
+		})))
 		.appendTo(pondPanel)
 
 	BubbleSpawner()

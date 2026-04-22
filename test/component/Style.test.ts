@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Marker } from "../../src/component/Marker";
-import { Style, StyleFontFace, StyleImport, StyleReset, darkScheme, elements, lightScheme, pseudoAfter, pseudoBefore, whenAfterSelf, whenFirst, whenHover, whenStuck } from "../../src/component/Style";
+import { Style, StyleFontFace, StyleImport, StyleReset, darkScheme, elements, lightScheme, pseudoAfter, pseudoBefore, whenAfterSelf, whenDisabled, whenFirst, whenHover, whenStuck } from "../../src/component/Style";
 import placeExtension from "../../src/component/extensions/placeExtension";
 
 placeExtension();
@@ -110,6 +110,17 @@ describe("Style", () => {
 		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
 
 		expect(styleText, "hover state selectors should render with the `:hover` suffix").toContain(".style-when-hover:hover { background: #111 }");
+	});
+
+	/** Verifies pseudo-class selectors are emitted from `whenDisabled()`. */
+	it("renders disabled state selectors", () => {
+		Style.Class("style-when-disabled", {
+			...whenDisabled({ opacity: "0.5" }),
+		});
+
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(styleText, "disabled state selectors should render with the `:disabled` suffix").toContain(".style-when-disabled:disabled { opacity: 0.5 }");
 	});
 
 	/** Verifies pseudo-class selectors are emitted from `whenFirst()`. */

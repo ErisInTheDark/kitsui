@@ -10,6 +10,7 @@ describe("kitsui entrypoint", () => {
 		expect(kitsui).toHaveProperty("State");
 		expect(kitsui).toHaveProperty("StyleManipulator");
 		expect(kitsui).toHaveProperty("Style");
+		expect(kitsui).toHaveProperty("whenDisabled");
 		expect(kitsui).toHaveProperty("whenStuck");
 		expect(kitsui).toHaveProperty("TextManipulator");
 	});
