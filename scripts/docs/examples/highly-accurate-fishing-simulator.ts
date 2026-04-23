@@ -1539,9 +1539,6 @@ function GullFleet (
 		.class.add(gullFleetStyle)
 		.appendTo(pond)
 
-	let gulls: Component[] = []
-	let previousCount = internGulls.value
-
 	const spawnGull = (index: number, immediate = false): Component => {
 		const gull = Component("span")
 			.class.add(gullStyle)
@@ -1651,27 +1648,16 @@ function GullFleet (
 			clearTimers()
 		})
 
-		gull.appendTo(fleet)
-
 		return gull
 	}
 
-	const render = (count: number): void => {
-		const immediateFirstSpawn = previousCount === 0 && count > 0
-		previousCount = count
-
-		for (const gull of gulls) {
-			gull.remove()
-		}
-
-		gulls = []
+	Component.Breakdown(fleet, internGulls, (Part, count) => {
 		for (let index = 0; index < count; index++) {
-			gulls.push(spawnGull(index, immediateFirstSpawn && index === 0))
+			Part(index, () => spawnGull(index, index === 0))
+				.appendTo(fleet)
 		}
-	}
+	})
 
-	render(internGulls.value)
-	internGulls.subscribe(fleet, render)
 	return fleet
 }
 

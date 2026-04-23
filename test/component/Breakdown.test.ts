@@ -174,6 +174,80 @@ describe("Component.Breakdown", () => {
 		}
 	});
 
+	/** Verifies stateless keyed parts are reused as the count changes and omitted ones are disposed. */
+	it("reuses stateless keyed parts across count changes and disposes omitted ones", async () => {
+		const owner = mountedComponent("div");
+		const sourceStateNumber = State(owner, 2);
+		const buildCounts = new Map<number, number>();
+		let initialPart0: Component | undefined;
+		let initialPart1: Component | undefined;
+		let grownPart0: Component | undefined;
+		let grownPart1: Component | undefined;
+		let grownPart2: Component | undefined;
+		let shrunkPart0: Component | undefined;
+
+		try {
+			Component.Breakdown(owner, sourceStateNumber, (Part, count) => {
+				for (let index = 0; index < count; index += 1) {
+					const part = Part(index, () => {
+						buildCounts.set(index, (buildCounts.get(index) ?? 0) + 1);
+						return Component("span").text.set(`part-${index}`);
+					});
+					owner.append(part);
+
+					if (count === 2 && index === 0) {
+						initialPart0 = part;
+					}
+
+					if (count === 2 && index === 1) {
+						initialPart1 = part;
+					}
+
+					if (count === 3 && index === 0) {
+						grownPart0 = part;
+					}
+
+					if (count === 3 && index === 1) {
+						grownPart1 = part;
+					}
+
+					if (count === 3 && index === 2) {
+						grownPart2 = part;
+					}
+
+					if (count === 1 && index === 0) {
+						shrunkPart0 = part;
+					}
+				}
+			});
+
+			expect(buildCounts.get(0), "the first stateless keyed part should build only once").toBe(1);
+			expect(buildCounts.get(1), "the second stateless keyed part should build only once").toBe(1);
+
+			sourceStateNumber.set(3);
+			await flushEffects();
+
+			expect(grownPart0, "growing the count should reuse the first stateless keyed part").toBe(initialPart0);
+			expect(grownPart1, "growing the count should reuse the second stateless keyed part").toBe(initialPart1);
+			expect(buildCounts.get(0), "the first stateless keyed part should not rebuild when the count grows").toBe(1);
+			expect(buildCounts.get(1), "the second stateless keyed part should not rebuild when the count grows").toBe(1);
+			expect(buildCounts.get(2), "the new stateless keyed part should build once when introduced").toBe(1);
+
+			sourceStateNumber.set(1);
+			await flushEffects();
+
+			expect(shrunkPart0, "shrinking the count should keep the retained stateless keyed part").toBe(initialPart0);
+			expect(initialPart1!.disposed, "stateless keyed parts omitted by a smaller count should be disposed").toBe(true);
+			expect(grownPart2!.disposed, "stateless keyed parts omitted by a smaller count should be disposed").toBe(true);
+			expect(Array.from(owner.element.children), "only the retained stateless keyed part should remain in the container").toEqual([
+				initialPart0!.element,
+			]);
+		}
+		finally {
+			owner.remove();
+		}
+	});
+
 	/** Verifies Breakdown-owned parts keep their explicit owner after placement operations. */
 	it("keeps Breakdown-owned parts explicitly owned after appendTo, prependTo, and insertTo", () => {
 		const owner = mountedComponent("section");

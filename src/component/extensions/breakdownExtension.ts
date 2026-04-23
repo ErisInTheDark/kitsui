@@ -2,7 +2,11 @@ import { Owner, State, type CleanupFunction } from "../../state/State";
 import { Component, type ComponentStaticExtensions } from "../Component";
 
 type BreakdownPartBuilder<TPart> = (state: State<TPart>) => Component;
-type BreakdownPartRegistrar = <TPart> (key: PropertyKey, value: TPart, build: BreakdownPartBuilder<TPart>) => Component;
+type StatelessBreakdownPartBuilder = () => Component;
+type BreakdownPartRegistrar = {
+	<TPart> (key: PropertyKey, value: TPart, build: BreakdownPartBuilder<TPart>): Component;
+	(key: PropertyKey, build: StatelessBreakdownPartBuilder): Component;
+};
 type BreakdownRenderer<TValue> = (Part: BreakdownPartRegistrar, value: TValue) => void;
 
 type BreakdownConstructor = {
@@ -11,7 +15,7 @@ type BreakdownConstructor = {
 
 type PartRecord<TPart = unknown> = {
 	component: Component;
-	state: State<TPart>;
+	state?: State<TPart>;
 };
 
 declare module "../Component" {
@@ -113,7 +117,7 @@ export default function breakdownExtension (): void {
 			}
 
 			parts.delete(key);
-			record.state.dispose();
+			record.state?.dispose();
 			record.component.remove();
 		};
 
@@ -149,10 +153,13 @@ export default function breakdownExtension (): void {
 					const currentValue = latestValue;
 					const seenKeys = new Set<PropertyKey>();
 
-					const Part: BreakdownPartRegistrar = <TPart> (key: PropertyKey, value: TPart, build: BreakdownPartBuilder<TPart>): Component => {
+					const Part: BreakdownPartRegistrar = <TPart> (key: PropertyKey, valueOrBuild: TPart | StatelessBreakdownPartBuilder, maybeBuild?: BreakdownPartBuilder<TPart>): Component => {
 						if (!isBreakdownKey(key)) {
 							throw new TypeError("Component.Breakdown part keys must be strings, numbers, or symbols.");
 						}
+
+						const isStateless = maybeBuild === undefined;
+						const build = (isStateless ? valueOrBuild : maybeBuild) as StatelessBreakdownPartBuilder | BreakdownPartBuilder<TPart>;
 
 						if (typeof build !== "function") {
 							throw new TypeError("Component.Breakdown parts require a builder function.");
@@ -166,17 +173,25 @@ export default function breakdownExtension (): void {
 
 						const existing = parts.get(key) as PartRecord<TPart> | undefined;
 						if (existing) {
-							existing.state.set(value);
+							if (!isStateless) {
+								existing.state?.set(valueOrBuild as TPart);
+							}
 							return existing.component;
 						}
 
-						const partState = State(owner, value);
 						let component: Component;
+						let partState: State<TPart> | undefined;
 
 						try {
-							component = validateCreatedPartComponent(build(partState));
+							if (isStateless) {
+								component = validateCreatedPartComponent((build as StatelessBreakdownPartBuilder)());
+							}
+							else {
+								partState = State(owner, valueOrBuild as TPart);
+								component = validateCreatedPartComponent((build as BreakdownPartBuilder<TPart>)(partState));
+							}
 						} catch (error) {
-							partState.dispose();
+							partState?.dispose();
 							throw error;
 						}
 
@@ -193,10 +208,10 @@ export default function breakdownExtension (): void {
 							}
 
 							parts.delete(key);
-							partState.dispose();
+							partState?.dispose();
 						});
 
-						partState.onCleanup(() => {
+						partState?.onCleanup(() => {
 							releaseComponentCleanup();
 						});
 
