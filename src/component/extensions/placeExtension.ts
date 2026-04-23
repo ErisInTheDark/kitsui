@@ -489,7 +489,6 @@ export default function placeExtension (): void {
 
 	prototype.appendTo = function appendTo (target) {
 		ensureActive(this);
-		this.setOwner(resolvePlacementContainerOwner(target, this));
 		const container = resolvePlacementContainer(target);
 		placeComponent(this, container, null);
 		return this;
@@ -506,7 +505,6 @@ export default function placeExtension (): void {
 
 	prototype.prependTo = function prependTo (target) {
 		ensureActive(this);
-		this.setOwner(resolvePlacementContainerOwner(target, this));
 		const container = resolvePlacementContainer(target);
 		placeComponent(this, container, container.firstChild);
 		return this;
@@ -523,7 +521,6 @@ export default function placeExtension (): void {
 
 	prototype.insertTo = function insertTo (where, target) {
 		ensureActive(this);
-		this.setOwner(resolvePlacementOwner(target, this));
 
 		const referenceNode = resolvePlacementReferenceNode(target);
 
@@ -553,7 +550,6 @@ export default function placeExtension (): void {
 	prototype.place = function place (owner, placer) {
 		ensureActive(this);
 		const placementOwner = owner === this ? getPlacementLifecycleOwner(this) : owner;
-		this.setOwner(null);
 		placementOwners.set(this, placementOwner);
 
 		const documentRef = this.element.ownerDocument;

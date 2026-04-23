@@ -147,6 +147,7 @@ const orphanedComponentErrorMessage = "Components must be connected to the docum
 const recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
 const elementComponents = new WeakMap<HTMLElement, WeakRef<ComponentClass<HTMLElement>>>();
 const componentOwnerResolvers = new Set<ComponentOwnerResolver>();
+const hiddenManagedOwners = new WeakMap<ComponentClass<HTMLElement>, Owner>();
 let componentAccessorInstalled = false;
 
 type MoveParent = ParentNode & Node & {
@@ -199,6 +200,16 @@ function getLiveComponent (element: HTMLElement): ComponentClass<HTMLElement> | 
 	}
 
 	return component;
+}
+
+function getWrappedNodeOwner (node: Node): Owner | null {
+	const maybeMarker = (node as Node & { marker?: Marker }).marker;
+	if (maybeMarker) {
+		return maybeMarker;
+	}
+
+	const maybeComponent = (node as Node & { component?: Component }).component;
+	return maybeComponent ?? null;
 }
 
 function installNodeComponentAccessor (): void {
@@ -946,6 +957,19 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			return true;
 		}
 
+		if (this.ownerResolves(hiddenManagedOwners.get(this) ?? null)) {
+			return true;
+		}
+
+		let current: Node | null = this.element.parentNode;
+		while (current) {
+			if (this.ownerResolves(getWrappedNodeOwner(current))) {
+				return true;
+			}
+
+			current = current.parentNode;
+		}
+
 		for (const resolver of componentOwnerResolvers) {
 			if (this.ownerResolves(resolver(this))) {
 				return true;
@@ -1065,9 +1089,20 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		let releaseChildCleanup: CleanupFunction = noop;
 		let placeholderWasInserted = false;
 
-		if (childComponent && childComponent.getOwner() === null) {
-			childComponent.setOwner(this);
-		}
+		const setHiddenManagedOwner = (owner: Owner | null) => {
+			if (!childComponent || childComponent.getOwner() !== null) {
+				return;
+			}
+
+			if (owner) {
+				hiddenManagedOwners.set(childComponent, owner);
+			}
+			else {
+				hiddenManagedOwners.delete(childComponent);
+			}
+
+			childComponent.refreshOrphanCheck();
+		};
 
 		const getSafeReferenceNode = (container: ParentNode): Node | null => {
 			const referenceNode = options.getReferenceNode();
@@ -1129,10 +1164,12 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			}
 
 			if (!container) {
+				setHiddenManagedOwner(this);
 				moveNode(storage, resolvedNode, null);
 				return;
 			}
 
+			setHiddenManagedOwner(null);
 			const moved = moveNode(container, resolvedNode, placeholder.node);
 
 			if (moved) {
@@ -1159,6 +1196,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			}
 
 			if (!container) {
+				setHiddenManagedOwner(this);
 				if (resolvedNode.parentNode !== storage) {
 					moveNode(storage, resolvedNode, null);
 				}
@@ -1166,6 +1204,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			}
 
 			if (resolvedNode.parentNode !== storage) {
+				setHiddenManagedOwner(this);
 				moveNode(storage, resolvedNode, null);
 			}
 		};
@@ -1174,6 +1213,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			active = false;
 			stateCleanup();
 			releaseChildCleanup();
+			setHiddenManagedOwner(null);
 			placeholder.remove();
 			storage.remove();
 

@@ -509,7 +509,7 @@ describe("Component", () => {
 		expect(toggled.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
 	});
 
-	it("keeps hidden appendWhen children managed until their host is mounted", () => {
+	it("keeps hidden appendWhen children managed while parked without rewriting ownership", () => {
 		const timeoutSpy = captureTimeoutCallbacks();
 
 		try {
@@ -522,7 +522,7 @@ describe("Component", () => {
 			root.append(host);
 			document.body.append(root.element);
 
-			expect(child.getOwner(), "hidden conditional children should be managed by their host while parked").toBe(host);
+			expect(child.getOwner(), "hidden conditional children should remain ownerless while parked").toBeNull();
 			expect(() => {
 				for (const callback of timeoutSpy.callbacks) {
 					callback();
@@ -822,6 +822,34 @@ describe("Component", () => {
 			afterB.element,
 			appendB.element,
 		]);
+	});
+
+	it("preserves multi-component selection order across hidden conditional transitions", async () => {
+		const timeoutSpy = captureTimeoutCallbacks();
+
+		try {
+			const root = Component("div");
+			const visible = State(root, false);
+			const host = Component("section");
+			const selected = Component("span").text.set("selected");
+			const selection = State<Component | null>(host, selected);
+
+			host.appendWhen(visible, selection);
+			root.append(host);
+			document.body.append(root.element);
+
+			expect(selected.getOwner(), "hidden conditional selections should remain ownerless while parked").toBeNull();
+			expect(() => {
+				for (const callback of timeoutSpy.callbacks) {
+					callback();
+				}
+			}, "mounting the host before the next tick should prevent orphan errors for hidden conditional selections").not.toThrow();
+
+			root.remove();
+		}
+		finally {
+			timeoutSpy.restore();
+		}
 	});
 
 	it("preserves multi-component selection order across hidden conditional transitions", async () => {
@@ -1338,7 +1366,7 @@ describe("Component", () => {
 		expect(child.disposed).toBe(true);
 	});
 
-	it("appendTo, prependTo, and insertTo inherit managed ownership from disconnected component targets", () => {
+	it("appendTo, prependTo, and insertTo keep ownerless children ownerless under disconnected managed targets", () => {
 		vi.useFakeTimers();
 
 		const root = mountedComponent("div");
@@ -1360,14 +1388,43 @@ describe("Component", () => {
 				inserted.element,
 				appended.element,
 			]);
+			expect(appended.getOwner(), "appendTo should not rewrite explicit ownership for ownerless children").toBeNull();
+			expect(prepended.getOwner(), "prependTo should not rewrite explicit ownership for ownerless children").toBeNull();
+			expect(inserted.getOwner(), "insertTo should not rewrite explicit ownership for ownerless children").toBeNull();
 			expect(() => {
 				vi.advanceTimersByTime(0);
 			}).not.toThrow();
 			expect(appended.disposed).toBe(false);
 			expect(prepended.disposed).toBe(false);
 			expect(inserted.disposed).toBe(false);
-		} finally {
 			root.remove();
+			expect(appended.disposed, "disposing the explicit owner should dispose the appended subtree").toBe(true);
+			expect(prepended.disposed, "disposing the explicit owner should dispose the prepended subtree").toBe(true);
+			expect(inserted.disposed, "disposing the explicit owner should dispose the inserted subtree").toBe(true);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("append into a disconnected managed component keeps ownerless children ownerless", () => {
+		vi.useFakeTimers();
+
+		const root = mountedComponent("div");
+		const parent = Component("section").setOwner(root);
+		const child = Component("span").text.set("child");
+
+		try {
+			parent.append(child);
+
+			expect(child.getOwner(), "append should not assign explicit ownership to an ownerless child").toBeNull();
+			expect(() => {
+				vi.advanceTimersByTime(0);
+			}, "advancing the orphan check should not throw for internally managed children").not.toThrow();
+			expect(child.disposed, "the internally managed child should remain alive before its owner is removed").toBe(false);
+
+			root.remove();
+			expect(child.disposed, "disposing the explicit owner should dispose the internally managed subtree").toBe(true);
+		} finally {
 			vi.useRealTimers();
 		}
 	});

@@ -7,10 +7,12 @@
  * These enable advanced features and should not be manually invoked.
  */
 
+import breakdownExtension from "./component/extensions/breakdownExtension";
 import placeExtension from "./component/extensions/placeExtension";
 import groupExtension from "./state/extensions/groupExtension";
 import mappingExtension from "./state/extensions/mappingExtension";
 
+breakdownExtension();
 placeExtension();
 groupExtension();
 mappingExtension();
