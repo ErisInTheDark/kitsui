@@ -3545,7 +3545,7 @@ ${innerRules}
           return;
         }
         parts.delete(key);
-        record.state.dispose();
+        record.state?.dispose();
         record.component.remove();
       };
       const cleanup = () => {
@@ -3573,10 +3573,12 @@ ${innerRules}
             rerenderQueued = false;
             const currentValue = latestValue;
             const seenKeys = /* @__PURE__ */ new Set();
-            const Part = (key, value, build) => {
+            const Part = (key, valueOrBuild, maybeBuild) => {
               if (!isBreakdownKey(key)) {
                 throw new TypeError("Component.Breakdown part keys must be strings, numbers, or symbols.");
               }
+              const isStateless = maybeBuild === void 0;
+              const build = isStateless ? valueOrBuild : maybeBuild;
               if (typeof build !== "function") {
                 throw new TypeError("Component.Breakdown parts require a builder function.");
               }
@@ -3586,15 +3588,22 @@ ${innerRules}
               seenKeys.add(key);
               const existing = parts.get(key);
               if (existing) {
-                existing.state.set(value);
+                if (!isStateless) {
+                  existing.state?.set(valueOrBuild);
+                }
                 return existing.component;
               }
-              const partState = State(owner, value);
               let component;
+              let partState;
               try {
-                component = validateCreatedPartComponent(build(partState));
+                if (isStateless) {
+                  component = validateCreatedPartComponent(build());
+                } else {
+                  partState = State(owner, valueOrBuild);
+                  component = validateCreatedPartComponent(build(partState));
+                }
               } catch (error) {
-                partState.dispose();
+                partState?.dispose();
                 throw error;
               }
               component.setOwner(owner);
@@ -3608,9 +3617,9 @@ ${innerRules}
                   return;
                 }
                 parts.delete(key);
-                partState.dispose();
+                partState?.dispose();
               });
-              partState.onCleanup(() => {
+              partState?.onCleanup(() => {
                 releaseComponentCleanup();
               });
               return component;

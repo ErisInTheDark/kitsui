@@ -1322,7 +1322,12 @@ export const State: StateConstructor & StateStaticExtensions;
 
 type BreakdownPartBuilder<TPart> = (state: State<TPart>) => Component;
 
-type BreakdownPartRegistrar = <TPart>(key: PropertyKey, value: TPart, build: BreakdownPartBuilder<TPart>) => Component;
+type StatelessBreakdownPartBuilder = () => Component;
+
+type BreakdownPartRegistrar = {
+    <TPart>(key: PropertyKey, value: TPart, build: BreakdownPartBuilder<TPart>): Component;
+    (key: PropertyKey, build: StatelessBreakdownPartBuilder): Component;
+};
 
 type BreakdownRenderer<TValue> = (Part: BreakdownPartRegistrar, value: TValue) => void;
 
