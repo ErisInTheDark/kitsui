@@ -1320,6 +1320,33 @@ type StateConstructor = {
 
 export const State: StateConstructor & StateStaticExtensions;
 
+type BreakdownPartBuilder<TPart> = (state: State<TPart>) => Component;
+
+type BreakdownPartRegistrar = <TPart>(key: PropertyKey, value: TPart, build: BreakdownPartBuilder<TPart>) => Component;
+
+type BreakdownRenderer<TValue> = (Part: BreakdownPartRegistrar, value: TValue) => void;
+
+type BreakdownConstructor = {
+    <TValue>(owner: Owner, state: State<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
+};
+
+export interface ComponentStaticExtensions {
+        /**
+         * Breaks a source state into keyed reusable parts owned by the provided owner.
+         *
+         * Each unique key creates a component once. Later breakdown passes reuse that component,
+         * update its per-part state, and let callers reposition it through normal placement APIs.
+         *
+         * Parts omitted from a later pass are removed and their part state is disposed.
+         *
+         * @param owner The owner that explicitly owns every created part.
+         * @param state The source state to break down on each update.
+         * @param breakdown Called immediately and on each source update to register keyed parts.
+         * @returns A cleanup function that stops the breakdown and disposes its parts.
+         */
+        Breakdown: BreakdownConstructor;
+    }
+
 type GroupedStateObject = Record<string, State<any>>;
 
 type GroupedValue<T extends GroupedStateObject> = {

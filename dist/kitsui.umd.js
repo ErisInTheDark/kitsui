@@ -2526,6 +2526,7 @@ ${innerRules}
   var recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
   var elementComponents = /* @__PURE__ */ new WeakMap();
   var componentOwnerResolvers = /* @__PURE__ */ new Set();
+  var hiddenManagedOwners = /* @__PURE__ */ new WeakMap();
   var componentAccessorInstalled = false;
   function isMoveParent(value) {
     return value !== null && typeof value.insertBefore === "function";
@@ -2563,6 +2564,14 @@ ${innerRules}
       return void 0;
     }
     return component;
+  }
+  function getWrappedNodeOwner2(node) {
+    const maybeMarker = node.marker;
+    if (maybeMarker) {
+      return maybeMarker;
+    }
+    const maybeComponent = node.component;
+    return maybeComponent ?? null;
   }
   function installNodeComponentAccessor() {
     if (componentAccessorInstalled) {
@@ -3134,6 +3143,16 @@ ${innerRules}
       if (this.ownerResolves(this.explicitOwner)) {
         return true;
       }
+      if (this.ownerResolves(hiddenManagedOwners.get(this) ?? null)) {
+        return true;
+      }
+      let current = this.element.parentNode;
+      while (current) {
+        if (this.ownerResolves(getWrappedNodeOwner2(current))) {
+          return true;
+        }
+        current = current.parentNode;
+      }
       for (const resolver of componentOwnerResolvers) {
         if (this.ownerResolves(resolver(this))) {
           return true;
@@ -3220,9 +3239,17 @@ ${innerRules}
       let active = true;
       let releaseChildCleanup = noop8;
       let placeholderWasInserted = false;
-      if (childComponent && childComponent.getOwner() === null) {
-        childComponent.setOwner(this);
-      }
+      const setHiddenManagedOwner = (owner) => {
+        if (!childComponent || childComponent.getOwner() !== null) {
+          return;
+        }
+        if (owner) {
+          hiddenManagedOwners.set(childComponent, owner);
+        } else {
+          hiddenManagedOwners.delete(childComponent);
+        }
+        childComponent.refreshOrphanCheck();
+      };
       const getSafeReferenceNode = (container) => {
         const referenceNode = options.getReferenceNode();
         if (!referenceNode) {
@@ -3269,9 +3296,11 @@ ${innerRules}
           return;
         }
         if (!container) {
+          setHiddenManagedOwner(this);
           moveNode(storage, resolvedNode, null);
           return;
         }
+        setHiddenManagedOwner(null);
         const moved = moveNode(container, resolvedNode, placeholder.node);
         if (moved) {
           childComponent?.refreshOrphanCheck();
@@ -3292,12 +3321,14 @@ ${innerRules}
           return;
         }
         if (!container) {
+          setHiddenManagedOwner(this);
           if (resolvedNode.parentNode !== storage) {
             moveNode(storage, resolvedNode, null);
           }
           return;
         }
         if (resolvedNode.parentNode !== storage) {
+          setHiddenManagedOwner(this);
           moveNode(storage, resolvedNode, null);
         }
       };
@@ -3305,6 +3336,7 @@ ${innerRules}
         active = false;
         stateCleanup();
         releaseChildCleanup();
+        setHiddenManagedOwner(null);
         placeholder.remove();
         storage.remove();
         if (childComponent) {
@@ -3454,8 +3486,160 @@ ${innerRules}
     return ComponentClass;
   };
 
-  // src/component/extensions/placeExtension.ts
+  // src/component/extensions/breakdownExtension.ts
   var noop9 = () => {
+  };
+  var componentClass = null;
+  var patched = false;
+  function getComponentClass() {
+    componentClass ?? (componentClass = Component.extend());
+    return componentClass;
+  }
+  function isStateLike(value) {
+    if (typeof value !== "object" || value === null) {
+      return false;
+    }
+    const maybeState = value;
+    return "value" in maybeState && typeof maybeState.subscribe === "function";
+  }
+  function isBreakdownKey(value) {
+    return typeof value === "string" || typeof value === "number" || typeof value === "symbol";
+  }
+  function validateCreatedPartComponent(component) {
+    if (!(component instanceof getComponentClass())) {
+      throw new TypeError("Component.Breakdown part builders must return a Component.");
+    }
+    if (component.getOwner() !== null) {
+      throw new Error("Component.Breakdown part builders must return an ownerless Component.");
+    }
+    if (component.element.parentNode !== null) {
+      throw new Error("Component.Breakdown part builders must return an unplaced Component.");
+    }
+    return component;
+  }
+  function breakdownExtension() {
+    if (patched) {
+      return;
+    }
+    patched = true;
+    const ComponentWithBreakdown = Component;
+    const Breakdown = function Breakdown2(owner, state2, breakdown) {
+      if (!(owner instanceof Owner)) {
+        throw new TypeError("Component.Breakdown requires an Owner as the first argument.");
+      }
+      if (!isStateLike(state2)) {
+        throw new TypeError("Component.Breakdown requires a State as the second argument.");
+      }
+      if (typeof breakdown !== "function") {
+        throw new TypeError("Component.Breakdown requires a breakdown function as the third argument.");
+      }
+      const parts = /* @__PURE__ */ new Map();
+      let active = true;
+      let latestValue = state2.value;
+      let rendering = false;
+      let rerenderQueued = false;
+      let releaseOwnerCleanup = noop9;
+      let releaseStateSubscription = noop9;
+      const removePart = (key, record = parts.get(key)) => {
+        if (!record || parts.get(key) !== record) {
+          return;
+        }
+        parts.delete(key);
+        record.state.dispose();
+        record.component.remove();
+      };
+      const cleanup = () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        releaseOwnerCleanup();
+        releaseStateSubscription();
+        for (const [key, record] of [...parts]) {
+          removePart(key, record);
+        }
+      };
+      const render = () => {
+        if (!active) {
+          return;
+        }
+        if (rendering) {
+          rerenderQueued = true;
+          return;
+        }
+        rendering = true;
+        try {
+          do {
+            rerenderQueued = false;
+            const currentValue = latestValue;
+            const seenKeys = /* @__PURE__ */ new Set();
+            const Part = (key, value, build) => {
+              if (!isBreakdownKey(key)) {
+                throw new TypeError("Component.Breakdown part keys must be strings, numbers, or symbols.");
+              }
+              if (typeof build !== "function") {
+                throw new TypeError("Component.Breakdown parts require a builder function.");
+              }
+              if (seenKeys.has(key)) {
+                throw new Error(`Component.Breakdown registered the key ${String(key)} more than once in a single pass.`);
+              }
+              seenKeys.add(key);
+              const existing = parts.get(key);
+              if (existing) {
+                existing.state.set(value);
+                return existing.component;
+              }
+              const partState = State(owner, value);
+              let component;
+              try {
+                component = validateCreatedPartComponent(build(partState));
+              } catch (error) {
+                partState.dispose();
+                throw error;
+              }
+              component.setOwner(owner);
+              const record = {
+                component,
+                state: partState
+              };
+              parts.set(key, record);
+              const releaseComponentCleanup = component.onCleanup(() => {
+                if (parts.get(key) !== record) {
+                  return;
+                }
+                parts.delete(key);
+                partState.dispose();
+              });
+              partState.onCleanup(() => {
+                releaseComponentCleanup();
+              });
+              return component;
+            };
+            breakdown(Part, currentValue);
+            for (const [key, record] of [...parts]) {
+              if (seenKeys.has(key)) {
+                continue;
+              }
+              removePart(key, record);
+            }
+          } while (active && rerenderQueued);
+        } finally {
+          rendering = false;
+        }
+      };
+      releaseOwnerCleanup = owner.onCleanup(cleanup);
+      releaseStateSubscription = state2.subscribe(owner, (value) => {
+        latestValue = value;
+        render();
+      });
+      render();
+      return cleanup;
+    };
+    ComponentWithBreakdown.Breakdown = Breakdown;
+  }
+
+  // src/component/extensions/placeExtension.ts
+  var noop10 = () => {
   };
   var PlacementLifecycleOwner = class extends Owner {
     // Uses Owner's default lifecycle hooks.
@@ -3464,11 +3648,11 @@ ${innerRules}
   var placementOwners = /* @__PURE__ */ new WeakMap();
   var placementLifecycleOwners = /* @__PURE__ */ new WeakMap();
   var recursiveTreeErrorMessage2 = "Cannot move a node into itself or one of its descendants.";
-  var componentClass = null;
-  var patched = false;
-  function getComponentClass() {
-    componentClass ?? (componentClass = Component.extend());
-    return componentClass;
+  var componentClass2 = null;
+  var patched2 = false;
+  function getComponentClass2() {
+    componentClass2 ?? (componentClass2 = Component.extend());
+    return componentClass2;
   }
   function isMoveParent2(value) {
     return value !== null && typeof value.insertBefore === "function";
@@ -3505,7 +3689,7 @@ ${innerRules}
     }
   }
   function isComponent(value) {
-    return value instanceof getComponentClass();
+    return value instanceof getComponentClass2();
   }
   function clearPlacement(component) {
     placementControllers.get(component)?.();
@@ -3526,7 +3710,7 @@ ${innerRules}
   function setPlacementController(component, cleanup) {
     clearPlacement(component);
     let active = true;
-    let releaseDisposeCleanup = noop9;
+    let releaseDisposeCleanup = noop10;
     const trackedCleanup = () => {
       if (!active) {
         return;
@@ -3680,14 +3864,14 @@ ${innerRules}
     marker["dispatchMount"]();
   }
   function placeExtension() {
-    if (patched) {
+    if (patched2) {
       return;
     }
-    patched = true;
+    patched2 = true;
     registerComponentOwnerResolver((component) => {
       return placementOwners.get(component) ?? null;
     });
-    const ComponentClass2 = getComponentClass();
+    const ComponentClass2 = getComponentClass2();
     const MarkerClass2 = Marker.extend();
     const prototype = ComponentClass2.prototype;
     const markerPrototype = MarkerClass2.prototype;
@@ -3718,7 +3902,6 @@ ${innerRules}
     };
     prototype.appendTo = function appendTo(target) {
       ensureActive(this);
-      this.setOwner(resolvePlacementContainerOwner(target, this));
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, null);
       return this;
@@ -3732,7 +3915,6 @@ ${innerRules}
     };
     prototype.prependTo = function prependTo(target) {
       ensureActive(this);
-      this.setOwner(resolvePlacementContainerOwner(target, this));
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, container.firstChild);
       return this;
@@ -3746,7 +3928,6 @@ ${innerRules}
     };
     prototype.insertTo = function insertTo(where, target) {
       ensureActive(this);
-      this.setOwner(resolvePlacementOwner(target, this));
       const referenceNode = resolvePlacementReferenceNode(target);
       if (!referenceNode) {
         return this;
@@ -3768,7 +3949,6 @@ ${innerRules}
     prototype.place = function place(owner, placer) {
       ensureActive(this);
       const placementOwner = owner === this ? getPlacementLifecycleOwner(this) : owner;
-      this.setOwner(null);
       placementOwners.set(this, placementOwner);
       const documentRef = this.element.ownerDocument;
       const storage = createStorageElement2(documentRef);
@@ -3780,8 +3960,8 @@ ${innerRules}
       };
       Place.prototype = PlaceClass.prototype;
       const placeState = placer(Place);
-      let releaseOwnerCleanup = noop9;
-      let releaseStateCleanup = noop9;
+      let releaseOwnerCleanup = noop10;
+      let releaseStateCleanup = noop10;
       let blockedByRecursivePlacement = false;
       const cleanup = setPlacementController(this, () => {
         releaseOwnerCleanup();
@@ -3833,7 +4013,7 @@ ${innerRules}
   }
 
   // src/state/extensions/groupExtension.ts
-  var patched2 = false;
+  var patched3 = false;
   function scheduleNextTick(callback) {
     const schedulerRef = globalThis;
     if (typeof schedulerRef.scheduler?.yield === "function") {
@@ -3884,10 +4064,10 @@ ${innerRules}
     return grouped;
   }
   function groupExtension() {
-    if (patched2) {
+    if (patched3) {
       return;
     }
-    patched2 = true;
+    patched3 = true;
     const StateWithGroup = State;
     const Group = function Group2(owner, states) {
       if (!(owner instanceof Owner)) {
@@ -3904,7 +4084,7 @@ ${innerRules}
   // src/state/extensions/mappingExtension.ts
   var truthyStates = /* @__PURE__ */ new WeakMap();
   var falsyStates = /* @__PURE__ */ new WeakMap();
-  var patched3 = false;
+  var patched4 = false;
   function createMappedState(source, owner, mapValue) {
     const graphOption = {
       graph: source.getGraph()
@@ -3928,10 +4108,10 @@ ${innerRules}
     return mapped;
   }
   function mappingExtension() {
-    if (patched3) {
+    if (patched4) {
       return;
     }
-    patched3 = true;
+    patched4 = true;
     const StateClass2 = State.extend();
     const prototype = StateClass2.prototype;
     prototype.map = function map(ownerOrMapValue, maybeMapValue) {
@@ -3978,6 +4158,7 @@ ${innerRules}
   }
 
   // src/index.ts
+  breakdownExtension();
   placeExtension();
   groupExtension();
   mappingExtension();
