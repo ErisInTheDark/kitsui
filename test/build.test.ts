@@ -8,6 +8,9 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "..");
 const distDirectory = path.join(projectRoot, "dist");
 const bundleFile = path.join(distDirectory, "kitsui.umd.js");
+const esmBundleFile = path.join(distDirectory, "kitsui.esm.js");
+const umdSourceMapFile = path.join(distDirectory, "kitsui.umd.js.map");
+const esmSourceMapFile = path.join(distDirectory, "kitsui.esm.js.map");
 const rawDeclarationFile = path.join(distDirectory, "index.d.ts");
 const bundledDeclarationFile = path.join(distDirectory, "kitsui.d.ts");
 const packageJsonPath = path.join(projectRoot, "package.json");
@@ -37,12 +40,31 @@ describe("build output", () => {
 		await buildProject();
 
 		await expect(access(bundleFile)).resolves.toBeUndefined();
+		await expect(access(esmBundleFile)).resolves.toBeUndefined();
+		await expect(access(umdSourceMapFile)).resolves.toBeUndefined();
+		await expect(access(esmSourceMapFile)).resolves.toBeUndefined();
 		await expect(access(rawDeclarationFile)).resolves.toBeUndefined();
 		await expect(access(bundledDeclarationFile)).resolves.toBeUndefined();
 
+		const umdBundleContents = await readFile(bundleFile, "utf8");
+		const esmBundleContents = await readFile(esmBundleFile, "utf8");
+		const umdSourceMapContents = JSON.parse(await readFile(umdSourceMapFile, "utf8")) as {
+			sources?: string[];
+			version?: number;
+		};
+		const esmSourceMapContents = JSON.parse(await readFile(esmSourceMapFile, "utf8")) as {
+			sources?: string[];
+			version?: number;
+		};
 		const rawDeclarationContents = await readFile(rawDeclarationFile, "utf8");
 		const bundledDeclarationContents = await readFile(bundledDeclarationFile, "utf8");
 
+		expect(umdBundleContents.includes("//# sourceMappingURL=kitsui.umd.js.map"), "links UMD sourcemap").toBe(true);
+		expect(esmBundleContents.includes("//# sourceMappingURL=kitsui.esm.js.map"), "links ESM sourcemap").toBe(true);
+		expect(umdSourceMapContents.version, "writes a valid UMD sourcemap").toBe(3);
+		expect(esmSourceMapContents.version, "writes a valid ESM sourcemap").toBe(3);
+		expect(umdSourceMapContents.sources?.some((source) => source.endsWith("src/index.ts")), "UMD sourcemap includes src/index.ts").toBe(true);
+		expect(esmSourceMapContents.sources?.some((source) => source.endsWith("src/index.ts")), "ESM sourcemap includes src/index.ts").toBe(true);
 		expect(rawDeclarationContents.includes('export { Component } from "./component/Component";'), "exports Component").toBe(true);
 		expect(rawDeclarationContents.includes('export { Owner, State } from "./state/State";'), "exports Owner and State").toBe(true);
 		expect(bundledDeclarationContents.includes('declare module "kitsui" {'), "declares module kitsui").toBe(true);
