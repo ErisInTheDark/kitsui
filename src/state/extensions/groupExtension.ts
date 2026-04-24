@@ -1,4 +1,5 @@
 import { Owner, State, StateStaticExtensions, type CleanupFunction, type StateOptions } from "../State";
+import type { Mapper } from "./mappingExtension";
 
 type GroupedStateObject = Record<string, State<any>>;
 
@@ -8,8 +9,52 @@ type GroupedValue<T extends GroupedStateObject> = {
 
 /** @group Group */
 type GroupConstructor = {
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
+	 * @param owner The owner that manages the grouped state's lifecycle.
+	 * @param states A record of source states to group.
+	 * @returns A state whose value is an object with the current value of each source state.
+	 */
 	<T extends GroupedStateObject> (owner: Owner, states: T): State<GroupedValue<T>>;
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
+	 * @param owner The owner that manages the grouped state's lifecycle.
+	 * @param states A record of source states to group.
+	 * @returns A state whose value is an object with the current value of each source state.
+	 */
 	new <T extends GroupedStateObject> (owner: Owner, states: T): State<GroupedValue<T>>;
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
+	 * @param owner The owner that manages the grouped state's lifecycle.
+	 * @param states A record of source states to group.
+	 * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+	 * @returns A state whose value is the mapper result for the current grouped snapshot.
+	 */
+	<T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
+	 * @param owner The owner that manages the grouped state's lifecycle.
+	 * @param states A record of source states to group.
+	 * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+	 * @returns A state whose value is the mapper result for the current grouped snapshot.
+	 */
+	new <T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
 };
 
 declare module "../State" {
@@ -19,10 +64,6 @@ declare module "../State" {
 		 *
 		 * The grouped state subscribes to all input states and coalesces source updates
 		 * into a single next-tick grouped update per tick.
-		 *
-		 * @param owner The owner that manages the grouped state's lifecycle.
-		 * @param states A record of source states to group.
-		 * @returns A state whose value is an object with the current value of each source state.
 		 * @group Group
 		 */
 		Group: GroupConstructor;
@@ -52,19 +93,34 @@ function scheduleNextTick (callback: () => void): void {
 	queueMicrotask(callback);
 }
 
-function readGroupSnapshot<T extends GroupedStateObject> (states: T): GroupedValue<T> {
+function readGroupedValue<T extends GroupedStateObject> (states: T): GroupedValue<T> {
 	const entries = Object.entries(states).map(([key, state]) => {
 		return [key, state.value] as const;
 	});
 
 	return Object.fromEntries(entries) as GroupedValue<T>;
+
 }
 
-function createGroupedState<T extends GroupedStateObject> (owner: Owner, states: T): State<GroupedValue<T>> {
-	const grouped = createOwnedState(owner, readGroupSnapshot(states));
+function readGroupSnapshot<T extends GroupedStateObject, U> (states: T, mapper: Mapper<GroupedValue<T>, U> | undefined, oldValue?: GroupedValue<T>): {
+	snapshot: GroupedValue<T>;
+	value: GroupedValue<T> | U;
+} {
+	const snapshot = readGroupedValue(states);
+
+	return {
+		snapshot,
+		value: mapper ? mapper(snapshot, oldValue) : snapshot,
+	};
+}
+
+function createGroupedState<T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U> | undefined): State<U> {
+	const initialGroup = readGroupSnapshot(states, mapper, undefined);
+	const grouped = createOwnedState(owner, initialGroup.value);
 	const releaseSubscriptions: CleanupFunction[] = [];
 	let active = true;
 	let queued = false;
+	let previousSnapshot = initialGroup.snapshot;
 
 	const flush = () => {
 		queued = false;
@@ -73,7 +129,9 @@ function createGroupedState<T extends GroupedStateObject> (owner: Owner, states:
 			return;
 		}
 
-		grouped.set(readGroupSnapshot(states));
+		const nextGroup = readGroupSnapshot(states, mapper, previousSnapshot);
+		grouped.set(nextGroup.value);
+		previousSnapshot = nextGroup.snapshot;
 	};
 
 	const queueGroupedUpdate = () => {
@@ -104,7 +162,7 @@ function createGroupedState<T extends GroupedStateObject> (owner: Owner, states:
 		releaseSubscriptions.length = 0;
 	});
 
-	return grouped;
+	return grouped as unknown as State<U>;
 }
 
 /**
@@ -119,7 +177,7 @@ export default function groupExtension (): void {
 	patched = true;
 
 	const StateWithGroup = State as typeof State & StateStaticExtensions;
-	const Group = function Group<T extends GroupedStateObject> (owner: Owner, states: T): State<GroupedValue<T>> {
+	const Group = function Group<T extends GroupedStateObject, U> (owner: Owner, states: T, mapper?: Mapper<GroupedValue<T>, U>): State<U> {
 		if (!(owner instanceof Owner)) {
 			throw new TypeError("State.Group requires an Owner as the first argument.");
 		}
@@ -128,7 +186,7 @@ export default function groupExtension (): void {
 			throw new TypeError("State.Group requires a states object as the second argument.");
 		}
 
-		return createGroupedState(owner, states);
+		return createGroupedState(owner, states, mapper);
 	} as GroupConstructor;
 
 	StateWithGroup.Group = Group;

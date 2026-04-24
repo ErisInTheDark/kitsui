@@ -330,6 +330,93 @@ describe("State", () => {
 		});
 	});
 
+	it("supports mapper overloads with both call and constructor forms", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 1);
+		const label = State(owner, "one");
+		const groupedFromCall = State.Group(owner, {
+			count,
+			label,
+		}, ({ count: currentCount, label: currentLabel }) => `${currentLabel}:${currentCount}`);
+		const groupedFromNew = new State.Group(owner, {
+			count,
+			label,
+		}, ({ count: currentCount, label: currentLabel }) => ({
+			summary: `${currentLabel}:${currentCount}`,
+			ready: currentCount > 0,
+		}));
+
+		expect(groupedFromCall.value).toBe("one:1");
+		expect(groupedFromNew.value).toEqual({
+			summary: "one:1",
+			ready: true,
+		});
+
+		count.set(2);
+		label.set("two");
+
+		expect(groupedFromCall.value).toBe("one:1");
+		expect(groupedFromNew.value).toEqual({
+			summary: "one:1",
+			ready: true,
+		});
+
+		await flushEffects();
+
+		expect(groupedFromCall.value).toBe("two:2");
+		expect(groupedFromNew.value).toEqual({
+			summary: "two:2",
+			ready: true,
+		});
+	});
+
+	it("passes the previous grouped snapshot to mapper overloads", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 1);
+		const label = State(owner, "one");
+		const mapper = vi.fn((values: { count: number; label: string }, old: { count: number; label: string } | undefined) => ({ values, old }));
+		const grouped = State.Group(owner, {
+			count,
+			label,
+		}, mapper);
+
+		expect(mapper).toHaveBeenCalledTimes(1);
+		expect(mapper).toHaveBeenNthCalledWith(1, {
+			count: 1,
+			label: "one",
+		}, undefined);
+		expect(grouped.value).toEqual({
+			values: {
+				count: 1,
+				label: "one",
+			},
+			old: undefined,
+		});
+
+		count.set(2);
+		label.set("two");
+		await flushEffects();
+
+		expect(mapper).toHaveBeenCalledTimes(2);
+		expect(mapper).toHaveBeenNthCalledWith(2, {
+			count: 2,
+			label: "two",
+		}, {
+			count: 1,
+			label: "one",
+		});
+		expect(grouped.value).toEqual({
+			values: {
+				count: 2,
+				label: "two",
+			},
+			old: {
+				count: 1,
+				label: "one",
+			},
+		});
+	});
+
 	it("updates grouped states on the next tick, not synchronously", async () => {
 		const owner = mountedOwner();
 		const count = State(owner, 0);
@@ -367,6 +454,28 @@ describe("State", () => {
 		]);
 	});
 
+	it("coalesces mapped grouped updates into one derived update per tick", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 0);
+		const label = State(owner, "zero");
+		const grouped = State.Group(owner, { count, label }, ({ count: currentCount, label: currentLabel }) => `${currentLabel}:${currentCount}`);
+		const calls: Array<[string, string]> = [];
+
+		grouped.subscribeImmediateUnbound((value, previousValue) => {
+			calls.push([previousValue, value]);
+		});
+
+		count.set(1);
+		label.set("one");
+		count.set(2);
+
+		await flushEffects();
+
+		expect(calls).toEqual([
+			["zero:0", "one:2"],
+		]);
+	});
+
 	it("supports empty grouped state objects", async () => {
 		const owner = mountedOwner();
 		const grouped = State.Group(owner, {});
@@ -375,6 +484,16 @@ describe("State", () => {
 
 		await flushEffects();
 		expect(grouped.value).toEqual({});
+	});
+
+	it("supports mapper overloads with empty grouped state objects", async () => {
+		const owner = mountedOwner();
+		const grouped = State.Group(owner, {}, () => "ready");
+
+		expect(grouped.value).toBe("ready");
+
+		await flushEffects();
+		expect(grouped.value).toBe("ready");
 	});
 
 	it("disposes grouped states when their owner is disposed", () => {

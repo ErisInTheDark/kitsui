@@ -316,9 +316,13 @@ describe("build:docs pipeline", () => {
 		expect(stateGroupDeclaration.includes('class="docs-declaration-type"'), "State.Group should not render a redundant declaration type code block when signatures exist").toBe(false);
 		expect(stateGroupDeclaration.includes('docs-kind-property'), "Constructor-backed static extensions should not use property icon styling").toBe(false);
 		expect(stateGroupDeclaration.includes('docs-kind-reference'), "Constructor-backed static extensions should use class/reference icon styling").toBe(true);
+		const stateGroupSignatureCount = (stateGroupDeclaration.match(/class="docs-signature docs-signature-accent-method"/gu) ?? []).length;
+		expect(stateGroupSignatureCount, "State.Group should render separate signature groups for grouped and mapped overloads").toBe(2);
 		expect(stateGroupDeclaration.includes('<br>'), "State.Group should preserve both call and constructor signatures").toBe(true);
 		expect(/docs-signature-param-row[\s\S]*?<span class="docs-parameter-name">owner<\/span>[\s\S]*?<div class="docs-comment"><span><span class="docs-comment">The owner that manages the grouped state's lifecycle\./u.test(stateGroupDeclaration), "State.Group should render the owner description in the signature parameter details").toBe(true);
 		expect(/docs-signature-param-row[\s\S]*?<span class="docs-parameter-name">states<\/span>[\s\S]*?<div class="docs-comment"><span><span class="docs-comment">A record of source states to group\./u.test(stateGroupDeclaration), "State.Group should render the states description in the signature parameter details").toBe(true);
+		expect(/docs-signature-param-row[\s\S]*?<span class="docs-parameter-name">mapper<\/span>[\s\S]*?<div class="docs-comment"><span><span class="docs-comment">Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state\./u.test(stateGroupDeclaration), "State.Group should render the mapper description in the mapped overload parameter details").toBe(true);
+		expect(stateGroupDeclaration.includes('A state whose value is the mapper result for the current grouped snapshot.'), "State.Group should render the mapped overload return description").toBe(true);
 		const mainStateSectionEnd = groupSectionStart;
 		const mainStateSectionHtml = stateHtml.slice(0, mainStateSectionEnd);
 		expect(mainStateSectionHtml.includes('id="StateStaticExtensions.Group"'), "State.Group should not remain nested in the main State section").toBe(false);
