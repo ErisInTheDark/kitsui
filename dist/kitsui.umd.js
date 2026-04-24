@@ -8,7 +8,6 @@
   }
 })(typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : this, function () {
   "use strict";
-
 "use strict";
 var __kitsui_factory__ = (() => {
   var __defProp = Object.defineProperty;
@@ -4174,6 +4173,6 @@ ${innerRules}
   return __toCommonJS(index_exports);
 })();
 
-
   return __kitsui_factory__;
 });
+//# sourceMappingURL=kitsui.umd.js.map
