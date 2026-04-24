@@ -1,4 +1,4 @@
-import { Owner, State, StateStaticExtensions, type CleanupFunction } from "../State";
+import { Owner, State, StateStaticExtensions, type CleanupFunction, type StateOptions } from "../State";
 
 type GroupedStateObject = Record<string, State<any>>;
 
@@ -33,6 +33,8 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
+const createOwnedState = State as unknown as <T>(owner: Owner, initialValue: T, options?: StateOptions<T>) => State<T>;
+
 let patched = false;
 
 function scheduleNextTick (callback: () => void): void {
@@ -59,7 +61,7 @@ function readGroupSnapshot<T extends GroupedStateObject> (states: T): GroupedVal
 }
 
 function createGroupedState<T extends GroupedStateObject> (owner: Owner, states: T): State<GroupedValue<T>> {
-	const grouped = State(owner, readGroupSnapshot(states));
+	const grouped = createOwnedState(owner, readGroupSnapshot(states));
 	const releaseSubscriptions: CleanupFunction[] = [];
 	let active = true;
 	let queued = false;

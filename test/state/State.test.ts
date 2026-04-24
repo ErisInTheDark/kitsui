@@ -125,6 +125,61 @@ describe("State", () => {
 		expect(state.value).toBe(2);
 	});
 
+	it("notifies immediate and queued subscribers when update returns the current value", async () => {
+		const state = State(mountedOwner(), "ready");
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		const returnedValue = state.update((currentValue) => currentValue);
+
+		expect(returnedValue, "update should return the current value when the updater returns it unchanged").toBe("ready");
+		expect(immediateListener, "update should still notify immediate subscribers even when the effective value is unchanged").toHaveBeenCalledOnce();
+		expect(immediateListener, "immediate subscribers should receive equal current and previous values").toHaveBeenCalledWith("ready", "ready");
+
+		await flushEffects();
+
+		expect(queuedListener, "update should still notify queued subscribers even when the effective value is unchanged").toHaveBeenCalledOnce();
+		expect(queuedListener, "queued subscribers should receive equal current and previous values").toHaveBeenCalledWith("ready", "ready");
+		expect(state.value, "update(current => current) should leave the stored state value unchanged").toBe("ready");
+	});
+
+	it("treats undefined from update as a keep-current sentinel", async () => {
+		const state = State(mountedOwner(), "ready");
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		const returnedValue = state.update(() => undefined as never);
+
+		expect(returnedValue, "update should return the current value when undefined means keep the current state").toBe("ready");
+		expect(state.value, "update(() => undefined) should keep the stored state value unchanged").toBe("ready");
+		expect(immediateListener, "update(() => undefined) should still notify immediate subscribers exactly once").toHaveBeenCalledOnce();
+		expect(immediateListener, "immediate subscribers should receive the retained value as both current and previous values").toHaveBeenCalledWith("ready", "ready");
+
+		await flushEffects();
+
+		expect(queuedListener, "update(() => undefined) should still notify queued subscribers exactly once").toHaveBeenCalledOnce();
+		expect(queuedListener, "queued subscribers should receive the retained value as both current and previous values").toHaveBeenCalledWith("ready", "ready");
+	});
+
+	it("rejects undefined-valued state construction at the type level", () => {
+		if (false) {
+			// @ts-expect-error State<string | undefined> should no longer be accepted.
+			State<string | undefined>(mountedOwner(), "ready");
+			// @ts-expect-error State<string | undefined> should no longer accept undefined-valued state construction.
+			State<string | undefined>(mountedOwner(), undefined);
+			// @ts-expect-error State.Readonly<string | undefined> should no longer accept undefined-valued construction.
+			State.Readonly<string | undefined>(undefined);
+		}
+
+		expect(true).toBe(true);
+	});
+
 	/** Verifies clear updates the stored value without notifying immediate or queued listeners. */
 	it("clears values without notifying listeners", async () => {
 		const state = State(mountedOwner(), "idle");
@@ -418,6 +473,26 @@ describe("State", () => {
 		expect(readonlyState.clear(2), "clear should return the retained readonly value").toBe(1);
 
 		expect(readonlyState.value, "clear should not mutate readonly states").toBe(1);
+	});
+
+	it("rejects undefined values at runtime", () => {
+		const owner = mountedOwner();
+		const state = State(owner, "ready");
+
+		try {
+			expect(() => State(owner, undefined as never), "State(owner, undefined) should reject undefined initial values").toThrow();
+			expect(() => State.Readonly(undefined as never), "State.Readonly(undefined) should reject undefined readonly values").toThrow();
+			expect(() => state.set(undefined as never), "state.set(undefined) should reject undefined stored values").toThrow();
+			expect(() => state.clear(undefined as never), "state.clear(undefined) should reject undefined stored values").toThrow();
+
+			const returnedValue = state.update(() => undefined as never);
+
+			expect(returnedValue, "update(() => undefined) should return the retained current value").toBe("ready");
+			expect(state.value, "update(() => undefined) should keep the stored value unchanged").toBe("ready");
+		}
+		finally {
+			owner.remove();
+		}
 	});
 
 	it("supports custom equality functions", async () => {

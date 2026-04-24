@@ -5,6 +5,22 @@ import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/t
 
 export type CleanupFunction = () => void;
 
+type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+type RejectUndefined<T> = IsAny<T> extends true ? T : [undefined] extends [T] ? never : T;
+
+type WidenStateValue<T> = [T] extends [string]
+	? string
+	: [T] extends [number]
+		? number
+		: [T] extends [boolean]
+			? boolean
+			: [T] extends [bigint]
+				? bigint
+				: [T] extends [symbol]
+					? symbol
+					: T;
+
 /**
  * Checks if two state values are considered equal.
  * @param currentValue The current state value.
@@ -23,9 +39,9 @@ export type StateListener<T> = (value: T, previousValue: T) => void;
 /**
  * Function that transforms the current state value into a new value.
  * @param currentValue The current state value.
- * @returns The transformed state value.
+ * @returns The transformed state value, or `undefined` to keep the current value.
  */
-export type StateUpdater<T> = (currentValue: T) => T;
+export type StateUpdater<T> = (currentValue: T) => T | void;
 
 /**
  * Options for creating a new state instance.
@@ -74,6 +90,7 @@ interface ImmediateStateListenerRecord<T> {
 
 interface QueuedStateListenerRecord<T> {
 	active: boolean;
+	forcePendingEmit: boolean;
 	graph: StateGraph;
 	listener: StateListener<T>;
 	pending: boolean;
@@ -92,6 +109,14 @@ const noop: CleanupFunction = () => {
 };
 
 const ident = <T>(value: T): T => value;
+
+function assertDefinedStateValue (value: unknown): void {
+	if (value !== undefined) {
+		return;
+	}
+
+	throw new TypeError("State values cannot be undefined.");
+}
 
 function createStateGraph (): StateGraph {
 	return {
@@ -118,10 +143,11 @@ function scheduleGraphFlush (graph: StateGraph): void {
 				continue;
 			}
 
-			if (pendingListener.equals(pendingListener.pendingOriginalValue, pendingListener.pendingFinalValue)) {
+			if (!pendingListener.forcePendingEmit && pendingListener.equals(pendingListener.pendingOriginalValue, pendingListener.pendingFinalValue)) {
 				continue;
 			}
 
+			pendingListener.forcePendingEmit = false;
 			pendingListener.listener(pendingListener.pendingFinalValue, pendingListener.pendingOriginalValue);
 		}
 	};
@@ -270,6 +296,7 @@ class StateClass<T> extends Owner {
 
 	constructor (owner: Owner | null, initialValue: T, options: StateInternalOptions<T> = {}) {
 		super();
+		assertDefinedStateValue(initialValue);
 		this.owner = owner;
 		this.currentValue = initialValue;
 		this.equalityFunction = options.equals ?? Object.is;
@@ -319,13 +346,19 @@ class StateClass<T> extends Owner {
 	 */
 	set (nextValue: T): T {
 		this.ensureActive();
+		assertDefinedStateValue(nextValue);
 
 		if (getEqualityFunction(this)(this.currentValue, nextValue)) {
 			return this.currentValue;
 		}
 
+		return this.commit(nextValue, false);
+	}
+
+	private commit (nextValue: T, forceNotify: boolean): T {
 		const previousValue = this.currentValue;
 		this.currentValue = nextValue;
+
 
 		for (const listenerRecord of [...getImmediateListeners(this)]) {
 			if (!listenerRecord.active) {
@@ -342,6 +375,7 @@ class StateClass<T> extends Owner {
 
 			if (!listenerRecord.pending) {
 				listenerRecord.pending = true;
+				listenerRecord.forcePendingEmit = forceNotify;
 				listenerRecord.pendingOriginalValue = previousValue;
 				listenerRecord.pendingFinalValue = this.currentValue;
 				listenerRecord.equals = getEqualityFunction(this);
@@ -350,6 +384,7 @@ class StateClass<T> extends Owner {
 				continue;
 			}
 
+			listenerRecord.forcePendingEmit ||= forceNotify;
 			listenerRecord.pendingFinalValue = this.currentValue;
 		}
 
@@ -363,19 +398,23 @@ class StateClass<T> extends Owner {
 	 * @returns The stored state value.
 	 */
 	clear (nextValue: T): T {
+		assertDefinedStateValue(nextValue);
 		this.currentValue = nextValue;
 		return this.currentValue;
 	}
 
 	/**
 	 * Updates the state by applying a function to the current value.
+	 * Returning `undefined` keeps the current value but still emits the update to listeners.
+	 * Unlike {@link set}, `update` always notifies listeners, even when the effective value is unchanged.
 	 * @param updater Function that transforms the current value to a new value.
-	 * @returns The new state value.
+	 * @returns The stored state value after the update.
 	 * @throws If the state has been disposed.
 	 */
 	update (updater: StateUpdater<T>): T {
 		this.ensureActive();
-		return this.set(updater(this.currentValue));
+		const nextValue = updater(this.currentValue);
+		return this.commit((nextValue === undefined ? this.currentValue : nextValue), true);
 	}
 
 	/**
@@ -435,6 +474,7 @@ class StateClass<T> extends Owner {
 		const listenerRecord: QueuedStateListenerRecord<T> = {
 			active: true,
 			equals: getEqualityFunction(this),
+			forcePendingEmit: false,
 			graph: this.graph,
 			listener,
 			pending: false,
@@ -677,10 +717,10 @@ export type State<T> = StateClass<T>;
 
 /** @group State */
 type StateConstructor = {
-	<T> (initialValue: T, options?: StateOptions<T>): State<T>;
-	<T> (owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
-	new <T>(initialValue: T, options?: StateOptions<T>): State<T>;
-	new <T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
+	<T> (owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+	new <T>(owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+	<T> (initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+	new <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
 	prototype: State<unknown>;
 	/**
 	 * Returns the underlying State class for prototype extension.
@@ -707,7 +747,7 @@ type StateConstructor = {
 	 * @param value The fixed value for the readonly state.
 	 * @returns A new readonly state instance with the specified value.
 	 */
-	Readonly<T> (value: T): State<T>;
+	Readonly<T> (value: RejectUndefined<T>): State<WidenStateValue<T>>;
 }
 
 /**
@@ -749,7 +789,7 @@ export const State = function State<T> (ownerOrValue: Owner | T, valueOrOptions?
 	}
 
 	return new StateClass(null, ownerOrValue as T, ((arguments.length >= 2 ? valueOrOptions : undefined) ?? {}) as StateInternalOptions<T>);
-} as StateConstructor & StateStaticExtensions;
+} as unknown as StateConstructor & StateStaticExtensions;
 
 State.prototype = StateClass.prototype;
 
@@ -781,11 +821,11 @@ State.extend = function extend (): ExtendableStateClass {
  * @param value The fixed value for the readonly state.
  * @returns A new readonly state instance with the specified value.
  */
-State.Readonly = function Readonly<T> (value: T): State<T> {
-	const readonlyState = new StateClass(null, value);
+State.Readonly = function Readonly<T> (value: RejectUndefined<T>): State<WidenStateValue<T>> {
+	const readonlyState = new StateClass(null, value as WidenStateValue<T>);
 	readonlyState["clearOrphanCheck"]();
 	readonlyState.clear = () => readonlyState.value;
 	readonlyState.set = ident;
 	readonlyState.update = () => readonlyState.value;
-	return readonlyState;
+	return readonlyState as State<WidenStateValue<T>>;
 };

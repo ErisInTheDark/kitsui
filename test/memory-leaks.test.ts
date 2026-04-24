@@ -300,7 +300,7 @@ async function leakProbe (
 		it("placement controller cleanup", async ({ hold, track }) => {
 			const placementOwner = hold(new TestOwner());
 			const stateOwner = hold(new TestOwner());
-			const currentPlace = hold(State(stateOwner, null as any));
+			const currentPlace = hold(State<object | null>(stateOwner, null));
 			const left = Component("div").appendTo(body);
 			const right = Component("div").appendTo(body);
 			let child = track("placed child", Component("span").text.set("child"));

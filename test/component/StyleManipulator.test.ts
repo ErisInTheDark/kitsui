@@ -64,8 +64,8 @@ describe("StyleManipulator", () => {
 
 	it("updates inline styles from property states and removes them when the state becomes nullish", async () => {
 		const component = mountedComponent("div");
-		const color = State<StyleValue | null | undefined>(component, "rebeccapurple");
-		const gap = State<StyleValue | null | undefined>(component, "12px");
+		const color = State<StyleValue | null>(component, "rebeccapurple");
+		const gap = State<StyleValue | null>(component, "12px");
 
 		component.style.set({
 			color,
@@ -83,16 +83,16 @@ describe("StyleManipulator", () => {
 		expect(component.element.style.getPropertyValue("--card-gap"), "custom property state updates should propagate to the inline style").toBe("16px");
 
 		color.set(null);
-		gap.set(undefined);
+		gap.set(null);
 		await flushEffects();
 
 		expect(component.element.style.getPropertyValue("color"), "null state values should remove the inline style property").toBe("");
-		expect(component.element.style.getPropertyValue("--card-gap"), "undefined state values should remove the inline style property").toBe("");
+		expect(component.element.style.getPropertyValue("--card-gap"), "null state values should remove the inline style property").toBe("");
 	});
 
 	it("replaces previously controlled styles when a state-driven definition changes", async () => {
 		const component = mountedComponent("div");
-		const definition = State<StyleAttributeDefinition | null | undefined>(component, {
+		const definition = State<StyleAttributeDefinition | null>(component, {
 			backgroundColor: "white",
 			color: "rebeccapurple",
 			$cardGap: "12px",
@@ -117,9 +117,9 @@ describe("StyleManipulator", () => {
 
 	it("replaces earlier property subscriptions when set is called again", async () => {
 		const component = mountedComponent("div");
-		const firstColor = State<StyleValue | null | undefined>(component, "rebeccapurple");
-		const firstGap = State<StyleValue | null | undefined>(component, "12px");
-		const secondColor = State<StyleValue | null | undefined>(component, "slateblue");
+		const firstColor = State<StyleValue | null>(component, "rebeccapurple");
+		const firstGap = State<StyleValue | null>(component, "12px");
+		const secondColor = State<StyleValue | null>(component, "slateblue");
 
 		component.style.set({
 			color: firstColor,
@@ -181,7 +181,7 @@ describe("StyleManipulator", () => {
 		const invalidAnimationName: StyleAttributeDefinition = { animationName: "fade-in" };
 
 		const acceptedCustomProperty: StyleAttributeDefinition = { $cardGap: "12px" };
-		const acceptedStateSource = null as unknown as State<StyleValue | null | undefined>;
+		const acceptedStateSource = null as unknown as State<StyleValue | null>;
 		const acceptedStateValue: StyleAttributeDefinition = {
 			color: acceptedStateSource,
 		};

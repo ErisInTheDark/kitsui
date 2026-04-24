@@ -1,6 +1,6 @@
 import { Owner, State, type CleanupFunction, type StateOptions } from "../State";
 
-type Nullish = null | undefined;
+type Nullish = null;
 
 /** Maps a source state value, and optionally its previous value, into a derived value. */
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
@@ -51,7 +51,7 @@ declare module "../State" {
 		readonly falsy: State<boolean>;
 
 		/**
-		 * Returns a state that falls back to a computed value when this state is null or undefined.
+		 * Returns a state that falls back to a computed value when this state is null.
 		 * Otherwise, returns the original value.
 		 * @param getValue Function invoked to compute the fallback value when needed.
 		 * @returns A new state with the original or fallback value.
@@ -71,6 +71,9 @@ declare module "../State" {
 const truthyStates = new WeakMap<State<unknown>, State<boolean>>();
 const falsyStates = new WeakMap<State<unknown>, State<boolean>>();
 
+const createOwnedState = State as unknown as <T>(owner: Owner, initialValue: T, options?: StateOptions<T>) => State<T>;
+const createOwnerlessState = State as unknown as <T>(initialValue: T, options?: StateOptions<T>) => State<T>;
+
 let patched = false;
 
 function createMappedState<T, TMapped> (
@@ -82,9 +85,9 @@ function createMappedState<T, TMapped> (
 		graph: source.getGraph(),
 	};
 	const mapped = (owner
-		? State(owner, mapValue(source.value), graphOption as Parameters<typeof State>[2])
-		: State(mapValue(source.value), graphOption as StateOptions<TMapped>)
-	) as RecomputableState<TMapped>;
+		? createOwnedState(owner, mapValue(source.value) as Exclude<TMapped, undefined>, graphOption as StateOptions<Exclude<TMapped, undefined>>)
+		: createOwnerlessState(mapValue(source.value) as Exclude<TMapped, undefined>, graphOption as StateOptions<Exclude<TMapped, undefined>>)
+	) as unknown as RecomputableState<TMapped>;
 	const releaseImplicitOwnerPropagation = ((mapped as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(source)) ?? (() => undefined);
 	const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
 		mapped.set(mapValue(value, oldValue));
@@ -162,7 +165,7 @@ export default function mappingExtension (): void {
 
 	prototype.or = function or<TFallback> (getValue: () => TFallback): RecomputableState<unknown | TFallback> {
 		return createMappedState<unknown, unknown | TFallback>(this, this, (value) => {
-			if (value === null || value === undefined) {
+			if (value === null) {
 				return getValue();
 			}
 

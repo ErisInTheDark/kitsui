@@ -6,8 +6,10 @@ import { expandVariableAccessShorthand, toCssPropertyName } from "./styleValue";
 /** Inline style values accepted by {@link StyleManipulator}. */
 export type StyleAttributeValue = StyleValue | null | undefined;
 
+type ReactiveStyleAttributeValue = StyleValue | null;
+
 /** A direct or subscribable inline style value. */
-export type StyleAttributeValueInput = StyleAttributeValue | State<StyleAttributeValue>;
+export type StyleAttributeValueInput = StyleAttributeValue | State<ReactiveStyleAttributeValue>;
 
 /**
  * Inline style declarations accepted by {@link StyleManipulator}.
@@ -30,7 +32,7 @@ export type StyleAttributeDefinition = (
 );
 
 /** Inline style definitions accepted directly or through a subscribable source. */
-export type StyleAttributeInput = StyleAttributeDefinition | State<StyleAttributeDefinition | null | undefined>;
+export type StyleAttributeInput = StyleAttributeDefinition | State<StyleAttributeDefinition | null>;
 
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
@@ -45,20 +47,20 @@ function isStateSource<TValue> (value: unknown): value is State<TValue> {
 	return value instanceof State;
 }
 
-function toStyleAttributeSource (value: StyleAttributeInput): State<StyleAttributeDefinition | null | undefined> {
-	if (isStateSource<StyleAttributeDefinition | null | undefined>(value)) {
+function toStyleAttributeSource (value: StyleAttributeInput): State<StyleAttributeDefinition | null> {
+	if (isStateSource<StyleAttributeDefinition | null>(value)) {
 		return value;
 	}
 
-	return State.Readonly(value);
+	return State.Readonly(value === undefined ? null : value);
 }
 
-function toStyleValueSource (value: StyleAttributeValueInput): State<StyleAttributeValue> {
-	if (isStateSource<StyleAttributeValue>(value)) {
+function toStyleValueSource (value: StyleAttributeValueInput): State<ReactiveStyleAttributeValue> {
+	if (isStateSource<ReactiveStyleAttributeValue>(value)) {
 		return value;
 	}
 
-	return State.Readonly(value);
+	return State.Readonly(value === undefined ? null : value);
 }
 
 function serializeStyleValue (value: StyleAttributeValue): string | null {
@@ -102,7 +104,7 @@ export class StyleManipulator<OWNER extends Component> {
 		this.replaceDeterminer((applyIfCurrent) => {
 			let releaseDefinition = noop;
 
-			const applyDefinition = (definition: StyleAttributeDefinition | null | undefined): void => {
+			const applyDefinition = (definition: StyleAttributeDefinition | null): void => {
 				releaseDefinition();
 				releaseDefinition = this.installDefinition(definition, applyIfCurrent);
 			};

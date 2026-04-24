@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AttributeManipulator } from "../../src/component/AttributeManipulator";
 import { Component } from "../../src/component/Component";
+import type { Place } from "../../src/component/extensions/placeExtension";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Style } from "../../src/component/Style";
 import { State } from "../../src/state/State";
@@ -1872,7 +1873,7 @@ describe("Component", () => {
 		const left = mountedComponent("div");
 		const right = mountedComponent("div");
 		const child = Component("span").text.set("child");
-		const current = State<any>(owner, null);
+		const current = State<Place | null>(owner, null);
 		let leftPlace: any;
 		let rightPlace: any;
 
@@ -1904,7 +1905,7 @@ describe("Component", () => {
 		const host = mountedComponent("div");
 		const anchor = Component("span").text.set("anchor");
 		const child = Component("span").text.set("child");
-		const current = State<any>(owner, null);
+		const current = State<Place | null>(owner, null);
 		let beforeAnchor: any;
 		let afterAnchor: any;
 
@@ -1938,7 +1939,7 @@ describe("Component", () => {
 		const owner = mountedComponent("section");
 		const host = mountedComponent("div");
 		const child = Component("span").text.set("child");
-		const current = State<any>(owner, null);
+		const current = State<Place | null>(owner, null);
 		let targetPlace: any;
 
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => { });

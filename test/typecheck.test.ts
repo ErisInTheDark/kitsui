@@ -35,15 +35,18 @@ describe("typecheck configuration", () => {
 		const tempRoot = await mkdtemp(path.join(os.tmpdir(), "kitsui-typecheck-test-"));
 		tempDirectories.push(tempRoot);
 
+		await mkdir(path.join(tempRoot, "scripts", "docs", "examples"), { recursive: true });
 		await mkdir(path.join(tempRoot, "scripts", "docs", "client"), { recursive: true });
 		await writeFile(path.join(tempRoot, "tsconfig.json"), "{}", "utf8");
 		await writeFile(path.join(tempRoot, "scripts", "docs", "client", "tsconfig.json"), "{}", "utf8");
+		await writeFile(path.join(tempRoot, "scripts", "docs", "examples", "tsconfig.json"), "{}", "utf8");
 		await writeFile(path.join(tempRoot, "tsconfig.kitsui-dts.json"), "{}", "utf8");
 
 		const projects = await listTypecheckProjects(tempRoot);
 		expect(projects.map((project: { configPath: string }) => path.relative(tempRoot, project.configPath).replaceAll("\\", "/"))).toEqual([
 			"tsconfig.json",
 			"scripts/docs/client/tsconfig.json",
+			"scripts/docs/examples/tsconfig.json",
 			"tsconfig.kitsui-dts.json",
 		]);
 	});
@@ -52,10 +55,12 @@ describe("typecheck configuration", () => {
 		const tempRoot = await mkdtemp(path.join(os.tmpdir(), "kitsui-typecheck-runner-test-"));
 		tempDirectories.push(tempRoot);
 
+		await mkdir(path.join(tempRoot, "scripts", "docs", "examples"), { recursive: true });
 		await mkdir(path.join(tempRoot, "scripts", "docs", "client"), { recursive: true });
 		await mkdir(path.join(tempRoot, "dist"), { recursive: true });
 		await writeFile(path.join(tempRoot, "tsconfig.json"), "{}", "utf8");
 		await writeFile(path.join(tempRoot, "scripts", "docs", "client", "tsconfig.json"), "{}", "utf8");
+		await writeFile(path.join(tempRoot, "scripts", "docs", "examples", "tsconfig.json"), "{}", "utf8");
 		await writeFile(path.join(tempRoot, "tsconfig.kitsui-dts.json"), "{}", "utf8");
 		await writeFile(path.join(tempRoot, "dist", "kitsui.d.ts"), 'declare module "kitsui" {}\n', "utf8");
 
@@ -71,6 +76,7 @@ describe("typecheck configuration", () => {
 		expect(calls).toEqual([
 			"tsconfig.json",
 			"scripts/docs/client/tsconfig.json",
+			"scripts/docs/examples/tsconfig.json",
 			"tsconfig.kitsui-dts.json",
 		]);
 	});

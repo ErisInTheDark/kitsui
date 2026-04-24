@@ -41,6 +41,8 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
+const createOwnedState = State as unknown as <T>(owner: Owner, initialValue: T) => State<T>;
+
 let componentClass: ReturnType<typeof Component.extend> | null = null;
 let patched = false;
 
@@ -187,8 +189,8 @@ export default function breakdownExtension (): void {
 								component = validateCreatedPartComponent((build as StatelessBreakdownPartBuilder)());
 							}
 							else {
-								partState = State(owner, valueOrBuild as TPart);
-								component = validateCreatedPartComponent((build as BreakdownPartBuilder<TPart>)(partState));
+								partState = createOwnedState(owner, valueOrBuild as Exclude<TPart, undefined>) as unknown as State<TPart>;
+								component = validateCreatedPartComponent((build as BreakdownPartBuilder<TPart>)(partState!));
 							}
 						} catch (error) {
 							partState?.dispose();

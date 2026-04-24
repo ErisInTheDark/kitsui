@@ -122,6 +122,12 @@ export async function listTypecheckProjects (rootDirectory = projectRoot): Promi
 			required: true,
 		},
 		{
+			configPath: path.join(rootDirectory, "scripts", "docs", "examples", "tsconfig.json"),
+			compiler: "tsgo",
+			description: "docs examples project",
+			required: true,
+		},
+		{
 			configPath: path.join(rootDirectory, "tsconfig.kitsui-dts.json"),
 			compiler: "tsgo-bundled-dts",
 			description: "bundled declaration project",

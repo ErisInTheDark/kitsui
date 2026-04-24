@@ -94,23 +94,23 @@ export type AriaRole =
 /** ARIA text value: a string or falsy value. */
 export type AriaText = string | null | undefined;
 /** ARIA text input: static text or a reactive State. */
-export type AriaTextInput = AriaText | State<AriaText>;
+export type AriaTextInput = AriaText | State<string | null>;
 /** ARIA role input: static role or a reactive State. */
-export type AriaRoleInput = AriaRole | null | undefined | State<AriaRole | null | undefined>;
+export type AriaRoleInput = AriaRole | null | undefined | State<AriaRole | null>;
 /** ARIA boolean input: static boolean or a reactive State. */
-export type AriaBooleanInput = boolean | null | undefined | State<boolean | null | undefined>;
+export type AriaBooleanInput = boolean | null | undefined | State<boolean | null>;
 /** ARIA mixed boolean value: true, false, "mixed", or falsy. */
 export type AriaBooleanMixed = boolean | "mixed" | null | undefined;
 /** ARIA mixed boolean input: static value or a reactive State. */
-export type AriaBooleanMixedInput = AriaBooleanMixed | State<AriaBooleanMixed>;
+export type AriaBooleanMixedInput = AriaBooleanMixed | State<boolean | "mixed" | null>;
 /** ARIA current value: true, or a specific page location type. */
 export type AriaCurrent = boolean | "page" | "step" | "location" | "date" | "time" | null | undefined;
 /** ARIA current input: static value or a reactive State. */
-export type AriaCurrentInput = AriaCurrent | State<AriaCurrent>;
+export type AriaCurrentInput = AriaCurrent | State<boolean | "page" | "step" | "location" | "date" | "time" | null>;
 /** ARIA live region politeness level. */
 export type AriaLive = "off" | "polite" | "assertive" | null | undefined;
 /** ARIA live input: static value or a reactive State. */
-export type AriaLiveInput = AriaLive | State<AriaLive>;
+export type AriaLiveInput = AriaLive | State<"off" | "polite" | "assertive" | null>;
 /** ARIA reference: an element ID string, HTMLElement, component with element, or falsy. */
 export type AriaReference = string | HTMLElement | { readonly element: HTMLElement } | Falsy;
 /** ARIA reference selection: a single reference or iterable of references. */

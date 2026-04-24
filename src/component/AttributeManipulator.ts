@@ -8,6 +8,8 @@ import type { Component } from "./Component";
  */
 export type AttributeNameSelection = string | Falsy | Iterable<string | Falsy>;
 
+type ReactiveAttributeNameSelection = Exclude<AttributeNameSelection, undefined>;
+
 
 /**
  * Valid types for HTML attribute values. All are serializable to strings.
@@ -19,16 +21,18 @@ export type AttributeValue = string | number | bigint | boolean;
  */
 export type AttributeValueSelection = AttributeValue | null | undefined;
 
+type ReactiveAttributeValueSelection = Exclude<AttributeValueSelection, undefined>;
+
 
 /**
  * Attribute name input: either a direct name selection or a subscribable source.
  */
-export type AttributeNameInput = AttributeNameSelection | State<AttributeNameSelection>;
+export type AttributeNameInput = AttributeNameSelection | State<ReactiveAttributeNameSelection>;
 
 /**
  * Attribute value input: either a direct value or a subscribable source.
  */
-export type AttributeValueInput = AttributeValueSelection | State<AttributeValueSelection>;
+export type AttributeValueInput = AttributeValueSelection | State<ReactiveAttributeValueSelection>;
 
 /**
  * Maps an attribute name to a value.
@@ -114,20 +118,20 @@ function serializeAttributeValue (value: AttributeValueSelection): string | null
 	return String(value);
 }
 
-function toAttributeNameSource (value: AttributeNameInput): State<AttributeNameSelection> {
-	if (isStateSource<AttributeNameSelection>(value)) {
-		return value as unknown as State<AttributeNameSelection>;
+function toAttributeNameSource (value: AttributeNameInput): State<ReactiveAttributeNameSelection> {
+	if (isStateSource<ReactiveAttributeNameSelection>(value)) {
+		return value as unknown as State<ReactiveAttributeNameSelection>;
 	}
 
-	return State.Readonly(value);
+	return State.Readonly(value === undefined ? null : value);
 }
 
-function toAttributeValueSource (value: AttributeValueInput): State<AttributeValueSelection> {
-	if (isStateSource<AttributeValueSelection>(value)) {
-		return value as unknown as State<AttributeValueSelection>;
+function toAttributeValueSource (value: AttributeValueInput): State<ReactiveAttributeValueSelection> {
+	if (isStateSource<ReactiveAttributeValueSelection>(value)) {
+		return value as unknown as State<ReactiveAttributeValueSelection>;
 	}
 
-	return State.Readonly(value);
+	return State.Readonly(value === undefined ? null : value);
 }
 
 /**

@@ -7,8 +7,10 @@ export type TextValue = string | number | bigint | boolean;
 /** Text content selections, including nullish values that clear the text content. */
 export type TextSelection = TextValue | null | undefined;
 
+type ReactiveTextSelection = Exclude<TextSelection, undefined>;
+
 /** A direct or subscribable text input. */
-export type TextInput = TextSelection | State<TextSelection>;
+export type TextInput = TextSelection | State<ReactiveTextSelection>;
 
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
@@ -19,12 +21,13 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
-function toTextSource (value: TextInput): State<TextSelection> {
+
+function toTextSource (value: TextInput): State<ReactiveTextSelection> {
 	if (value instanceof State) {
 		return value;
 	}
 
-	return State.Readonly(value);
+	return State.Readonly(value === undefined ? null : value);
 }
 
 function serializeTextSelection (value: TextSelection): string {
