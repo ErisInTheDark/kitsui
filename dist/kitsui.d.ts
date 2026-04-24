@@ -3,23 +3,23 @@ export type AriaRole = "alert" | "alertdialog" | "application" | "article" | "ba
 
 export type AriaText = string | null | undefined;
 
-export type AriaTextInput = AriaText | State<AriaText>;
+export type AriaTextInput = AriaText | State<string | null>;
 
-export type AriaRoleInput = AriaRole | null | undefined | State<AriaRole | null | undefined>;
+export type AriaRoleInput = AriaRole | null | undefined | State<AriaRole | null>;
 
-export type AriaBooleanInput = boolean | null | undefined | State<boolean | null | undefined>;
+export type AriaBooleanInput = boolean | null | undefined | State<boolean | null>;
 
 export type AriaBooleanMixed = boolean | "mixed" | null | undefined;
 
-export type AriaBooleanMixedInput = AriaBooleanMixed | State<AriaBooleanMixed>;
+export type AriaBooleanMixedInput = AriaBooleanMixed | State<boolean | "mixed" | null>;
 
 export type AriaCurrent = boolean | "page" | "step" | "location" | "date" | "time" | null | undefined;
 
-export type AriaCurrentInput = AriaCurrent | State<AriaCurrent>;
+export type AriaCurrentInput = AriaCurrent | State<boolean | "page" | "step" | "location" | "date" | "time" | null>;
 
 export type AriaLive = "off" | "polite" | "assertive" | null | undefined;
 
-export type AriaLiveInput = AriaLive | State<AriaLive>;
+export type AriaLiveInput = AriaLive | State<"off" | "polite" | "assertive" | null>;
 
 export type AriaReference = string | HTMLElement | {
     readonly element: HTMLElement;
@@ -133,13 +133,17 @@ export class AriaManipulator<OWNER extends Component> {
 
 export type AttributeNameSelection = string | Falsy | Iterable<string | Falsy>;
 
+type ReactiveAttributeNameSelection = Exclude<AttributeNameSelection, undefined>;
+
 export type AttributeValue = string | number | bigint | boolean;
 
 export type AttributeValueSelection = AttributeValue | null | undefined;
 
-export type AttributeNameInput = AttributeNameSelection | State<AttributeNameSelection>;
+type ReactiveAttributeValueSelection = Exclude<AttributeValueSelection, undefined>;
 
-export type AttributeValueInput = AttributeValueSelection | State<AttributeValueSelection>;
+export type AttributeNameInput = AttributeNameSelection | State<ReactiveAttributeNameSelection>;
+
+export type AttributeValueInput = AttributeValueSelection | State<ReactiveAttributeValueSelection>;
 
 export interface AttributeEntry {
     name: AttributeNameInput;
@@ -536,7 +540,7 @@ type HostedEvent<TEvent extends Event, THost extends Owner, THostKey extends str
 
 type EventListenerFor<THost extends Owner, THostKey extends string, TEvent extends Event> = (event: HostedEvent<TEvent, THost, THostKey>) => unknown;
 
-type EventListenerInputFor<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | State<EventListenerFor<THost, THostKey, TEvent> | null | undefined> | null | undefined;
+type EventListenerInputFor<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | State<EventListenerFor<THost, THostKey, TEvent> | null> | null | undefined;
 
 type EventMapValue<TEventMap, TEventName extends keyof TEventMap & string> = TEventMap[TEventName] extends Event ? TEventMap[TEventName] : Event;
 
@@ -975,7 +979,9 @@ export function whenClosed(definition: StyleDefinition): StyleDefinition;
 
 export type StyleAttributeValue = StyleValue | null | undefined;
 
-export type StyleAttributeValueInput = StyleAttributeValue | State<StyleAttributeValue>;
+type ReactiveStyleAttributeValue = StyleValue | null;
+
+export type StyleAttributeValueInput = StyleAttributeValue | State<ReactiveStyleAttributeValue>;
 
 export type StyleAttributeDefinition = ({
     [KEY in keyof CSSStyleDeclaration as KEY extends string ? CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never : never]?: StyleAttributeValueInput;
@@ -983,7 +989,7 @@ export type StyleAttributeDefinition = ({
     [KEY in `$${string}`]?: StyleAttributeValueInput;
 });
 
-export type StyleAttributeInput = StyleAttributeDefinition | State<StyleAttributeDefinition | null | undefined>;
+export type StyleAttributeInput = StyleAttributeDefinition | State<StyleAttributeDefinition | null>;
 
 export class StyleManipulator<OWNER extends Component> {
     private readonly owner;
@@ -1012,7 +1018,9 @@ export type TextValue = string | number | bigint | boolean;
 
 export type TextSelection = TextValue | null | undefined;
 
-export type TextInput = TextSelection | State<TextSelection>;
+type ReactiveTextSelection = Exclude<TextSelection, undefined>;
+
+export type TextInput = TextSelection | State<ReactiveTextSelection>;
 
 export class TextManipulator<OWNER extends Component> {
     private readonly owner;
@@ -1038,7 +1046,7 @@ export class TextManipulator<OWNER extends Component> {
     private ensureActive;
 }
 
-type Nullish = null | undefined;
+type Nullish = null;
 
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
 
@@ -1078,7 +1086,7 @@ export interface StateExtensions<T> {
          */
         readonly falsy: State<boolean>;
         /**
-         * Returns a state that falls back to a computed value when this state is null or undefined.
+         * Returns a state that falls back to a computed value when this state is null.
          * Otherwise, returns the original value.
          * @param getValue Function invoked to compute the fallback value when needed.
          * @returns A new state with the original or fallback value.
@@ -1095,11 +1103,17 @@ export interface StateExtensions<T> {
 
 export type CleanupFunction = () => void;
 
+type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+type RejectUndefined<T> = IsAny<T> extends true ? T : [undefined] extends [T] ? never : T;
+
+type WidenStateValue<T> = [T] extends [string] ? string : [T] extends [number] ? number : [T] extends [boolean] ? boolean : [T] extends [bigint] ? bigint : [T] extends [symbol] ? symbol : T;
+
 export type StateEqualityFunction<T> = (currentValue: T, nextValue: T) => boolean;
 
 export type StateListener<T> = (value: T, previousValue: T) => void;
 
-export type StateUpdater<T> = (currentValue: T) => T;
+export type StateUpdater<T> = (currentValue: T) => T | void;
 
 export interface StateOptions<T> {
     /**
@@ -1124,6 +1138,7 @@ interface StateGraph {
 
 interface QueuedStateListenerRecord<T> {
     active: boolean;
+    forcePendingEmit: boolean;
     graph: StateGraph;
     listener: StateListener<T>;
     pending: boolean;
@@ -1213,6 +1228,7 @@ class StateClass<T> extends Owner {
      * @throws If the state has been disposed.
      */
     set(nextValue: T): T;
+    private commit;
     /**
      * Replaces the internal state value without checking disposal or notifying listeners.
      * This is intended for silent state resets during disposal and cleanup flows.
@@ -1222,8 +1238,10 @@ class StateClass<T> extends Owner {
     clear(nextValue: T): T;
     /**
      * Updates the state by applying a function to the current value.
+     * Returning `undefined` keeps the current value but still emits the update to listeners.
+     * Unlike {@link set}, `update` always notifies listeners, even when the effective value is unchanged.
      * @param updater Function that transforms the current value to a new value.
-     * @returns The new state value.
+     * @returns The stored state value after the update.
      * @throws If the state has been disposed.
      */
     update(updater: StateUpdater<T>): T;
@@ -1285,10 +1303,10 @@ interface StateClass<T> extends StateExtensions<T> {
 export type State<T> = StateClass<T>;
 
 type StateConstructor = {
-    <T>(initialValue: T, options?: StateOptions<T>): State<T>;
-    <T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
-    new <T>(initialValue: T, options?: StateOptions<T>): State<T>;
-    new <T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
+    <T>(owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+    new <T>(owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+    <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+    new <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
     prototype: State<unknown>;
     /**
      * Returns the underlying State class for prototype extension.
@@ -1315,7 +1333,7 @@ type StateConstructor = {
      * @param value The fixed value for the readonly state.
      * @returns A new readonly state instance with the specified value.
      */
-    Readonly<T>(value: T): State<T>;
+    Readonly<T>(value: RejectUndefined<T>): State<WidenStateValue<T>>;
 };
 
 export const State: StateConstructor & StateStaticExtensions;

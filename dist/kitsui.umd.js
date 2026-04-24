@@ -118,6 +118,12 @@ var __kitsui_factory__ = (() => {
   var noop = () => {
   };
   var ident = (value) => value;
+  function assertDefinedStateValue(value) {
+    if (value !== void 0) {
+      return;
+    }
+    throw new TypeError("State values cannot be undefined.");
+  }
   function createStateGraph() {
     return {
       pendingListeners: /* @__PURE__ */ new Set(),
@@ -138,9 +144,10 @@ var __kitsui_factory__ = (() => {
         if (!pendingListener.active) {
           continue;
         }
-        if (pendingListener.equals(pendingListener.pendingOriginalValue, pendingListener.pendingFinalValue)) {
+        if (!pendingListener.forcePendingEmit && pendingListener.equals(pendingListener.pendingOriginalValue, pendingListener.pendingFinalValue)) {
           continue;
         }
+        pendingListener.forcePendingEmit = false;
         pendingListener.listener(pendingListener.pendingFinalValue, pendingListener.pendingOriginalValue);
       }
     };
@@ -253,6 +260,7 @@ var __kitsui_factory__ = (() => {
       __publicField(this, "immediateListeners", /* @__PURE__ */ new Set());
       /** @deprecated Use getQueuedListeners(this) */
       __publicField(this, "queuedListeners", /* @__PURE__ */ new Set());
+      assertDefinedStateValue(initialValue);
       this.owner = owner;
       this.currentValue = initialValue;
       this.equalityFunction = options.equals ?? Object.is;
@@ -296,9 +304,13 @@ var __kitsui_factory__ = (() => {
      */
     set(nextValue) {
       this.ensureActive();
+      assertDefinedStateValue(nextValue);
       if (getEqualityFunction(this)(this.currentValue, nextValue)) {
         return this.currentValue;
       }
+      return this.commit(nextValue, false);
+    }
+    commit(nextValue, forceNotify) {
       const previousValue = this.currentValue;
       this.currentValue = nextValue;
       for (const listenerRecord of [...getImmediateListeners(this)]) {
@@ -313,6 +325,7 @@ var __kitsui_factory__ = (() => {
         }
         if (!listenerRecord.pending) {
           listenerRecord.pending = true;
+          listenerRecord.forcePendingEmit = forceNotify;
           listenerRecord.pendingOriginalValue = previousValue;
           listenerRecord.pendingFinalValue = this.currentValue;
           listenerRecord.equals = getEqualityFunction(this);
@@ -320,6 +333,7 @@ var __kitsui_factory__ = (() => {
           scheduleGraphFlush(listenerRecord.graph);
           continue;
         }
+        listenerRecord.forcePendingEmit || (listenerRecord.forcePendingEmit = forceNotify);
         listenerRecord.pendingFinalValue = this.currentValue;
       }
       return this.currentValue;
@@ -331,18 +345,22 @@ var __kitsui_factory__ = (() => {
      * @returns The stored state value.
      */
     clear(nextValue) {
+      assertDefinedStateValue(nextValue);
       this.currentValue = nextValue;
       return this.currentValue;
     }
     /**
      * Updates the state by applying a function to the current value.
+     * Returning `undefined` keeps the current value but still emits the update to listeners.
+     * Unlike {@link set}, `update` always notifies listeners, even when the effective value is unchanged.
      * @param updater Function that transforms the current value to a new value.
-     * @returns The new state value.
+     * @returns The stored state value after the update.
      * @throws If the state has been disposed.
      */
     update(updater) {
       this.ensureActive();
-      return this.set(updater(this.currentValue));
+      const nextValue = updater(this.currentValue);
+      return this.commit(nextValue === void 0 ? this.currentValue : nextValue, true);
     }
     /**
      * Sets a new equality function for comparing state values.
@@ -395,6 +413,7 @@ var __kitsui_factory__ = (() => {
       const listenerRecord = {
         active: true,
         equals: getEqualityFunction(this),
+        forcePendingEmit: false,
         graph: this.graph,
         listener,
         pending: false,
@@ -854,13 +873,13 @@ var __kitsui_factory__ = (() => {
     if (isStateSource(value)) {
       return value;
     }
-    return State.Readonly(value);
+    return State.Readonly(value === void 0 ? null : value);
   }
   function toAttributeValueSource(value) {
     if (isStateSource(value)) {
       return value;
     }
-    return State.Readonly(value);
+    return State.Readonly(value === void 0 ? null : value);
   }
   var AttributeManipulator = class {
     /**
@@ -2309,13 +2328,13 @@ ${innerRules}
     if (isStateSource2(value)) {
       return value;
     }
-    return State.Readonly(value);
+    return State.Readonly(value === void 0 ? null : value);
   }
   function toStyleValueSource(value) {
     if (isStateSource2(value)) {
       return value;
     }
-    return State.Readonly(value);
+    return State.Readonly(value === void 0 ? null : value);
   }
   function serializeStyleValue(value) {
     if (value === null || value === void 0) {
@@ -2430,7 +2449,7 @@ ${innerRules}
     if (value instanceof State) {
       return value;
     }
-    return State.Readonly(value);
+    return State.Readonly(value === void 0 ? null : value);
   }
   function serializeTextSelection(value) {
     if (value === null || value === void 0) {
@@ -3488,6 +3507,7 @@ ${innerRules}
   // src/component/extensions/breakdownExtension.ts
   var noop9 = () => {
   };
+  var createOwnedState = State;
   var componentClass = null;
   var patched = false;
   function getComponentClass() {
@@ -3598,7 +3618,7 @@ ${innerRules}
                 if (isStateless) {
                   component = validateCreatedPartComponent(build());
                 } else {
-                  partState = State(owner, valueOrBuild);
+                  partState = createOwnedState(owner, valueOrBuild);
                   component = validateCreatedPartComponent(build(partState));
                 }
               } catch (error) {
@@ -4021,6 +4041,7 @@ ${innerRules}
   }
 
   // src/state/extensions/groupExtension.ts
+  var createOwnedState2 = State;
   var patched3 = false;
   function scheduleNextTick(callback) {
     const schedulerRef = globalThis;
@@ -4037,7 +4058,7 @@ ${innerRules}
     return Object.fromEntries(entries);
   }
   function createGroupedState(owner, states) {
-    const grouped = State(owner, readGroupSnapshot(states));
+    const grouped = createOwnedState2(owner, readGroupSnapshot(states));
     const releaseSubscriptions = [];
     let active = true;
     let queued = false;
@@ -4092,12 +4113,14 @@ ${innerRules}
   // src/state/extensions/mappingExtension.ts
   var truthyStates = /* @__PURE__ */ new WeakMap();
   var falsyStates = /* @__PURE__ */ new WeakMap();
+  var createOwnedState3 = State;
+  var createOwnerlessState = State;
   var patched4 = false;
   function createMappedState(source, owner, mapValue) {
     const graphOption = {
       graph: source.getGraph()
     };
-    const mapped = owner ? State(owner, mapValue(source.value), graphOption) : State(mapValue(source.value), graphOption);
+    const mapped = owner ? createOwnedState3(owner, mapValue(source.value), graphOption) : createOwnerlessState(mapValue(source.value), graphOption);
     const releaseImplicitOwnerPropagation = mapped._registerImplicitOwnerDependent?.(source) ?? (() => void 0);
     const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
       mapped.set(mapValue(value, oldValue));
@@ -4154,7 +4177,7 @@ ${innerRules}
     });
     prototype.or = function or(getValue) {
       return createMappedState(this, this, (value) => {
-        if (value === null || value === void 0) {
+        if (value === null) {
           return getValue();
         }
         return value;
