@@ -4051,23 +4051,34 @@ ${innerRules}
     }
     queueMicrotask(callback);
   }
-  function readGroupSnapshot(states) {
+  function readGroupedValue(states) {
     const entries = Object.entries(states).map(([key, state2]) => {
       return [key, state2.value];
     });
     return Object.fromEntries(entries);
   }
-  function createGroupedState(owner, states) {
-    const grouped = createOwnedState2(owner, readGroupSnapshot(states));
+  function readGroupSnapshot(states, mapper, oldValue) {
+    const snapshot = readGroupedValue(states);
+    return {
+      snapshot,
+      value: mapper ? mapper(snapshot, oldValue) : snapshot
+    };
+  }
+  function createGroupedState(owner, states, mapper) {
+    const initialGroup = readGroupSnapshot(states, mapper, void 0);
+    const grouped = createOwnedState2(owner, initialGroup.value);
     const releaseSubscriptions = [];
     let active = true;
     let queued = false;
+    let previousSnapshot = initialGroup.snapshot;
     const flush = () => {
       queued = false;
       if (!active || grouped.disposed) {
         return;
       }
-      grouped.set(readGroupSnapshot(states));
+      const nextGroup = readGroupSnapshot(states, mapper, previousSnapshot);
+      grouped.set(nextGroup.value);
+      previousSnapshot = nextGroup.snapshot;
     };
     const queueGroupedUpdate = () => {
       if (!active || queued || grouped.disposed) {
@@ -4098,14 +4109,14 @@ ${innerRules}
     }
     patched3 = true;
     const StateWithGroup = State;
-    const Group = function Group2(owner, states) {
+    const Group = function Group2(owner, states, mapper) {
       if (!(owner instanceof Owner)) {
         throw new TypeError("State.Group requires an Owner as the first argument.");
       }
       if (typeof states !== "object" || states === null) {
         throw new TypeError("State.Group requires a states object as the second argument.");
       }
-      return createGroupedState(owner, states);
+      return createGroupedState(owner, states, mapper);
     };
     StateWithGroup.Group = Group;
   }

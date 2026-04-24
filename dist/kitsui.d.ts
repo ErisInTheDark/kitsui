@@ -1377,8 +1377,52 @@ type GroupedValue<T extends GroupedStateObject> = {
 };
 
 type GroupConstructor = {
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @returns A state whose value is an object with the current value of each source state.
+     */
     <T extends GroupedStateObject>(owner: Owner, states: T): State<GroupedValue<T>>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @returns A state whose value is an object with the current value of each source state.
+     */
     new <T extends GroupedStateObject>(owner: Owner, states: T): State<GroupedValue<T>>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @returns A state whose value is the mapper result for the current grouped snapshot.
+     */
+    <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @returns A state whose value is the mapper result for the current grouped snapshot.
+     */
+    new <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
 };
 
 export interface StateStaticExtensions {
@@ -1387,10 +1431,6 @@ export interface StateStaticExtensions {
          *
          * The grouped state subscribes to all input states and coalesces source updates
          * into a single next-tick grouped update per tick.
-         *
-         * @param owner The owner that manages the grouped state's lifecycle.
-         * @param states A record of source states to group.
-         * @returns A state whose value is an object with the current value of each source state.
          * @group Group
          */
         Group: GroupConstructor;
