@@ -57,8 +57,11 @@ export type {
 export { EventManipulator } from "./component/EventManipulator";
 export type { ComponentEvent, ComponentEventListener, EventListenerInput } from "./component/EventManipulator";
 export type { Place, PlacementTarget, PlacerFunction } from "./component/extensions/placeExtension";
+export { GenericClaimManipulator } from "./component/GenericClaimManipulator";
+export { GenericPropertyManipulator } from "./component/GenericPropertyManipulator";
 export { Marker } from "./component/Marker";
 export type { ExtendableMarkerClass, MarkerEventMap, MarkerExtensions, MarkerStaticExtensions } from "./component/Marker";
+export { OwnerManipulator } from "./component/OwnerManipulator";
 export {
     Style, StyleAnimation, StyleFontFace, StyleImport, StyleReset, StyleRoot, StyleSelector, darkScheme, elements, lightScheme,
     pseudoAfter, pseudoBefore,

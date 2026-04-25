@@ -7,6 +7,7 @@ import { ClassManipulator } from "./ClassManipulator";
 import type { ComponentHTMLElementEventMap } from "./EventManipulator";
 import { EventManipulator } from "./EventManipulator";
 import { Marker } from "./Marker";
+import { OwnerManipulator } from "./OwnerManipulator";
 import { StyleManipulator } from "./StyleManipulator";
 import { TextManipulator } from "./TextManipulator";
 
@@ -295,8 +296,6 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * The underlying DOM element managed by this component.
 	 */
 	readonly element: ELEMENT;
-	private explicitOwner: Owner | null = null;
-	private releaseExplicitOwner: CleanupFunction = noop;
 	private readonly structuralCleanups = new Set<CleanupFunction>();
 	private mounted = false;
 	private onBeforeMove: (() => void) | null = null;
@@ -389,20 +388,31 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	}
 
 	/**
+	 * Lazily creates and memoizes an OwnerManipulator for managing explicit owners.
+	 */
+	get owner (): OwnerManipulator<this> {
+		this.ensureActive();
+
+		const manipulator = new OwnerManipulator(this, () => {
+			this.refreshOrphanCheck();
+		});
+		Object.defineProperty(this, "owner", {
+			configurable: true,
+			enumerable: true,
+			value: manipulator,
+			writable: false,
+		});
+
+		return manipulator;
+	}
+
+	/**
 	 * Lazily creates and memoizes a TextManipulator for managing text content.
 	 */
 	get text (): TextManipulator<this> {
 		this.ensureActive();
 
-		const manipulator = new TextManipulator(this, (value) => {
-			this.releaseStructuralCleanups();
-
-			for (const childNode of Array.from(this.element.childNodes)) {
-				disposeManagedNode(childNode);
-			}
-
-			this.element.textContent = value;
-		});
+		const manipulator = new TextManipulator(this);
 		Object.defineProperty(this, "text", {
 			configurable: true,
 			enumerable: true,
@@ -633,7 +643,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			getReferenceNode: () => Node | null;
 		},
 	): CleanupFunction {
-		const marker = Marker("kitsui:conditional-stateful").setOwner(this);
+		const marker = Marker("kitsui:conditional-stateful").owner.add(this);
 		const storage = createStorageElement(this.element.ownerDocument);
 		let active = true;
 		let markerWasInserted = false;
@@ -830,50 +840,10 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		this.element.dispatchEvent(new CustomEvent("Mount"));
 	}
 
-	/**
-	 * Sets or clears the explicit owner of this component.
-	 * When a component has an explicit owner, it is removed when the owner is disposed.
-	 * This is independent of implicit ownership through DOM ancestry.
-	 * @param owner - The owner component or state, or null to remove explicit ownership.
-	 * @returns This component for chaining.
-	 */
-	setOwner (owner: Owner | null): this {
-		this.ensureActive();
-
-		if (this.explicitOwner === owner) {
-			return this;
-		}
-
-		this.releaseExplicitOwner();
-		this.releaseExplicitOwner = noop;
-		this.explicitOwner = owner;
-
-		if (owner) {
-			this.releaseExplicitOwner = owner.onCleanup(() => {
-				this.remove();
-			});
-		}
-
-		this.refreshOrphanCheck();
-
-		return this;
-	}
-
-	/**
-	 * Gets the current explicit owner of this component.
-	 * @returns The owner component/state, or null if no explicit owner is set.
-	 */
-	getOwner (): Owner | null {
-		return this.explicitOwner;
-	}
-
 	protected beforeDispose (): void {
 		this.element.dispatchEvent(new CustomEvent("Dispose"));
 		this.clearOrphanCheck();
 		this.releaseStructuralCleanups();
-		this.releaseExplicitOwner();
-		this.releaseExplicitOwner = noop;
-		this.explicitOwner = null;
 
 		if (getLiveComponent(this.element) === this) {
 			elementComponents.delete(this.element);
@@ -888,7 +858,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 				const component = getLiveComponent(node);
 
 				if (component && !component.disposed) {
-					if (component.getOwner()) {
+					if (component.owner.get()) {
 						return;
 					}
 
@@ -953,7 +923,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			return true;
 		}
 
-		if (this.ownerResolves(this.explicitOwner)) {
+		if (this.owner.getAll().some(owner => this.ownerResolves(owner))) {
 			return true;
 		}
 
@@ -1082,7 +1052,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		}
 
 		const resolvedNode = this.resolveNode(node);
-		const placeholder = Marker("kitsui:conditional").setOwner(this);
+		const placeholder = Marker("kitsui:conditional").owner.add(this);
 		const storage = createStorageElement(this.element.ownerDocument);
 		const childComponent = node instanceof ComponentClass ? node : null;
 		let active = true;
@@ -1090,7 +1060,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		let placeholderWasInserted = false;
 
 		const setHiddenManagedOwner = (owner: Owner | null) => {
-			if (!childComponent || childComponent.getOwner() !== null) {
+			if (!childComponent || childComponent.owner.get() !== null) {
 				return;
 			}
 
@@ -1218,8 +1188,8 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			storage.remove();
 
 			if (childComponent) {
-				const explicitOwner = childComponent.getOwner();
-				if (explicitOwner && explicitOwner !== this) {
+				const explicitOwners = childComponent.owner.getAll();
+				if (explicitOwners.some(owner => owner !== this)) {
 					childComponent.element.parentNode?.removeChild(childComponent.element);
 					childComponent.refreshOrphanCheck();
 					return;
@@ -1261,7 +1231,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			getReferenceNode: () => Node | null;
 		},
 	): CleanupFunction {
-		const marker = Marker("kitsui:stateful-child").setOwner(this);
+		const marker = Marker("kitsui:stateful-child").owner.add(this);
 		const storage = createStorageElement(this.element.ownerDocument);
 		let active = true;
 		let renderedComponents: Component[] = [];

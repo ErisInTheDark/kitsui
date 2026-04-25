@@ -426,15 +426,15 @@ describe("Component", () => {
 		expect(child.element.isConnected).toBe(false);
 	});
 
-	it("setOwner can set and release explicit ownership", () => {
+	it("owner can set and release explicit ownership", () => {
 		const explicitOwner = mountedComponent("section");
 		const child = Component("div");
 
-		child.setOwner(explicitOwner);
-		expect(child.getOwner(), "explicit owner should be set").toBe(explicitOwner);
+		child.owner.add(explicitOwner);
+		expect(child.owner.get(), "explicit owner should be set").toBe(explicitOwner);
 
-		child.setOwner(null);
-		expect(child.getOwner(), "explicit owner should be cleared").toBeNull();
+		child.owner.remove(explicitOwner);
+		expect(child.owner.get(), "explicit owner should be cleared").toBeNull();
 
 		explicitOwner.remove();
 		expect(child.disposed, "child should not be disposed when a released explicit owner is removed").toBe(false);
@@ -523,7 +523,7 @@ describe("Component", () => {
 			root.append(host);
 			document.body.append(root.element);
 
-			expect(child.getOwner(), "hidden conditional children should remain ownerless while parked").toBeNull();
+			expect(child.owner.get(), "hidden conditional children should remain ownerless while parked").toBeNull();
 			expect(() => {
 				for (const callback of timeoutSpy.callbacks) {
 					callback();
@@ -541,11 +541,11 @@ describe("Component", () => {
 		const host = mountedComponent("div");
 		const retentionOwner = mountedComponent("section");
 		const visible = State(host, false);
-		const child = Component("span").text.set("child").setOwner(retentionOwner);
+		const child = Component("span").text.set("child").owner.add(retentionOwner);
 
 		host.appendWhen(visible, child);
 
-		expect(child.getOwner(), "conditionally parking a child should not override an existing explicit owner").toBe(retentionOwner);
+		expect(child.owner.get(), "conditionally parking a child should not override an existing explicit owner").toBe(retentionOwner);
 
 		host.remove();
 		retentionOwner.remove();
@@ -557,18 +557,18 @@ describe("Component", () => {
 		const visible = State(host, false);
 		const anchor = Component("span").text.set("anchor");
 		const trailing = Component("span").text.set("trailing");
-		const appended = Component("span").text.set("appended").setOwner(retentionOwner);
-		const prepended = Component("span").text.set("prepended").setOwner(retentionOwner);
-		const inserted = Component("span").text.set("inserted").setOwner(retentionOwner);
+		const appended = Component("span").text.set("appended").owner.add(retentionOwner);
+		const prepended = Component("span").text.set("prepended").owner.add(retentionOwner);
+		const inserted = Component("span").text.set("inserted").owner.add(retentionOwner);
 
 		host.append(anchor, trailing);
 		host.appendWhen(visible, appended);
 		host.prependWhen(visible, prepended);
 		anchor.insertWhen(visible, "after", inserted);
 
-		expect(appended.getOwner()).toBe(retentionOwner);
-		expect(prepended.getOwner()).toBe(retentionOwner);
-		expect(inserted.getOwner()).toBe(retentionOwner);
+		expect(appended.owner.get()).toBe(retentionOwner);
+		expect(prepended.owner.get()).toBe(retentionOwner);
+		expect(inserted.owner.get()).toBe(retentionOwner);
 
 		visible.set(true);
 		await flushEffects();
@@ -580,9 +580,9 @@ describe("Component", () => {
 			trailing.element,
 			appended.element,
 		]);
-		expect(appended.getOwner()).toBe(retentionOwner);
-		expect(prepended.getOwner()).toBe(retentionOwner);
-		expect(inserted.getOwner()).toBe(retentionOwner);
+		expect(appended.owner.get()).toBe(retentionOwner);
+		expect(prepended.owner.get()).toBe(retentionOwner);
+		expect(inserted.owner.get()).toBe(retentionOwner);
 
 		visible.set(false);
 		await flushEffects();
@@ -590,9 +590,9 @@ describe("Component", () => {
 		expect(appended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
 		expect(prepended.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
 		expect(inserted.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
-		expect(appended.getOwner()).toBe(retentionOwner);
-		expect(prepended.getOwner()).toBe(retentionOwner);
-		expect(inserted.getOwner()).toBe(retentionOwner);
+		expect(appended.owner.get()).toBe(retentionOwner);
+		expect(prepended.owner.get()).toBe(retentionOwner);
+		expect(inserted.owner.get()).toBe(retentionOwner);
 
 		host.remove();
 
@@ -839,7 +839,7 @@ describe("Component", () => {
 			root.append(host);
 			document.body.append(root.element);
 
-			expect(selected.getOwner(), "hidden conditional selections should remain ownerless while parked").toBeNull();
+			expect(selected.owner.get(), "hidden conditional selections should remain ownerless while parked").toBeNull();
 			expect(() => {
 				for (const callback of timeoutSpy.callbacks) {
 					callback();
@@ -857,7 +857,7 @@ describe("Component", () => {
 		const host = mountedComponent("div");
 		const anchor = Component("span").text.set("anchor");
 		const visible = State(host, true);
-		const owned = (label: string) => Component("span").text.set(label).setOwner(host);
+		const owned = (label: string) => Component("span").text.set(label).owner.add(host);
 		const appendA = owned("append-a");
 		const appendB = owned("append-b");
 		const prependA = owned("prepend-a");
@@ -929,8 +929,8 @@ describe("Component", () => {
 		const host = mountedComponent("div");
 		const retentionOwner = mountedComponent("section");
 		const visible = State(host, true);
-		const selectedA = Component("span").text.set("selected-a").setOwner(retentionOwner);
-		const selectedB = Component("span").text.set("selected-b").setOwner(retentionOwner);
+		const selectedA = Component("span").text.set("selected-a").owner.add(retentionOwner);
+		const selectedB = Component("span").text.set("selected-b").owner.add(retentionOwner);
 		const selection = State(host, selectedA as Component | Iterable<Component>);
 
 		host.appendWhen(visible, selection);
@@ -944,8 +944,8 @@ describe("Component", () => {
 
 		expect(selectedA.disposed).toBe(false);
 		expect(selectedB.disposed).toBe(false);
-		expect(selectedA.getOwner()).toBe(retentionOwner);
-		expect(selectedB.getOwner()).toBe(retentionOwner);
+		expect(selectedA.owner.get()).toBe(retentionOwner);
+		expect(selectedB.owner.get()).toBe(retentionOwner);
 
 		visible.set(true);
 		await flushEffects();
@@ -957,8 +957,8 @@ describe("Component", () => {
 	it("disposes retained hidden conditional selections when the host is removed", async () => {
 		const host = mountedComponent("div");
 		const visible = State(host, true);
-		const selectedA = Component("span").text.set("selected-a").setOwner(host);
-		const selectedB = Component("span").text.set("selected-b").setOwner(host);
+		const selectedA = Component("span").text.set("selected-a").owner.add(host);
+		const selectedB = Component("span").text.set("selected-b").owner.add(host);
 		const selection = State(host, selectedA as Component | Iterable<Component>);
 
 		host.appendWhen(visible, selection);
@@ -978,12 +978,12 @@ describe("Component", () => {
 		const host = mountedComponent("div");
 		const visible = State(host, true);
 		const nestedVisible = State(host, true);
-		const outerA = Component("section").setOwner(host);
-		const outerB = Component("section").setOwner(host);
-		const outerAText = Component("span").text.set("outer-a").setOwner(outerA);
-		const nestedA = Component("span").text.set("nested-a").setOwner(outerA);
-		const outerBText = Component("span").text.set("outer-b").setOwner(outerB);
-		const nestedB = Component("span").text.set("nested-b").setOwner(outerB);
+		const outerA = Component("section").owner.add(host);
+		const outerB = Component("section").owner.add(host);
+		const outerAText = Component("span").text.set("outer-a").owner.add(outerA);
+		const nestedA = Component("span").text.set("nested-a").owner.add(outerA);
+		const outerBText = Component("span").text.set("outer-b").owner.add(outerB);
+		const nestedB = Component("span").text.set("nested-b").owner.add(outerB);
 		const selection = State(host, outerA as Component | Iterable<Component>);
 
 		outerA.append(outerAText).appendWhen(nestedVisible, nestedA);
@@ -1017,7 +1017,7 @@ describe("Component", () => {
 	it("throws when a conditional selection contains duplicate components", async () => {
 		const host = mountedComponent("div");
 		const visible = State(host, true);
-		const component = Component("span").text.set("test").setOwner(host);
+		const component = Component("span").text.set("test").owner.add(host);
 		const selection = State(host, [component, component]);
 
 		expect(() => {
@@ -1371,10 +1371,10 @@ describe("Component", () => {
 		vi.useFakeTimers();
 
 		const root = mountedComponent("div");
-		const managedContainer = Component("section").setOwner(root);
+		const managedContainer = Component("section").owner.add(root);
 		const appended = Component("span").text.set("appended");
 		const prepended = Component("span").text.set("prepended");
-		const anchor = Component("span").text.set("anchor").setOwner(managedContainer);
+		const anchor = Component("span").text.set("anchor").owner.add(managedContainer);
 		const inserted = Component("span").text.set("inserted");
 
 		managedContainer.append(anchor);
@@ -1389,9 +1389,9 @@ describe("Component", () => {
 				inserted.element,
 				appended.element,
 			]);
-			expect(appended.getOwner(), "appendTo should not rewrite explicit ownership for ownerless children").toBeNull();
-			expect(prepended.getOwner(), "prependTo should not rewrite explicit ownership for ownerless children").toBeNull();
-			expect(inserted.getOwner(), "insertTo should not rewrite explicit ownership for ownerless children").toBeNull();
+			expect(appended.owner.get(), "appendTo should not rewrite explicit ownership for ownerless children").toBeNull();
+			expect(prepended.owner.get(), "prependTo should not rewrite explicit ownership for ownerless children").toBeNull();
+			expect(inserted.owner.get(), "insertTo should not rewrite explicit ownership for ownerless children").toBeNull();
 			expect(() => {
 				vi.advanceTimersByTime(0);
 			}).not.toThrow();
@@ -1411,13 +1411,13 @@ describe("Component", () => {
 		vi.useFakeTimers();
 
 		const root = mountedComponent("div");
-		const parent = Component("section").setOwner(root);
+		const parent = Component("section").owner.add(root);
 		const child = Component("span").text.set("child");
 
 		try {
 			parent.append(child);
 
-			expect(child.getOwner(), "append should not assign explicit ownership to an ownerless child").toBeNull();
+			expect(child.owner.get(), "append should not assign explicit ownership to an ownerless child").toBeNull();
 			expect(() => {
 				vi.advanceTimersByTime(0);
 			}, "advancing the orphan check should not throw for internally managed children").not.toThrow();
@@ -1445,8 +1445,8 @@ describe("Component", () => {
 			trailing,
 			appended.element,
 		]);
-		expect(prepended.getOwner()).toBe(null);
-		expect(appended.getOwner()).toBe(null);
+		expect(prepended.owner.get()).toBe(null);
+		expect(appended.owner.get()).toBe(null);
 
 		prepended.remove();
 		appended.remove();
@@ -1479,7 +1479,6 @@ describe("Component", () => {
 			const mountCallback = vi.fn();
 			component.event.owned.on.Mount(mountCallback);
 
-			component.setOwner(null);
 			container.appendChild(component.element);
 			document.body.appendChild(container);
 
@@ -1566,7 +1565,7 @@ describe("Component", () => {
 			const explicitOwner = mountedComponent("aside");
 			const child = Component("div");
 
-			child.setOwner(explicitOwner);
+			child.owner.add(explicitOwner);
 			parent.append(child);
 
 			expect(child.element.parentElement, "child should be in parent").toBe(parent.element);
@@ -2036,7 +2035,7 @@ describe("Component", () => {
 		const host = mountedComponent("div");
 		const retentionOwner = mountedComponent("section");
 		const visible = State(host, true);
-		const child = Component("span").text.set("child").setOwner(retentionOwner);
+		const child = Component("span").text.set("child").owner.add(retentionOwner);
 
 		host.appendWhen(visible, child);
 		expect(host.element.contains(child.element)).toBe(true);
@@ -2054,7 +2053,7 @@ describe("Component", () => {
 		const host = mountedComponent("div");
 		const retentionOwner = mountedComponent("section");
 		const visible = State(host, true);
-		const child = Component("span").text.set("child").setOwner(retentionOwner);
+		const child = Component("span").text.set("child").owner.add(retentionOwner);
 
 		host.prependWhen(visible, child);
 		expect(host.element.contains(child.element)).toBe(true);
@@ -2073,7 +2072,7 @@ describe("Component", () => {
 		const retentionOwner = mountedComponent("section");
 		const visible = State(host, true);
 		const anchor = Component("span").text.set("anchor");
-		const child = Component("span").text.set("child").setOwner(retentionOwner);
+		const child = Component("span").text.set("child").owner.add(retentionOwner);
 
 		host.append(anchor);
 		anchor.insertWhen(visible, "after", child);

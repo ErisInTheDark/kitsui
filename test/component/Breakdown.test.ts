@@ -265,9 +265,9 @@ describe("Component.Breakdown", () => {
 				inserted = Part("insert", "insert", textPart).insertTo("before", anchor);
 			});
 
-			expect(appended!.getOwner(), "appendTo should not replace the Breakdown owner").toBe(owner);
-			expect(prepended!.getOwner(), "prependTo should not replace the Breakdown owner").toBe(owner);
-			expect(inserted!.getOwner(), "insertTo should not replace the Breakdown owner").toBe(owner);
+			expect(appended!.owner.get(), "appendTo should not replace the Breakdown owner").toBe(owner);
+			expect(prepended!.owner.get(), "prependTo should not replace the Breakdown owner").toBe(owner);
+			expect(inserted!.owner.get(), "insertTo should not replace the Breakdown owner").toBe(owner);
 
 			container.remove();
 
@@ -305,12 +305,12 @@ describe("Component.Breakdown", () => {
 				part = Part("append", value, textPart).appendToWhen(visible, container);
 			});
 
-			expect(part!.getOwner(), "appendToWhen should preserve the Breakdown owner").toBe(owner);
+			expect(part!.owner.get(), "appendToWhen should preserve the Breakdown owner").toBe(owner);
 
 			visible.set(false);
 			await flushEffects();
 
-			expect(part!.getOwner(), "hiding a Breakdown-owned part should not clear its explicit owner").toBe(owner);
+			expect(part!.owner.get(), "hiding a Breakdown-owned part should not clear its explicit owner").toBe(owner);
 
 			container.remove();
 			expect(part!.disposed, "Breakdown-owned parts should survive container disposal while hidden").toBe(false);
@@ -352,7 +352,7 @@ describe("Component.Breakdown", () => {
 		const owner = mountedComponent("div");
 		const otherOwner = mountedComponent("section");
 		const source = State(owner, "initial");
-		const explicitlyOwned = Component("span").setOwner(otherOwner);
+		const explicitlyOwned = Component("span").owner.add(otherOwner);
 
 		try {
 			expect(() => {

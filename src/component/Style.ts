@@ -416,7 +416,7 @@ export function StyleAnimation (name: string, keyframes: KeyframesDefinition): A
 	const suffixedName = `${name}-${++animationIdCounter}`;
 	const marker = styleAnimationBuilder({ keyframes, name: suffixedName }) as AnimationMarker;
 	animationMarkerData.set(marker, { keyframes, name: suffixedName });
-	marker.setOwner(animationMarkerOwner);
+	marker.owner.add(animationMarkerOwner);
 	Object.defineProperty(marker, "name", {
 		configurable: true,
 		enumerable: true,

@@ -94,7 +94,7 @@ export default function Editor (): EditorComponent {
 		createResultPanel (): Component {
 			const resultWrap = Component("div")
 				.class.add(resultWrapStyle)
-				.setOwner(editorComponent);
+				.owner.add(editorComponent);
 
 			Component("span")
 				.class.add(resultLabelStyle)

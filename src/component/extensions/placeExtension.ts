@@ -358,7 +358,7 @@ function resolveOwnPlacementOwner (component: Component | undefined): Owner | nu
 		return null;
 	}
 
-	return component.getOwner() ?? placementOwners.get(component) ?? null;
+	return component.owner.get() ?? placementOwners.get(component) ?? null;
 }
 
 function resolvePlacementOwner (target: PlacementTarget | PlacementParent, component?: Component): Owner | null {
@@ -373,7 +373,7 @@ function resolvePlacementOwner (target: PlacementTarget | PlacementParent, compo
 	}
 
 	if (target instanceof Marker) {
-		return target.getOwner() ?? resolveNearestWrappedAncestor(target.node) ?? null;
+		return target.owner.get() ?? resolveNearestWrappedAncestor(target.node) ?? null;
 	}
 
 	if (target instanceof PlaceClass) {
@@ -455,21 +455,39 @@ export default function placeExtension (): void {
 	const markerPrototype = MarkerClass.prototype as Marker;
 
 	markerPrototype.appendTo = function appendTo (target) {
-		this.setOwner(resolvePlacementContainerOwner(target));
+		const resolvedOwner = resolvePlacementContainerOwner(target);
+		if (resolvedOwner) {
+			this.owner.add(resolvedOwner, "placement");
+		}
+		else {
+			this.owner.remove("placement");
+		}
 		const container = resolvePlacementContainer(target);
 		placeMarker(this, container, null);
 		return this;
 	};
 
 	markerPrototype.prependTo = function prependTo (target) {
-		this.setOwner(resolvePlacementContainerOwner(target));
+		const resolvedOwner = resolvePlacementContainerOwner(target);
+		if (resolvedOwner) {
+			this.owner.add(resolvedOwner, "placement");
+		}
+		else {
+			this.owner.remove("placement");
+		}
 		const container = resolvePlacementContainer(target);
 		placeMarker(this, container, container.firstChild);
 		return this;
 	};
 
 	markerPrototype.insertTo = function insertTo (where, target) {
-		this.setOwner(resolvePlacementOwner(target));
+		const resolvedOwner = resolvePlacementOwner(target);
+		if (resolvedOwner) {
+			this.owner.add(resolvedOwner, "placement");
+		}
+		else {
+			this.owner.remove("placement");
+		}
 
 		const referenceNode = resolvePlacementReferenceNode(target);
 
@@ -556,7 +574,7 @@ export default function placeExtension (): void {
 		const storage = createStorageElement(documentRef);
 		const places = new Set<Place>();
 		const Place = function Place (): Place {
-			const place = new PlaceClass(placementOwner, Marker("kitsui:place").setOwner(placementOwner));
+			const place = new PlaceClass(placementOwner, Marker("kitsui:place").owner.add(placementOwner, "place"));
 			places.add(place);
 			return place;
 		} as PlaceConstructor;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Component } from "../../src/component/Component";
 import placeExtension from "../../src/component/extensions/placeExtension";
+import { GenericPropertyManipulator } from "../../src/component/GenericPropertyManipulator";
 import { TextManipulator } from "../../src/component/TextManipulator";
 import { State } from "../../src/state/State";
 
@@ -30,6 +31,7 @@ describe("TextManipulator", () => {
 		const component = mountedComponent();
 
 		expect(component.text).toBeInstanceOf(TextManipulator);
+		expect(component.text, "TextManipulator should inherit the generic property manipulator behavior").toBeInstanceOf(GenericPropertyManipulator);
 		expect(component.text).toBe(component.text);
 	});
 
@@ -63,6 +65,35 @@ describe("TextManipulator", () => {
 		value.set(null);
 		await flushEffects();
 		expect(component.element.textContent).toBe("");
+	});
+
+	it("replaces the active determiner when switching between reactive modes", async () => {
+		const component = mountedComponent();
+		const first = State<string | null>(component, "alpha");
+		const visible = State(component, true);
+		const second = State<string | null>(component, "beta");
+
+		component.text.set(first);
+		expect(component.element.textContent).toBe("alpha");
+
+		component.text.bind(visible, second);
+		expect(component.element.textContent).toBe("beta");
+
+		first.set("stale");
+		await flushEffects();
+		expect(component.element.textContent).toBe("beta");
+
+		visible.set(false);
+		await flushEffects();
+		expect(component.element.textContent).toBe("");
+
+		second.set("gamma");
+		await flushEffects();
+		expect(component.element.textContent).toBe("");
+
+		visible.set(true);
+		await flushEffects();
+		expect(component.element.textContent).toBe("gamma");
 	});
 
 	it("binds text visibility to a boolean state", async () => {
@@ -124,5 +155,14 @@ describe("TextManipulator", () => {
 
 		expect(child.disposed).toBe(true);
 		expect(host.element.textContent).toBe("done");
+	});
+
+	it("rejects updates after the owning component is disposed", () => {
+		const component = mountedComponent();
+		const text = component.text;
+
+		component.dispose();
+
+		expect(() => text.set("late")).toThrowError("Disposed components cannot be modified.");
 	});
 });

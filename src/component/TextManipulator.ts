@@ -1,5 +1,6 @@
-import { State, type CleanupFunction } from "../state/State";
+import { State } from "../state/State";
 import type { Component } from "./Component";
+import { GenericPropertyManipulator } from "./GenericPropertyManipulator";
 
 /** Serializable values accepted by the text manipulator. */
 export type TextValue = string | number | bigint | boolean;
@@ -12,42 +13,10 @@ type ReactiveTextSelection = Exclude<TextSelection, undefined>;
 /** A direct or subscribable text input. */
 export type TextInput = TextSelection | State<ReactiveTextSelection>;
 
-interface DeterminerRecord {
-	cleanup: CleanupFunction;
-	token: symbol;
-}
-
-const noop: CleanupFunction = () => {
-	// Intentionally empty.
-};
-
-
-function toTextSource (value: TextInput): State<ReactiveTextSelection> {
-	if (value instanceof State) {
-		return value;
-	}
-
-	return State.Readonly(value === undefined ? null : value);
-}
-
-function serializeTextSelection (value: TextSelection): string {
-	if (value === null || value === undefined) {
-		return "";
-	}
-
-	return String(value);
-}
-
 /**
  * Manages an element's text content with support for direct values and reactive sources.
  */
-export class TextManipulator<OWNER extends Component> {
-	private determiner: DeterminerRecord | null = null;
-
-	constructor (
-		private readonly owner: OWNER,
-		private readonly writeText: (value: string) => void,
-	) { }
+export class TextManipulator<OWNER extends Component> extends GenericPropertyManipulator<OWNER, TextInput, ReactiveTextSelection> {
 
 	/**
 	 * Sets the element's text content from a direct value or subscribable source.
@@ -55,19 +24,8 @@ export class TextManipulator<OWNER extends Component> {
 	 * @param value Direct or reactive text input.
 	 * @returns The owning component for fluent chaining.
 	 */
-	set (value: TextInput): OWNER {
-		this.ensureActive();
-		const textSource = toTextSource(value);
-
-		this.replaceDeterminer((applyIfCurrent) => {
-			applyIfCurrent(textSource.value);
-
-			return textSource.subscribe(this.owner, (nextValue) => {
-				applyIfCurrent(nextValue);
-			});
-		});
-
-		return this.owner;
+	override set (value: TextInput): OWNER {
+		return super.set(value);
 	}
 
 	/**
@@ -77,66 +35,22 @@ export class TextManipulator<OWNER extends Component> {
 	 * @param value Direct or reactive text input.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (visible: State<boolean>, value: TextInput): OWNER {
-		this.ensureActive();
-		const textSource = toTextSource(value);
-
-		this.replaceDeterminer((applyIfCurrent) => {
-			const sync = () => {
-				applyIfCurrent(visible.value ? textSource.value : null);
-			};
-
-			const releaseVisibility = visible.subscribe(this.owner, sync);
-			const releaseText = textSource.subscribe(this.owner, sync);
-			sync();
-
-			return () => {
-				releaseVisibility();
-				releaseText();
-			};
-		});
-
-		return this.owner;
+	override bind (visible: State<boolean>, value: TextInput): OWNER {
+		return super.bind(visible, value);
 	}
 
-	private replaceDeterminer (createCleanup: (applyIfCurrent: (value: TextSelection) => void) => CleanupFunction): CleanupFunction {
-		this.determiner?.cleanup();
-
-		const token = Symbol("text");
-		let active = true;
-		let cleanup = noop;
-
-		const applyIfCurrent = (value: TextSelection): void => {
-			if (this.determiner?.token !== token) {
-				return;
-			}
-
-			this.writeText(serializeTextSelection(value));
-		};
-
-		const trackedCleanup = () => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-
-			if (this.determiner?.token === token) {
-				this.determiner = null;
-				this.writeText("");
-			}
-
-			cleanup();
-		};
-
-		this.determiner = { cleanup: trackedCleanup, token };
-		cleanup = createCleanup(applyIfCurrent);
-		return trackedCleanup;
-	}
-
-	private ensureActive (): void {
-		if (this.owner.disposed) {
-			throw new Error("Disposed components cannot be modified.");
+	protected override toSource (value: TextInput): State<ReactiveTextSelection> {
+		if (value instanceof State) {
+			return value;
 		}
+
+		return State.Readonly(value ?? null);
+	}
+
+	protected override writeProperty (value: ReactiveTextSelection | undefined): void {
+		const text = String(value ?? "");
+		
+		this.owner.clear();
+		this.owner.element.textContent = text;
 	}
 }

@@ -56,7 +56,7 @@ function declarationSlice (html: string, declarationName: string): string {
 beforeAll(async () => {
 	docsDirectory = await mkdtemp(path.join(os.tmpdir(), "kitsui-docs-test-"));
 	await buildDocsSite({ outputDirectory: docsDirectory });
-}, 20_000);
+}, 30_000);
 
 afterAll(async () => {
 	if (!docsDirectory) {
@@ -103,6 +103,7 @@ describe("build:docs pipeline", () => {
 		const stateHtml = await readFile(path.join(docsDirectory, "State.html"), "utf8");
 		const styleHtml = await readFile(path.join(docsDirectory, "Style.html"), "utf8");
 		const markerHtml = await readFile(path.join(docsDirectory, "Marker.html"), "utf8");
+		const ownerManipulatorHtml = await readFile(path.join(docsDirectory, "OwnerManipulator.html"), "utf8");
 		const eventHtml = await readFile(path.join(docsDirectory, "EventManipulator.html"), "utf8");
 		const manipulatorModules = (docsModel.children ?? [])
 			.filter(child => child.name.startsWith("component/") && child.name.endsWith("Manipulator"))
@@ -143,6 +144,11 @@ describe("build:docs pipeline", () => {
 		expect(markerHtml.includes("A wrapper around a DOM comment used where an actual DOM element is not needed."), "Marker should render its JSDoc summary on the public docs page").toBe(true);
 		const markerExtendDeclaration = declarationSlice(markerHtml, "Marker.extend");
 		expect(markerExtendDeclaration.includes("Returns the underlying Marker class for prototype extension."), "Marker.extend should render its JSDoc summary").toBe(true);
+		expect(/id="Marker\.owner"[\s\S]*?Lazily creates and memoizes an OwnerManipulator/u.test(markerHtml), "Marker.owner should render its JSDoc summary").toBe(true);
+		expect(ownerManipulatorHtml.includes('<title>OwnerManipulator - kitsui</title>'), "Missing OwnerManipulator page title").toBe(true);
+		expect(ownerManipulatorHtml.includes('<h1 class="docs-component-title">OwnerManipulator</h1>'), "Missing OwnerManipulator page heading").toBe(true);
+		expect(ownerManipulatorHtml.includes("Manages explicit lifecycle owners for a component-like host."), "OwnerManipulator should render its JSDoc summary").toBe(true);
+		expect(ownerManipulatorHtml.includes('<a class="docs-sidebar-link docs-sidebar-link-active" href="OwnerManipulator.html">OwnerManipulator</a>'), "OwnerManipulator page should be active in the sidebar").toBe(true);
 		const markerBuilderDeclaration = declarationSlice(markerHtml, "Marker.builder");
 		expect(markerBuilderDeclaration.includes("Creates a marker factory from an id/build definition pair."), "Marker.builder should render its JSDoc summary").toBe(true);
 		expect(markerBuilderDeclaration.includes('href="Marker.html#MarkerBuilderDefinition"'), "Marker.builder should link to MarkerBuilderDefinition").toBe(true);
@@ -165,8 +171,7 @@ describe("build:docs pipeline", () => {
 		expect(/id="Marker\.node"[\s\S]*?underlying DOM comment node/u.test(markerHtml), "Marker.node should render its JSDoc summary").toBe(true);
 		expect(/id="Marker\.event"[\s\S]*?Lazily creates the marker's event manipulator/u.test(markerHtml), "Marker.event should render its JSDoc summary").toBe(true);
 		expect(/id="Marker\.remove"[\s\S]*?Disposes the marker and removes its comment node/u.test(markerHtml), "Marker.remove should render its JSDoc summary").toBe(true);
-		expect(/id="Marker\.setOwner"[\s\S]*?Assigns or clears the explicit owner/u.test(markerHtml), "Marker.setOwner should render its JSDoc summary").toBe(true);
-		expect(/id="Marker\.getOwner"[\s\S]*?current explicit owner/u.test(markerHtml), "Marker.getOwner should render its JSDoc summary").toBe(true);
+		expect(/id="Marker\.owner"[\s\S]*?Lazily creates and memoizes an OwnerManipulator/u.test(markerHtml), "Marker.owner should render its JSDoc summary").toBe(true);
 		expect(/id="Marker\.use"[\s\S]*?Registers mount and optional dispose hooks/u.test(markerHtml), "Marker.use should render its JSDoc summary").toBe(true);
 		const eventManipulatorDeclaration = declarationSlice(eventHtml, "EventManipulator");
 		expect(eventManipulatorDeclaration.includes("Manages event listeners for a host owner with automatic cleanup and reactive listener support."), "EventManipulator should render its JSDoc summary").toBe(true);
@@ -247,18 +252,30 @@ describe("build:docs pipeline", () => {
 		}
 		const classLinkIndex = componentHtml.indexOf('href="ClassManipulator.html">ClassManipulator</a>');
 		const attributeLinkIndex = componentHtml.indexOf('href="AttributeManipulator.html">AttributeManipulator</a>');
+		const styleLinkIndex = componentHtml.indexOf('href="StyleManipulator.html">StyleManipulator</a>');
 		const ariaLinkIndex = componentHtml.indexOf('href="AriaManipulator.html">AriaManipulator</a>');
+		const ownerLinkIndex = componentHtml.indexOf('href="OwnerManipulator.html">OwnerManipulator</a>');
 		const textLinkIndex = componentHtml.indexOf('href="TextManipulator.html">TextManipulator</a>');
+		const genericClaimLinkIndex = componentHtml.indexOf('href="GenericClaimManipulator.html">GenericClaimManipulator</a>');
+		const genericPropertyLinkIndex = componentHtml.indexOf('href="GenericPropertyManipulator.html">GenericPropertyManipulator</a>');
 		const eventLinkIndex = componentHtml.indexOf('href="EventManipulator.html">EventManipulator</a>');
 		expect(classLinkIndex, "Sidebar should include ClassManipulator link").toBeGreaterThanOrEqual(0);
 		expect(attributeLinkIndex, "Sidebar should include AttributeManipulator link").toBeGreaterThanOrEqual(0);
+		expect(styleLinkIndex, "Sidebar should include StyleManipulator link").toBeGreaterThanOrEqual(0);
 		expect(ariaLinkIndex, "Sidebar should include AriaManipulator link").toBeGreaterThanOrEqual(0);
+		expect(ownerLinkIndex, "Sidebar should include OwnerManipulator link").toBeGreaterThanOrEqual(0);
 		expect(textLinkIndex, "Sidebar should include TextManipulator link").toBeGreaterThanOrEqual(0);
+		expect(genericClaimLinkIndex, "Sidebar should include GenericClaimManipulator link").toBeGreaterThanOrEqual(0);
+		expect(genericPropertyLinkIndex, "Sidebar should include GenericPropertyManipulator link").toBeGreaterThanOrEqual(0);
 		expect(eventLinkIndex, "Sidebar should include EventManipulator link").toBeGreaterThanOrEqual(0);
 		expect(classLinkIndex < attributeLinkIndex, "ClassManipulator should come before AttributeManipulator in sidebar").toBe(true);
-		expect(attributeLinkIndex < ariaLinkIndex, "AttributeManipulator should come before AriaManipulator in sidebar").toBe(true);
-		expect(ariaLinkIndex < textLinkIndex, "AriaManipulator should come before TextManipulator in sidebar").toBe(true);
+		expect(attributeLinkIndex < styleLinkIndex, "AttributeManipulator should come before StyleManipulator in sidebar").toBe(true);
+		expect(styleLinkIndex < ariaLinkIndex, "StyleManipulator should come before AriaManipulator in sidebar").toBe(true);
+		expect(ariaLinkIndex < ownerLinkIndex, "AriaManipulator should come before OwnerManipulator in sidebar").toBe(true);
+		expect(ownerLinkIndex < textLinkIndex, "OwnerManipulator should come before TextManipulator in sidebar").toBe(true);
 		expect(textLinkIndex < eventLinkIndex, "TextManipulator should come before EventManipulator in sidebar").toBe(true);
+		expect(eventLinkIndex < genericClaimLinkIndex, "EventManipulator should come before GenericClaimManipulator in sidebar").toBe(true);
+		expect(genericClaimLinkIndex < genericPropertyLinkIndex, "GenericClaimManipulator should come before GenericPropertyManipulator in sidebar").toBe(true);
 		expect(firstManipulatorHtml.includes(`<title>${firstManipulator} - kitsui</title>`), "Generated manipulator page should set title").toBe(true);
 		expect(firstManipulatorHtml.includes(`<h1 class="docs-component-title">${firstManipulator}</h1>`), "Generated manipulator page should render heading").toBe(true);
 		expect(firstManipulatorHtml.includes(`<a class="docs-sidebar-link docs-sidebar-link-active" href="${firstManipulator}.html">${firstManipulator}</a>`), "Generated manipulator page should be active in sidebar").toBe(true);

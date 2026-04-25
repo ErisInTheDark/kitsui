@@ -1,6 +1,7 @@
 import { Owner, type CleanupFunction } from "../state/State";
 import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
 import { EventManipulator } from "./EventManipulator";
+import { OwnerManipulator } from "./OwnerManipulator";
 
 declare global {
 	interface Node {
@@ -68,7 +69,10 @@ let markerAccessorInstalled = false;
 type OwnerWithNode = Owner & Partial<{
 	element: Node;
 	node: Node;
-	getOwner: () => Owner | null;
+	owner: {
+		get: () => Owner | null;
+		getAll: () => Owner[];
+	};
 	isManaged: () => boolean;
 }>;
 
@@ -126,9 +130,11 @@ function getOwnerNode (owner: Owner): Node | null {
 	return null;
 }
 
-function getExplicitOwner (owner: Owner): Owner | null {
+function getExplicitOwners (owner: Owner): Owner[] {
 	const value = owner as OwnerWithNode;
-	return typeof value.getOwner === "function" ? value.getOwner() : null;
+	return value.owner && typeof value.owner.getAll === "function"
+		? value.owner.getAll()
+		: [];
 }
 
 function isManagedOwner (owner: Owner | null, visitedOwners: Set<Owner>): boolean {
@@ -148,9 +154,9 @@ function isManagedOwner (owner: Owner | null, visitedOwners: Set<Owner>): boolea
 		return true;
 	}
 
-	const explicitOwner = getExplicitOwner(owner);
-	if (explicitOwner) {
-		return isManagedOwner(explicitOwner, visitedOwners);
+	const explicitOwners = getExplicitOwners(owner);
+	if (explicitOwners.length > 0) {
+		return explicitOwners.some(explicitOwner => isManagedOwner(explicitOwner, visitedOwners));
 	}
 
 	if (ownerNode && "element" in value && typeof value.isManaged === "function") {
@@ -185,8 +191,6 @@ function isManagedNode (node: Node, visitedOwners: Set<Owner> = new Set()): bool
 class MarkerClass extends Owner {
 	/** The underlying DOM comment node that this marker wraps. */
 	readonly node: Comment;
-	private explicitOwner: Owner | null = null;
-	private releaseExplicitOwner: CleanupFunction = noop;
 	private mounted = false;
 	private orphanCheckId: DeferredTimeoutHandle | null = null;
 
@@ -217,40 +221,26 @@ class MarkerClass extends Owner {
 		return manipulator;
 	}
 
+	/** Lazily creates and memoizes an OwnerManipulator for managing explicit owners. */
+	get owner (): OwnerManipulator<this> {
+		this.ensureActive();
+
+		const manipulator = new OwnerManipulator(this, () => {
+			this.refreshOrphanCheck();
+		});
+		Object.defineProperty(this, "owner", {
+			configurable: true,
+			enumerable: true,
+			value: manipulator,
+			writable: false,
+		});
+
+		return manipulator;
+	}
+
 	/** Disposes the marker and removes its comment node from the DOM. */
 	remove (): void {
 		super.dispose();
-	}
-
-	/**
-	 * Assigns or clears the explicit owner responsible for disposing this marker.
-	 * @param owner The owner to bind to this marker, or `null` to clear explicit ownership.
-	 * @returns This marker for chaining.
-	 */
-	setOwner (owner: Owner | null): this {
-		this.ensureActive();
-
-		if (this.explicitOwner === owner) {
-			return this;
-		}
-
-		this.releaseExplicitOwner();
-		this.releaseExplicitOwner = noop;
-		this.explicitOwner = owner;
-
-		if (owner) {
-			this.releaseExplicitOwner = owner.onCleanup(() => {
-				this.remove();
-			});
-		}
-
-		this.refreshOrphanCheck();
-		return this;
-	}
-
-	/** Returns the marker's current explicit owner, if one has been assigned. */
-	getOwner (): Owner | null {
-		return this.explicitOwner;
 	}
 
 	/**
@@ -279,9 +269,6 @@ class MarkerClass extends Owner {
 	protected beforeDispose (): void {
 		this.node.dispatchEvent(new CustomEvent("Dispose"));
 		this.clearOrphanCheck();
-		this.releaseExplicitOwner();
-		this.releaseExplicitOwner = noop;
-		this.explicitOwner = null;
 
 		if (getLiveMarker(this.node) === this) {
 			markers.delete(this.node);
@@ -349,7 +336,7 @@ class MarkerClass extends Owner {
 			return true;
 		}
 
-		return isManagedOwner(this.explicitOwner, new Set());
+		return this.owner.getAll().some(owner => isManagedOwner(owner, new Set()));
 	}
 }
 

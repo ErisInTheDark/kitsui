@@ -69,7 +69,7 @@ function validateCreatedPartComponent (component: unknown): Component {
 		throw new TypeError("Component.Breakdown part builders must return a Component.");
 	}
 
-	if (component.getOwner() !== null) {
+	if (component.owner.get() !== null) {
 		throw new Error("Component.Breakdown part builders must return an ownerless Component.");
 	}
 
@@ -197,7 +197,7 @@ export default function breakdownExtension (): void {
 							throw error;
 						}
 
-						component.setOwner(owner);
+						component.owner.add(owner);
 						const record: PartRecord<TPart> = {
 							component,
 							state: partState,

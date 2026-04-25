@@ -143,7 +143,7 @@ describe("Marker", () => {
 		marker.event.owned.on.Dispose(() => {
 			events.push("Dispose");
 		});
-		marker.setOwner(owner);
+		marker.owner.add(owner);
 
 		await flushLifecycle();
 		expect(events).toEqual([]);
@@ -170,7 +170,7 @@ describe("Marker", () => {
 		marker.event.owned.on.Dispose(() => {
 			events.push("Dispose");
 		});
-		marker.setOwner(owner);
+		marker.owner.add(owner);
 
 		await flushLifecycle();
 		expect(events).toEqual([]);
@@ -183,7 +183,7 @@ describe("Marker", () => {
 
 	it("treats managed wrapped ancestors as implicit ownership", async () => {
 		const owner = mountedComponent("section");
-		const child = Component("div").setOwner(owner);
+		const child = Component("div").owner.add(owner);
 		const marker = Marker("implicit");
 		let mounts = 0;
 
