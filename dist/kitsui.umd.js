@@ -38,8 +38,11 @@ var __kitsui_factory__ = (() => {
     ClassManipulator: () => ClassManipulator,
     Component: () => Component,
     EventManipulator: () => EventManipulator,
+    GenericClaimManipulator: () => GenericClaimManipulator,
+    GenericPropertyManipulator: () => GenericPropertyManipulator,
     Marker: () => Marker,
     Owner: () => Owner,
+    OwnerManipulator: () => OwnerManipulator,
     State: () => State,
     Style: () => Style,
     StyleAnimation: () => StyleAnimation,
@@ -1276,9 +1279,361 @@ var __kitsui_factory__ = (() => {
     }
   };
 
-  // src/component/Marker.ts
+  // src/component/GenericClaimManipulator.ts
   var noop4 = () => {
   };
+  function isBooleanStateClaim(claim) {
+    return claim instanceof State;
+  }
+  var GenericClaimManipulator = class {
+    constructor(owner) {
+      this.owner = owner;
+      __publicField(this, "anonymousClaims", /* @__PURE__ */ new Set());
+      __publicField(this, "claimsByClaimant", /* @__PURE__ */ new Map());
+      __publicField(this, "keyedClaims", /* @__PURE__ */ new Map());
+      __publicField(this, "activeClaimCount", 0);
+      /**
+       * True while any registered claim is currently active.
+       * Subclasses can observe or bind this state through their own public API.
+       */
+      __publicField(this, "hasClaim");
+      this.hasClaim = State(owner, false);
+    }
+    /**
+     * Registers a claim against this manipulator.
+     * A non-null id reserves a single slot, so later claims with the same id replace the previous claimant.
+     * A null id registers an anonymous claim that overlaps with any number of other anonymous claims.
+     * Owner claims stay active until that owner is cleaned up, and State claims stay active while their value is true.
+     * @param id Unique claim slot to replace, or null to register an overlapping anonymous claim.
+     * @param claim Owner or boolean state contributing the claim.
+     */
+    registerClaim(id, claim) {
+      this.ensureActive();
+      if (id === null) {
+        const record2 = this.createClaimRecord(id, claim);
+        this.anonymousClaims.add(record2);
+        this.trackClaimant(record2);
+        return;
+      }
+      const record = this.createClaimRecord(id, claim);
+      const previousClaim = this.keyedClaims.get(id);
+      this.keyedClaims.set(id, record);
+      this.trackClaimant(record);
+      previousClaim?.cleanup();
+    }
+    deregisterClaim(idOrClaimant, claimant) {
+      this.ensureActive();
+      if (claimant !== void 0) {
+        if (idOrClaimant === null) {
+          this.cleanupMatchingClaims(this.claimsByClaimant.get(claimant), (record) => record.id === null);
+          return;
+        }
+        const keyedClaim = this.keyedClaims.get(idOrClaimant);
+        if (keyedClaim?.claimant === claimant) {
+          keyedClaim.cleanup();
+        }
+        return;
+      }
+      if (typeof idOrClaimant === "string") {
+        this.keyedClaims.get(idOrClaimant)?.cleanup();
+        return;
+      }
+      if (idOrClaimant !== null) {
+        this.cleanupMatchingClaims(this.claimsByClaimant.get(idOrClaimant));
+      }
+    }
+    createClaimRecord(id, claim) {
+      let record;
+      const releaseClaimRecord = () => {
+        if (id === null) {
+          this.anonymousClaims.delete(record);
+        } else if (this.keyedClaims.get(id) === record) {
+          this.keyedClaims.delete(id);
+        }
+        this.untrackClaimant(record);
+      };
+      record = isBooleanStateClaim(claim) ? this.createStateClaimRecord(id, claim, releaseClaimRecord) : this.createOwnerClaimRecord(id, claim, releaseClaimRecord);
+      return record;
+    }
+    createOwnerClaimRecord(id, claim, onCleanup) {
+      const record = {
+        id,
+        claimant: claim,
+        active: false,
+        cleanup: noop4
+      };
+      let active = true;
+      let releaseOwner = noop4;
+      let releaseClaim = noop4;
+      const cleanup = () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        this.setClaimActive(record, false);
+        onCleanup();
+        releaseOwner();
+        releaseClaim();
+      };
+      record.cleanup = cleanup;
+      releaseOwner = this.owner.onCleanup(cleanup);
+      this.setClaimActive(record, true);
+      releaseClaim = claim.onCleanup(cleanup);
+      return record;
+    }
+    createStateClaimRecord(id, claim, onCleanup) {
+      const record = {
+        id,
+        claimant: claim,
+        active: false,
+        cleanup: noop4
+      };
+      let active = true;
+      let releaseOwner = noop4;
+      let releaseClaim = noop4;
+      let releaseClaimOwner = noop4;
+      const cleanup = () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        this.setClaimActive(record, false);
+        onCleanup();
+        releaseOwner();
+        releaseClaim();
+        releaseClaimOwner();
+      };
+      record.cleanup = cleanup;
+      releaseOwner = this.owner.onCleanup(cleanup);
+      this.setClaimActive(record, claim.value);
+      releaseClaimOwner = claim.onCleanup(cleanup);
+      releaseClaim = claim.subscribe(this.owner, (value) => {
+        if (!active) {
+          return;
+        }
+        this.setClaimActive(record, value);
+      });
+      return record;
+    }
+    cleanupMatchingClaims(records, predicate) {
+      if (!records) {
+        return;
+      }
+      for (const record of [...records]) {
+        if (predicate && !predicate(record)) {
+          continue;
+        }
+        record.cleanup();
+      }
+    }
+    trackClaimant(record) {
+      let records = this.claimsByClaimant.get(record.claimant);
+      if (!records) {
+        records = /* @__PURE__ */ new Set();
+        this.claimsByClaimant.set(record.claimant, records);
+      }
+      records.add(record);
+    }
+    untrackClaimant(record) {
+      const records = this.claimsByClaimant.get(record.claimant);
+      if (!records) {
+        return;
+      }
+      records.delete(record);
+      if (records.size === 0) {
+        this.claimsByClaimant.delete(record.claimant);
+      }
+    }
+    setClaimActive(record, active) {
+      if (record.active === active) {
+        return;
+      }
+      record.active = active;
+      this.activeClaimCount += active ? 1 : -1;
+      this.syncHasClaim();
+    }
+    syncHasClaim() {
+      if (this.hasClaim.disposed) {
+        return;
+      }
+      const nextValue = this.activeClaimCount > 0;
+      if (this.hasClaim.value === nextValue) {
+        return;
+      }
+      this.hasClaim.set(nextValue);
+    }
+    ensureActive() {
+      if (this.owner.disposed) {
+        throw new Error("Disposed owners cannot be modified.");
+      }
+    }
+  };
+
+  // src/component/OwnerManipulator.ts
+  var noop5 = () => {
+  };
+  var OwnerManipulator = class extends GenericClaimManipulator {
+    constructor(owner, refreshManagement) {
+      super(owner);
+      this.refreshManagement = refreshManagement;
+      __publicField(this, "anonymousEntries", /* @__PURE__ */ new Map());
+      __publicField(this, "entriesByOwner", /* @__PURE__ */ new Map());
+      __publicField(this, "keyedEntries", /* @__PURE__ */ new Map());
+      owner.onCleanup(() => {
+        this.clearEntries();
+      });
+    }
+    /**
+     * Adds an explicit owner claim to the host.
+     * A non-null id replaces any previous claim registered in the same slot.
+     * Anonymous claims are deduplicated by owner.
+     * @param owner Explicit owner to register.
+     * @param id Optional keyed claim slot.
+     * @returns The owning host for fluent chaining.
+     */
+    add(owner, id = null) {
+      if (id === null) {
+        if (this.anonymousEntries.has(owner)) {
+          return this.owner;
+        }
+      } else {
+        const existingEntry = this.keyedEntries.get(id);
+        if (existingEntry?.owner === owner) {
+          return this.owner;
+        }
+        if (existingEntry) {
+          this.unregisterEntry(existingEntry, true);
+        }
+      }
+      const entry = {
+        active: true,
+        id,
+        owner,
+        releaseLifecycle: noop5
+      };
+      entry.releaseLifecycle = owner.onCleanup(() => {
+        if (!entry.active) {
+          return;
+        }
+        this.unregisterEntry(entry, true);
+        if (this.getAll().length === 0) {
+          this.owner.remove();
+        }
+      });
+      this.trackEntry(entry);
+      this.registerClaim(id, owner);
+      this.refreshManagement();
+      return this.owner;
+    }
+    remove(idOrOwner, owner) {
+      if (owner !== void 0) {
+        if (idOrOwner === null) {
+          const anonymousEntry = this.anonymousEntries.get(owner);
+          if (anonymousEntry) {
+            this.unregisterEntry(anonymousEntry, true);
+          }
+          return this.owner;
+        }
+        const keyedEntry = this.keyedEntries.get(idOrOwner);
+        if (keyedEntry?.owner === owner) {
+          this.unregisterEntry(keyedEntry, true);
+        }
+        return this.owner;
+      }
+      if (typeof idOrOwner === "string") {
+        const keyedEntry = this.keyedEntries.get(idOrOwner);
+        if (keyedEntry) {
+          this.unregisterEntry(keyedEntry, true);
+        }
+        return this.owner;
+      }
+      if (idOrOwner !== null) {
+        const entries = this.entriesByOwner.get(idOrOwner);
+        for (const entry of [...entries ?? []]) {
+          this.unregisterEntry(entry, true);
+        }
+      }
+      return this.owner;
+    }
+    /**
+     * Returns one explicit owner if any are registered.
+     * When multiple owners are present, which owner is returned is not guaranteed.
+     * @returns One explicit owner or null when no owners are registered.
+     */
+    get() {
+      for (const entry of this.keyedEntries.values()) {
+        return entry.owner;
+      }
+      for (const entry of this.anonymousEntries.values()) {
+        return entry.owner;
+      }
+      return null;
+    }
+    /**
+     * Returns every currently registered explicit owner without duplicates.
+     * @returns All explicit owners currently managing the host.
+     */
+    getAll() {
+      return [...new Set([
+        ...this.keyedEntries.values(),
+        ...this.anonymousEntries.values()
+      ].map((entry) => entry.owner))];
+    }
+    clearEntries() {
+      for (const entry of [
+        ...this.keyedEntries.values(),
+        ...this.anonymousEntries.values()
+      ]) {
+        this.untrackEntry(entry);
+        entry.active = false;
+        entry.releaseLifecycle();
+      }
+    }
+    trackEntry(entry) {
+      if (entry.id === null) {
+        this.anonymousEntries.set(entry.owner, entry);
+      } else {
+        this.keyedEntries.set(entry.id, entry);
+      }
+      let entries = this.entriesByOwner.get(entry.owner);
+      if (!entries) {
+        entries = /* @__PURE__ */ new Set();
+        this.entriesByOwner.set(entry.owner, entries);
+      }
+      entries.add(entry);
+    }
+    untrackEntry(entry) {
+      if (entry.id === null) {
+        if (this.anonymousEntries.get(entry.owner) === entry) {
+          this.anonymousEntries.delete(entry.owner);
+        }
+      } else if (this.keyedEntries.get(entry.id) === entry) {
+        this.keyedEntries.delete(entry.id);
+      }
+      const ownerEntries = this.entriesByOwner.get(entry.owner);
+      if (!ownerEntries) {
+        return;
+      }
+      ownerEntries.delete(entry);
+      if (ownerEntries.size === 0) {
+        this.entriesByOwner.delete(entry.owner);
+      }
+    }
+    unregisterEntry(entry, deregisterClaim) {
+      if (!entry.active) {
+        return;
+      }
+      entry.active = false;
+      this.untrackEntry(entry);
+      entry.releaseLifecycle();
+      if (deregisterClaim) {
+        this.deregisterClaim(entry.id, entry.owner);
+      }
+      this.refreshManagement();
+    }
+  };
+
+  // src/component/Marker.ts
   var orphanedMarkerErrorMessage = "Markers must be connected to the document or have a managed owner before the next tick.";
   var markers = /* @__PURE__ */ new WeakMap();
   var markerAccessorInstalled = false;
@@ -1324,9 +1679,9 @@ var __kitsui_factory__ = (() => {
     }
     return null;
   }
-  function getExplicitOwner(owner) {
+  function getExplicitOwners(owner) {
     const value = owner;
-    return typeof value.getOwner === "function" ? value.getOwner() : null;
+    return value.owner && typeof value.owner.getAll === "function" ? value.owner.getAll() : [];
   }
   function isManagedOwner(owner, visitedOwners) {
     if (!owner || owner.disposed) {
@@ -1341,9 +1696,9 @@ var __kitsui_factory__ = (() => {
     if (ownerNode && isManagedNode(ownerNode, visitedOwners)) {
       return true;
     }
-    const explicitOwner = getExplicitOwner(owner);
-    if (explicitOwner) {
-      return isManagedOwner(explicitOwner, visitedOwners);
+    const explicitOwners = getExplicitOwners(owner);
+    if (explicitOwners.length > 0) {
+      return explicitOwners.some((explicitOwner) => isManagedOwner(explicitOwner, visitedOwners));
     }
     if (ownerNode && "element" in value && typeof value.isManaged === "function") {
       return value.isManaged();
@@ -1373,8 +1728,6 @@ var __kitsui_factory__ = (() => {
       super();
       /** The underlying DOM comment node that this marker wraps. */
       __publicField(this, "node");
-      __publicField(this, "explicitOwner", null);
-      __publicField(this, "releaseExplicitOwner", noop4);
       __publicField(this, "mounted", false);
       __publicField(this, "orphanCheckId", null);
       installNodeMarkerAccessor();
@@ -1394,34 +1747,23 @@ var __kitsui_factory__ = (() => {
       });
       return manipulator;
     }
+    /** Lazily creates and memoizes an OwnerManipulator for managing explicit owners. */
+    get owner() {
+      this.ensureActive();
+      const manipulator = new OwnerManipulator(this, () => {
+        this.refreshOrphanCheck();
+      });
+      Object.defineProperty(this, "owner", {
+        configurable: true,
+        enumerable: true,
+        value: manipulator,
+        writable: false
+      });
+      return manipulator;
+    }
     /** Disposes the marker and removes its comment node from the DOM. */
     remove() {
       super.dispose();
-    }
-    /**
-     * Assigns or clears the explicit owner responsible for disposing this marker.
-     * @param owner The owner to bind to this marker, or `null` to clear explicit ownership.
-     * @returns This marker for chaining.
-     */
-    setOwner(owner) {
-      this.ensureActive();
-      if (this.explicitOwner === owner) {
-        return this;
-      }
-      this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop4;
-      this.explicitOwner = owner;
-      if (owner) {
-        this.releaseExplicitOwner = owner.onCleanup(() => {
-          this.remove();
-        });
-      }
-      this.refreshOrphanCheck();
-      return this;
-    }
-    /** Returns the marker's current explicit owner, if one has been assigned. */
-    getOwner() {
-      return this.explicitOwner;
     }
     /**
      * Registers mount and optional dispose hooks tied to this marker's lifecycle events.
@@ -1445,9 +1787,6 @@ var __kitsui_factory__ = (() => {
     beforeDispose() {
       this.node.dispatchEvent(new CustomEvent("Dispose"));
       this.clearOrphanCheck();
-      this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop4;
-      this.explicitOwner = null;
       if (getLiveMarker(this.node) === this) {
         markers.delete(this.node);
       }
@@ -1500,7 +1839,7 @@ var __kitsui_factory__ = (() => {
       if (isManagedNode(this.node)) {
         return true;
       }
-      return isManagedOwner(this.explicitOwner, /* @__PURE__ */ new Set());
+      return this.owner.getAll().some((owner) => isManagedOwner(owner, /* @__PURE__ */ new Set()));
     }
   };
   var Marker = function Marker2(id) {
@@ -1873,7 +2212,7 @@ ${innerRules}
     const suffixedName = `${name}-${++animationIdCounter}`;
     const marker = styleAnimationBuilder({ keyframes, name: suffixedName });
     animationMarkerData.set(marker, { keyframes, name: suffixedName });
-    marker.setOwner(animationMarkerOwner);
+    marker.owner.add(animationMarkerOwner);
     Object.defineProperty(marker, "name", {
       configurable: true,
       enumerable: true,
@@ -2017,7 +2356,7 @@ ${innerRules}
   }
 
   // src/component/ClassManipulator.ts
-  var noop5 = () => {
+  var noop6 = () => {
   };
   function isStyleInputState(value) {
     return value instanceof State;
@@ -2197,7 +2536,7 @@ ${innerRules}
       }
       this.replaceDeterminer(style, () => {
         this.element.classList.add(style.className);
-        return noop5;
+        return noop6;
       });
     }
     installRemoveInput(style) {
@@ -2212,7 +2551,7 @@ ${innerRules}
       }
       this.replaceDeterminer(style, () => {
         this.element.classList.remove(style.className);
-        return noop5;
+        return noop6;
       });
     }
     installStateDrivenStyles(selectionState, getPresent, options = {}) {
@@ -2243,8 +2582,8 @@ ${innerRules}
             continue;
           }
           const entry = {
-            apply: noop5,
-            cleanup: noop5
+            apply: noop6,
+            cleanup: noop6
           };
           const determinerCleanup = this.replaceDeterminer(style, (applyIfCurrent) => {
             entry.apply = () => {
@@ -2274,7 +2613,7 @@ ${innerRules}
         for (const entry of entries.values()) {
           entry.apply();
         }
-      }) ?? noop5;
+      }) ?? noop6;
       syncSelection(selectionState.value);
       return () => {
         if (!active) {
@@ -2319,7 +2658,7 @@ ${innerRules}
   };
 
   // src/component/StyleManipulator.ts
-  var noop6 = () => {
+  var noop7 = () => {
   };
   function isStateSource2(value) {
     return value instanceof State;
@@ -2363,7 +2702,7 @@ ${innerRules}
       this.ensureActive();
       const definitionSource = toStyleAttributeSource(value);
       this.replaceDeterminer((applyIfCurrent) => {
-        let releaseDefinition = noop6;
+        let releaseDefinition = noop7;
         const applyDefinition = (definition) => {
           releaseDefinition();
           releaseDefinition = this.installDefinition(definition, applyIfCurrent);
@@ -2381,7 +2720,7 @@ ${innerRules}
     }
     installDefinition(definition, applyIfCurrent) {
       if (!definition) {
-        return noop6;
+        return noop7;
       }
       const cleanups = [];
       const activeProperties = /* @__PURE__ */ new Set();
@@ -2406,7 +2745,7 @@ ${innerRules}
       this.determiner?.cleanup();
       const token = /* @__PURE__ */ Symbol("style");
       let active = true;
-      let cleanup = noop6;
+      let cleanup = noop7;
       const applyIfCurrent = (propertyName, value) => {
         if (this.determiner?.token !== token) {
           return;
@@ -2442,78 +2781,63 @@ ${innerRules}
     }
   };
 
-  // src/component/TextManipulator.ts
-  var noop7 = () => {
+  // src/component/GenericPropertyManipulator.ts
+  var noop8 = () => {
   };
-  function toTextSource(value) {
-    if (value instanceof State) {
-      return value;
-    }
-    return State.Readonly(value === void 0 ? null : value);
-  }
-  function serializeTextSelection(value) {
-    if (value === null || value === void 0) {
-      return "";
-    }
-    return String(value);
-  }
-  var TextManipulator = class {
-    constructor(owner, writeText) {
+  var GenericPropertyManipulator = class {
+    constructor(owner) {
       this.owner = owner;
-      this.writeText = writeText;
       __publicField(this, "determiner", null);
     }
     /**
-     * Sets the element's text content from a direct value or subscribable source.
-     * Nullish values clear the text content.
-     * @param value Direct or reactive text input.
+     * Sets the property from a direct value or subscribable source.
+     * @param value Direct or reactive property input.
      * @returns The owning component for fluent chaining.
      */
     set(value) {
       this.ensureActive();
-      const textSource = toTextSource(value);
+      const source = this.toSource(value);
       this.replaceDeterminer((applyIfCurrent) => {
-        applyIfCurrent(textSource.value);
-        return textSource.subscribe(this.owner, (nextValue) => {
+        applyIfCurrent(source.value);
+        return source.subscribe(this.owner, (nextValue) => {
           applyIfCurrent(nextValue);
         });
       });
       return this.owner;
     }
     /**
-     * Shows or clears text content based on a boolean source.
-     * When visible, the latest text value is applied; when hidden, the text content is cleared.
-     * @param visible Boolean source controlling whether text is shown.
-     * @param value Direct or reactive text input.
+     * Applies the property while visible and clears it while hidden.
+     * @param visible Boolean source controlling whether the property is shown.
+     * @param value Direct or reactive property input.
      * @returns The owning component for fluent chaining.
      */
     bind(visible, value) {
       this.ensureActive();
-      const textSource = toTextSource(value);
+      const source = this.toSource(value);
       this.replaceDeterminer((applyIfCurrent) => {
         const sync = () => {
-          applyIfCurrent(visible.value ? textSource.value : null);
+          applyIfCurrent(visible.value ? source.value : void 0);
         };
         const releaseVisibility = visible.subscribe(this.owner, sync);
-        const releaseText = textSource.subscribe(this.owner, sync);
+        const releaseValue = source.subscribe(this.owner, sync);
         sync();
         return () => {
           releaseVisibility();
-          releaseText();
+          releaseValue();
         };
       });
       return this.owner;
     }
     replaceDeterminer(createCleanup) {
       this.determiner?.cleanup();
-      const token = /* @__PURE__ */ Symbol("text");
+      const token = /* @__PURE__ */ Symbol("property");
       let active = true;
-      let cleanup = noop7;
+      let cleanup = noop8;
       const applyIfCurrent = (value) => {
         if (this.determiner?.token !== token) {
           return;
         }
-        this.writeText(serializeTextSelection(value));
+        this.writeProperty(value);
       };
       const trackedCleanup = () => {
         if (!active) {
@@ -2522,7 +2846,7 @@ ${innerRules}
         active = false;
         if (this.determiner?.token === token) {
           this.determiner = null;
-          this.writeText("");
+          this.writeProperty(void 0);
         }
         cleanup();
       };
@@ -2537,8 +2861,42 @@ ${innerRules}
     }
   };
 
+  // src/component/TextManipulator.ts
+  var TextManipulator = class extends GenericPropertyManipulator {
+    /**
+     * Sets the element's text content from a direct value or subscribable source.
+     * Nullish values clear the text content.
+     * @param value Direct or reactive text input.
+     * @returns The owning component for fluent chaining.
+     */
+    set(value) {
+      return super.set(value);
+    }
+    /**
+     * Shows or clears text content based on a boolean source.
+     * When visible, the latest text value is applied; when hidden, the text content is cleared.
+     * @param visible Boolean source controlling whether text is shown.
+     * @param value Direct or reactive text input.
+     * @returns The owning component for fluent chaining.
+     */
+    bind(visible, value) {
+      return super.bind(visible, value);
+    }
+    toSource(value) {
+      if (value instanceof State) {
+        return value;
+      }
+      return State.Readonly(value ?? null);
+    }
+    writeProperty(value) {
+      const text = String(value ?? "");
+      this.owner.clear();
+      this.owner.element.textContent = text;
+    }
+  };
+
   // src/component/Component.ts
-  var noop8 = () => {
+  var noop9 = () => {
   };
   var orphanedComponentErrorMessage = "Components must be connected to the document or have a managed owner before the next tick.";
   var recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
@@ -2645,8 +3003,6 @@ ${innerRules}
        * The underlying DOM element managed by this component.
        */
       __publicField(this, "element");
-      __publicField(this, "explicitOwner", null);
-      __publicField(this, "releaseExplicitOwner", noop8);
       __publicField(this, "structuralCleanups", /* @__PURE__ */ new Set());
       __publicField(this, "mounted", false);
       __publicField(this, "onBeforeMove", null);
@@ -2716,17 +3072,27 @@ ${innerRules}
       return manipulator;
     }
     /**
+     * Lazily creates and memoizes an OwnerManipulator for managing explicit owners.
+     */
+    get owner() {
+      this.ensureActive();
+      const manipulator = new OwnerManipulator(this, () => {
+        this.refreshOrphanCheck();
+      });
+      Object.defineProperty(this, "owner", {
+        configurable: true,
+        enumerable: true,
+        value: manipulator,
+        writable: false
+      });
+      return manipulator;
+    }
+    /**
      * Lazily creates and memoizes a TextManipulator for managing text content.
      */
     get text() {
       this.ensureActive();
-      const manipulator = new TextManipulator(this, (value) => {
-        this.releaseStructuralCleanups();
-        for (const childNode of Array.from(this.element.childNodes)) {
-          disposeManagedNode(childNode);
-        }
-        this.element.textContent = value;
-      });
+      const manipulator = new TextManipulator(this);
       Object.defineProperty(this, "text", {
         configurable: true,
         enumerable: true,
@@ -2912,7 +3278,7 @@ ${innerRules}
       return this;
     }
     attachConditionalSelectionState(visibleState, selectionState, options) {
-      const marker = Marker("kitsui:conditional-stateful").setOwner(this);
+      const marker = Marker("kitsui:conditional-stateful").owner.add(this);
       const storage = createStorageElement(this.element.ownerDocument);
       let active = true;
       let markerWasInserted = false;
@@ -3060,43 +3426,10 @@ ${innerRules}
       this.mounted = true;
       this.element.dispatchEvent(new CustomEvent("Mount"));
     }
-    /**
-     * Sets or clears the explicit owner of this component.
-     * When a component has an explicit owner, it is removed when the owner is disposed.
-     * This is independent of implicit ownership through DOM ancestry.
-     * @param owner - The owner component or state, or null to remove explicit ownership.
-     * @returns This component for chaining.
-     */
-    setOwner(owner) {
-      this.ensureActive();
-      if (this.explicitOwner === owner) {
-        return this;
-      }
-      this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop8;
-      this.explicitOwner = owner;
-      if (owner) {
-        this.releaseExplicitOwner = owner.onCleanup(() => {
-          this.remove();
-        });
-      }
-      this.refreshOrphanCheck();
-      return this;
-    }
-    /**
-     * Gets the current explicit owner of this component.
-     * @returns The owner component/state, or null if no explicit owner is set.
-     */
-    getOwner() {
-      return this.explicitOwner;
-    }
     beforeDispose() {
       this.element.dispatchEvent(new CustomEvent("Dispose"));
       this.clearOrphanCheck();
       this.releaseStructuralCleanups();
-      this.releaseExplicitOwner();
-      this.releaseExplicitOwner = noop8;
-      this.explicitOwner = null;
       if (getLiveComponent(this.element) === this) {
         elementComponents.delete(this.element);
       }
@@ -3107,7 +3440,7 @@ ${innerRules}
         if (node instanceof HTMLElement) {
           const component = getLiveComponent(node);
           if (component && !component.disposed) {
-            if (component.getOwner()) {
+            if (component.owner.get()) {
               return;
             }
             component.remove();
@@ -3158,7 +3491,7 @@ ${innerRules}
       if (this.element.isConnected) {
         return true;
       }
-      if (this.ownerResolves(this.explicitOwner)) {
+      if (this.owner.getAll().some((owner) => this.ownerResolves(owner))) {
         return true;
       }
       if (this.ownerResolves(hiddenManagedOwners.get(this) ?? null)) {
@@ -3226,7 +3559,7 @@ ${innerRules}
     }
     trackStructuralCleanup(cleanup) {
       let active = true;
-      let releaseOwnerCleanup = noop8;
+      let releaseOwnerCleanup = noop9;
       const trackedCleanup = () => {
         if (!active) {
           return;
@@ -3248,17 +3581,17 @@ ${innerRules}
     }
     attachConditionalNode(state2, node, options) {
       if (!node && node !== "") {
-        return noop8;
+        return noop9;
       }
       const resolvedNode = this.resolveNode(node);
-      const placeholder = Marker("kitsui:conditional").setOwner(this);
+      const placeholder = Marker("kitsui:conditional").owner.add(this);
       const storage = createStorageElement(this.element.ownerDocument);
       const childComponent = node instanceof _ComponentClass ? node : null;
       let active = true;
-      let releaseChildCleanup = noop8;
+      let releaseChildCleanup = noop9;
       let placeholderWasInserted = false;
       const setHiddenManagedOwner = (owner) => {
-        if (!childComponent || childComponent.getOwner() !== null) {
+        if (!childComponent || childComponent.owner.get() !== null) {
           return;
         }
         if (owner) {
@@ -3358,8 +3691,8 @@ ${innerRules}
         placeholder.remove();
         storage.remove();
         if (childComponent) {
-          const explicitOwner = childComponent.getOwner();
-          if (explicitOwner && explicitOwner !== this) {
+          const explicitOwners = childComponent.owner.getAll();
+          if (explicitOwners.some((owner) => owner !== this)) {
             childComponent.element.parentNode?.removeChild(childComponent.element);
             childComponent.refreshOrphanCheck();
             return;
@@ -3387,7 +3720,7 @@ ${innerRules}
       return cleanup;
     }
     attachStatefulChildren(state2, options) {
-      const marker = Marker("kitsui:stateful-child").setOwner(this);
+      const marker = Marker("kitsui:stateful-child").owner.add(this);
       const storage = createStorageElement(this.element.ownerDocument);
       let active = true;
       let renderedComponents = [];
@@ -3505,7 +3838,7 @@ ${innerRules}
   };
 
   // src/component/extensions/breakdownExtension.ts
-  var noop9 = () => {
+  var noop10 = () => {
   };
   var createOwnedState = State;
   var componentClass = null;
@@ -3528,7 +3861,7 @@ ${innerRules}
     if (!(component instanceof getComponentClass())) {
       throw new TypeError("Component.Breakdown part builders must return a Component.");
     }
-    if (component.getOwner() !== null) {
+    if (component.owner.get() !== null) {
       throw new Error("Component.Breakdown part builders must return an ownerless Component.");
     }
     if (component.element.parentNode !== null) {
@@ -3557,8 +3890,8 @@ ${innerRules}
       let latestValue = state2.value;
       let rendering = false;
       let rerenderQueued = false;
-      let releaseOwnerCleanup = noop9;
-      let releaseStateSubscription = noop9;
+      let releaseOwnerCleanup = noop10;
+      let releaseStateSubscription = noop10;
       const removePart = (key, record = parts.get(key)) => {
         if (!record || parts.get(key) !== record) {
           return;
@@ -3625,7 +3958,7 @@ ${innerRules}
                 partState?.dispose();
                 throw error;
               }
-              component.setOwner(owner);
+              component.owner.add(owner);
               const record = {
                 component,
                 state: partState
@@ -3667,7 +4000,7 @@ ${innerRules}
   }
 
   // src/component/extensions/placeExtension.ts
-  var noop10 = () => {
+  var noop11 = () => {
   };
   var PlacementLifecycleOwner = class extends Owner {
     // Uses Owner's default lifecycle hooks.
@@ -3738,7 +4071,7 @@ ${innerRules}
   function setPlacementController(component, cleanup) {
     clearPlacement(component);
     let active = true;
-    let releaseDisposeCleanup = noop10;
+    let releaseDisposeCleanup = noop11;
     const trackedCleanup = () => {
       if (!active) {
         return;
@@ -3839,7 +4172,7 @@ ${innerRules}
     if (!component) {
       return null;
     }
-    return component.getOwner() ?? placementOwners.get(component) ?? null;
+    return component.owner.get() ?? placementOwners.get(component) ?? null;
   }
   function resolvePlacementOwner(target, component) {
     if (!target) {
@@ -3849,7 +4182,7 @@ ${innerRules}
       return target === component ? resolveOwnPlacementOwner(component) : resolveOwnPlacementOwner(target);
     }
     if (target instanceof Marker) {
-      return target.getOwner() ?? resolveNearestWrappedAncestor(target.node) ?? null;
+      return target.owner.get() ?? resolveNearestWrappedAncestor(target.node) ?? null;
     }
     if (target instanceof PlaceClass) {
       return target.owner;
@@ -3904,19 +4237,34 @@ ${innerRules}
     const prototype = ComponentClass2.prototype;
     const markerPrototype = MarkerClass2.prototype;
     markerPrototype.appendTo = function appendTo(target) {
-      this.setOwner(resolvePlacementContainerOwner(target));
+      const resolvedOwner = resolvePlacementContainerOwner(target);
+      if (resolvedOwner) {
+        this.owner.add(resolvedOwner, "placement");
+      } else {
+        this.owner.remove("placement");
+      }
       const container = resolvePlacementContainer(target);
       placeMarker(this, container, null);
       return this;
     };
     markerPrototype.prependTo = function prependTo(target) {
-      this.setOwner(resolvePlacementContainerOwner(target));
+      const resolvedOwner = resolvePlacementContainerOwner(target);
+      if (resolvedOwner) {
+        this.owner.add(resolvedOwner, "placement");
+      } else {
+        this.owner.remove("placement");
+      }
       const container = resolvePlacementContainer(target);
       placeMarker(this, container, container.firstChild);
       return this;
     };
     markerPrototype.insertTo = function insertTo(where, target) {
-      this.setOwner(resolvePlacementOwner(target));
+      const resolvedOwner = resolvePlacementOwner(target);
+      if (resolvedOwner) {
+        this.owner.add(resolvedOwner, "placement");
+      } else {
+        this.owner.remove("placement");
+      }
       const referenceNode = resolvePlacementReferenceNode(target);
       if (!referenceNode) {
         return this;
@@ -3982,14 +4330,14 @@ ${innerRules}
       const storage = createStorageElement2(documentRef);
       const places = /* @__PURE__ */ new Set();
       const Place = function Place2() {
-        const place2 = new PlaceClass(placementOwner, Marker("kitsui:place").setOwner(placementOwner));
+        const place2 = new PlaceClass(placementOwner, Marker("kitsui:place").owner.add(placementOwner, "place"));
         places.add(place2);
         return place2;
       };
       Place.prototype = PlaceClass.prototype;
       const placeState = placer(Place);
-      let releaseOwnerCleanup = noop10;
-      let releaseStateCleanup = noop10;
+      let releaseOwnerCleanup = noop11;
+      let releaseStateCleanup = noop11;
       let blockedByRecursivePlacement = false;
       const cleanup = setPlacementController(this, () => {
         releaseOwnerCleanup();

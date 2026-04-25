@@ -386,8 +386,6 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * The underlying DOM element managed by this component.
      */
     readonly element: ELEMENT;
-    private explicitOwner;
-    private releaseExplicitOwner;
     private readonly structuralCleanups;
     private mounted;
     private onBeforeMove;
@@ -409,6 +407,10 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * Lazily creates and memoizes an AriaManipulator for managing ARIA attributes.
      */
     get aria(): AriaManipulator<this>;
+    /**
+     * Lazily creates and memoizes an OwnerManipulator for managing explicit owners.
+     */
+    get owner(): OwnerManipulator<this>;
     /**
      * Lazily creates and memoizes a TextManipulator for managing text content.
      */
@@ -498,19 +500,6 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
     remove(): void;
     /** @internal Dispatches the Mount event if this component has never been mounted. */
     dispatchMount(): void;
-    /**
-     * Sets or clears the explicit owner of this component.
-     * When a component has an explicit owner, it is removed when the owner is disposed.
-     * This is independent of implicit ownership through DOM ancestry.
-     * @param owner - The owner component or state, or null to remove explicit ownership.
-     * @returns This component for chaining.
-     */
-    setOwner(owner: Owner | null): this;
-    /**
-     * Gets the current explicit owner of this component.
-     * @returns The owner component/state, or null if no explicit owner is set.
-     */
-    getOwner(): Owner | null;
     protected beforeDispose(): void;
     protected afterDispose(): void;
     private ensureActive;
@@ -730,6 +719,90 @@ class PlaceClass {
 
 export type Place = PlaceClass;
 
+type Claimant = Owner | State<boolean>;
+
+export abstract class GenericClaimManipulator<OWNER extends Owner> {
+    protected readonly owner: OWNER;
+    private readonly anonymousClaims;
+    private readonly claimsByClaimant;
+    private readonly keyedClaims;
+    private activeClaimCount;
+    /**
+     * True while any registered claim is currently active.
+     * Subclasses can observe or bind this state through their own public API.
+     */
+    protected readonly hasClaim: State<boolean>;
+    constructor(owner: OWNER);
+    /**
+     * Registers a claim against this manipulator.
+     * A non-null id reserves a single slot, so later claims with the same id replace the previous claimant.
+     * A null id registers an anonymous claim that overlaps with any number of other anonymous claims.
+     * Owner claims stay active until that owner is cleaned up, and State claims stay active while their value is true.
+     * @param id Unique claim slot to replace, or null to register an overlapping anonymous claim.
+     * @param claim Owner or boolean state contributing the claim.
+     */
+    protected registerClaim(id: string | null, claim: Claimant): void;
+    /**
+     * Deregisters claims by claimant, by keyed id, or by the `(id, claimant)` composite used during registration.
+     * When `id` is null, the composite form removes all anonymous claims currently registered for that claimant.
+     * @param claimant Owner or boolean state whose claims should be removed.
+     */
+    protected deregisterClaim(claimant: Claimant): void;
+    /**
+     * Deregisters the currently registered keyed claim for the provided id.
+     * @param id Unique keyed claim id.
+     */
+    protected deregisterClaim(id: string): void;
+    /**
+     * Deregisters the claim matching the provided registration composite.
+     * @param id Unique claim slot, or null for anonymous claims.
+     * @param claimant Owner or boolean state contributing the claim.
+     */
+    protected deregisterClaim(id: string | null, claimant: Claimant): void;
+    private createClaimRecord;
+    private createOwnerClaimRecord;
+    private createStateClaimRecord;
+    private cleanupMatchingClaims;
+    private trackClaimant;
+    private untrackClaimant;
+    private setClaimActive;
+    private syncHasClaim;
+    private ensureActive;
+}
+
+export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT, SELECTION> {
+    protected readonly owner: OWNER;
+    private determiner;
+    constructor(owner: OWNER);
+    /**
+     * Sets the property from a direct value or subscribable source.
+     * @param value Direct or reactive property input.
+     * @returns The owning component for fluent chaining.
+     */
+    set(value: INPUT): OWNER;
+    /**
+     * Applies the property while visible and clears it while hidden.
+     * @param visible Boolean source controlling whether the property is shown.
+     * @param value Direct or reactive property input.
+     * @returns The owning component for fluent chaining.
+     */
+    bind(visible: State<boolean>, value: INPUT): OWNER;
+    /**
+     * Converts a public input value into the reactive source used by the determiner lifecycle.
+     * @param value Direct or reactive property input.
+     * @returns A subscribable source that yields concrete property selections.
+     */
+    protected abstract toSource(value: INPUT): State<SELECTION>;
+    /**
+     * Writes the current selection to the underlying component property.
+     * Undefined is used internally to clear the property when a binding is hidden or replaced.
+     * @param value Concrete property selection or undefined to clear the property.
+     */
+    protected abstract writeProperty(value: SELECTION | undefined): void;
+    private replaceDeterminer;
+    private ensureActive;
+}
+
 export interface MarkerEventMap {
     Mount: CustomEvent;
     Dispose: CustomEvent;
@@ -778,8 +851,6 @@ type MarkerConstructor = {
 class MarkerClass extends Owner {
     /** The underlying DOM comment node that this marker wraps. */
     readonly node: Comment;
-    private explicitOwner;
-    private releaseExplicitOwner;
     private mounted;
     private orphanCheckId;
     /**
@@ -789,16 +860,10 @@ class MarkerClass extends Owner {
     constructor(id: string);
     /** Lazily creates the marker's event manipulator for mount and dispose lifecycle events. */
     get event(): EventManipulator<this, "marker", MarkerEventMap>;
+    /** Lazily creates and memoizes an OwnerManipulator for managing explicit owners. */
+    get owner(): OwnerManipulator<this>;
     /** Disposes the marker and removes its comment node from the DOM. */
     remove(): void;
-    /**
-     * Assigns or clears the explicit owner responsible for disposing this marker.
-     * @param owner The owner to bind to this marker, or `null` to clear explicit ownership.
-     * @returns This marker for chaining.
-     */
-    setOwner(owner: Owner | null): this;
-    /** Returns the marker's current explicit owner, if one has been assigned. */
-    getOwner(): Owner | null;
     /**
      * Registers mount and optional dispose hooks tied to this marker's lifecycle events.
      * @param onMount Called when the marker mounts. May return a cleanup function.
@@ -823,6 +888,60 @@ interface MarkerClass extends MarkerExtensions {
 export type Marker = MarkerClass;
 
 export const Marker: MarkerConstructor & MarkerStaticExtensions;
+
+export class OwnerManipulator<HOST extends Owner & {
+    remove(): void;
+}> extends GenericClaimManipulator<HOST> {
+    private readonly refreshManagement;
+    private readonly anonymousEntries;
+    private readonly entriesByOwner;
+    private readonly keyedEntries;
+    constructor(owner: HOST, refreshManagement: () => void);
+    /**
+     * Adds an explicit owner claim to the host.
+     * A non-null id replaces any previous claim registered in the same slot.
+     * Anonymous claims are deduplicated by owner.
+     * @param owner Explicit owner to register.
+     * @param id Optional keyed claim slot.
+     * @returns The owning host for fluent chaining.
+     */
+    add(owner: Owner, id?: string | null): HOST;
+    /**
+     * Removes explicit owner claims by owner, by keyed id, or by the `(id, owner)` composite.
+     * @param owner Explicit owner whose claims should be removed.
+     * @returns The owning host for fluent chaining.
+     */
+    remove(owner: Owner): HOST;
+    /**
+     * Removes the explicit owner claim registered for a keyed id.
+     * @param id Keyed claim slot to clear.
+     * @returns The owning host for fluent chaining.
+     */
+    remove(id: string): HOST;
+    /**
+     * Removes the explicit owner claim matching the provided composite.
+     * When `id` is null, this removes the anonymous claim for that owner if present.
+     * @param id Keyed claim slot, or null for the anonymous owner slot.
+     * @param owner Explicit owner that registered the claim.
+     * @returns The owning host for fluent chaining.
+     */
+    remove(id: string | null, owner: Owner): HOST;
+    /**
+     * Returns one explicit owner if any are registered.
+     * When multiple owners are present, which owner is returned is not guaranteed.
+     * @returns One explicit owner or null when no owners are registered.
+     */
+    get(): Owner | null;
+    /**
+     * Returns every currently registered explicit owner without duplicates.
+     * @returns All explicit owners currently managing the host.
+     */
+    getAll(): Owner[];
+    private clearEntries;
+    private trackEntry;
+    private untrackEntry;
+    private unregisterEntry;
+}
 
 export type StyleValue = string | number;
 
@@ -1022,11 +1141,7 @@ type ReactiveTextSelection = Exclude<TextSelection, undefined>;
 
 export type TextInput = TextSelection | State<ReactiveTextSelection>;
 
-export class TextManipulator<OWNER extends Component> {
-    private readonly owner;
-    private readonly writeText;
-    private determiner;
-    constructor(owner: OWNER, writeText: (value: string) => void);
+export class TextManipulator<OWNER extends Component> extends GenericPropertyManipulator<OWNER, TextInput, ReactiveTextSelection> {
     /**
      * Sets the element's text content from a direct value or subscribable source.
      * Nullish values clear the text content.
@@ -1042,8 +1157,8 @@ export class TextManipulator<OWNER extends Component> {
      * @returns The owning component for fluent chaining.
      */
     bind(visible: State<boolean>, value: TextInput): OWNER;
-    private replaceDeterminer;
-    private ensureActive;
+    protected toSource(value: TextInput): State<ReactiveTextSelection>;
+    protected writeProperty(value: ReactiveTextSelection | undefined): void;
 }
 
 type Nullish = null;
