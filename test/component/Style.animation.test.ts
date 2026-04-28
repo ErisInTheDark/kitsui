@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { Style, StyleAnimation, elements, mountStylesheet, type StyleDefinition, unmountStylesheet, whenHover } from "../../src/component/Style";
+import { Style, StyleAnimation, elements, mountStylesheet, unmountStylesheet, whenHover, type StyleDefinition } from "../../src/component/Style";
 import placeExtension from "../../src/component/extensions/placeExtension";
 
 placeExtension();
@@ -41,6 +41,25 @@ describe("StyleAnimation", () => {
 		expect(styleText).toContain("from { opacity: 0 }");
 		expect(styleText).toContain("to { opacity: 1 }");
 		expect(styleText).toContain(`.style-animation-class { animation-duration: 1s; animation-name: ${fade.name} }`);
+	});
+
+	/** Verifies keyframe bodies use the shared declaration serializer without reordering properties. */
+	it("preserves keyframe declaration order in serialized bodies", () => {
+		const fade = StyleAnimation("style-animation-order", {
+			from: {
+				borderRadius: "8px",
+				backgroundColor: "#fff",
+			},
+		});
+
+		Style.Class("style-animation-order-class", {
+			animationDuration: "1s",
+			animationName: [fade],
+		});
+
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(styleText, "keyframe declaration bodies should preserve the original property order").toContain(`from { border-radius: 8px; background-color: #fff }`);
 	});
 
 	it("serializes multiple animation markers in animationName", () => {

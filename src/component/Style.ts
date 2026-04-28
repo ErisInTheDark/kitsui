@@ -85,7 +85,6 @@ function serializeStylePropertyValue (propertyName: string, value: StyleValue | 
 function serializeDeclarationBody (definition: StyleDefinition): string {
 	return Object.entries(definition)
 		.filter((entry): entry is [string, StyleValue | readonly AnimationMarker[]] => entry[1] !== undefined && entry[1] !== null && !isNestedDefinition(entry[0], entry[1]))
-		.sort(([left], [right]) => left.localeCompare(right))
 		.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`)
 		.join("; ");
 }
@@ -169,7 +168,6 @@ function serializeRules (selector: string, definition: StyleDefinition): string[
 
 	if (ownProperties.length > 0) {
 		const body = ownProperties
-			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`)
 			.join("; ");
 		rules.unshift(`${selector} { ${body} }`);
@@ -575,7 +573,7 @@ export type FontFaceDefinition = StyleDefinition & {
  *   fontStyle: "normal",
  *   fontDisplay: "swap",
  * });
- * // Generates: @font-face { font-display: swap; font-family: 'Inter'; font-style: normal; font-weight: 400; src: url(...) format('woff2') }
+ * // Generates: @font-face { font-family: 'Inter'; src: url(...) format('woff2'); font-weight: 400; font-style: normal; font-display: swap }
  */
 export const StyleFontFace = Marker.builder<[definition: FontFaceDefinition]>({
 	id (definition) {
@@ -584,7 +582,6 @@ export const StyleFontFace = Marker.builder<[definition: FontFaceDefinition]>({
 	build (marker, definition) {
 		const properties = Object.entries(definition)
 			.filter((entry): entry is [string, StyleValue] => entry[1] !== undefined && entry[1] !== null)
-			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`)
 			.join("; ");
 		const rule = `@font-face { ${properties} }`;

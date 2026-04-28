@@ -16,7 +16,7 @@ describe("Style", () => {
 		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
 
 		expect(style.className).toBe("style-spread-fragment");
-		expect(styleText).toContain(".style-spread-fragment { color: red; display: flex; gap: 8px }");
+		expect(styleText).toContain(".style-spread-fragment { display: flex; gap: 8px; color: red }");
 	});
 
 	it("can be constructed with or without new", () => {
@@ -28,11 +28,11 @@ describe("Style", () => {
 	});
 
 	it("registers CSS immediately when created", () => {
-		const style = Style.Class("card-box", { backgroundColor: "#fff", borderRadius: "8px" });
+		const style = Style.Class("card-box", { borderRadius: "8px", backgroundColor: "#fff" });
 		const styleElement = document.querySelector("style[data-kitsui-styles='true']");
 
 		expect(style.className).toBe("card-box");
-		expect(styleElement?.textContent).toContain(".card-box { background-color: #fff; border-radius: 8px }");
+		expect(styleElement?.textContent).toContain(".card-box { border-radius: 8px; background-color: #fff }");
 	});
 
 	it("serializes custom property names and variable shorthand values", () => {
@@ -168,19 +168,20 @@ describe("Style", () => {
 		expect(styleText, "pseudo-after should render a `::after` rule").toContain(".style-pseudo-elements::after { content: '' }");
 	});
 
-	/** Verifies nested element selectors can themselves contain nested element selectors. */
+	/** Verifies nested element selectors can themselves contain nested element selectors in declaration order. */
 	it("renders recursive nested element selectors", () => {
 		Style.Class("style-recursive-nesting", {
 			...elements("pre", {
+				color: "#eee",
 				background: "#111",
-				...elements("code", { background: "none" }),
+				...elements("code", { marginTop: "1rem", background: "none" }),
 			}),
 		});
 
 		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
 
-		expect(styleText, "the outer nested element rule should render").toContain(".style-recursive-nesting pre { background: #111 }");
-		expect(styleText, "the inner nested element rule should render after the outer selector").toContain(".style-recursive-nesting pre code { background: none }");
+		expect(styleText, "the outer nested element rule should preserve declaration order").toContain(".style-recursive-nesting pre { color: #eee; background: #111 }");
+		expect(styleText, "the inner nested element rule should preserve declaration order").toContain(".style-recursive-nesting pre code { margin-top: 1rem; background: none }");
 	});
 
 	/** Verifies state helpers can be nested inside element selectors. */
@@ -266,7 +267,7 @@ describe("Style", () => {
 		expect(styleText, "basic font-face rules should include the family name and source descriptor").toContain("@font-face { font-family: 'TestFont'; src: url(test.woff2) format('woff2') }");
 	});
 
-	/** Verifies optional font-face descriptors are serialized alongside the required fields. */
+	/** Verifies optional font-face descriptors preserve object declaration order alongside the required fields. */
 	it("renders font-face rules with all properties", () => {
 		StyleFontFace({
 			fontFamily: "'TestFont2'",
@@ -278,7 +279,7 @@ describe("Style", () => {
 
 		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
 
-		expect(styleText, "font-face rules should serialize all provided descriptors in CSS property order").toContain("@font-face { font-display: swap; font-family: 'TestFont2'; font-style: normal; font-weight: 700; src: url(test2.woff2) }");
+		expect(styleText, "font-face rules should serialize all provided descriptors in declaration order").toContain("@font-face { font-family: 'TestFont2'; src: url(test2.woff2); font-weight: 700; font-style: normal; font-display: swap }");
 	});
 
 	/** Verifies reset rules, font-face rules, and class rules keep their stylesheet order. */
