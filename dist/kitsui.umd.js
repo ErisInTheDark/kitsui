@@ -240,6 +240,12 @@ var __kitsui_factory__ = (() => {
   function getEqualityFunction(state2) {
     return state2["equalityFunction"];
   }
+  function getFixFunction(state2) {
+    return state2["fixFunction"];
+  }
+  function fixStateValue(fix, value) {
+    return fix(value) ?? value;
+  }
   function getImmediateListeners(state2) {
     return state2["immediateListeners"];
   }
@@ -258,6 +264,8 @@ var __kitsui_factory__ = (() => {
       __publicField(this, "currentValue");
       /** @deprecated Use getEqualityFunction(this) */
       __publicField(this, "equalityFunction");
+      /** @deprecated Use getFixFunction(this) */
+      __publicField(this, "fixFunction");
       __publicField(this, "graph");
       /** @deprecated Use getImmediateListeners(this) */
       __publicField(this, "immediateListeners", /* @__PURE__ */ new Set());
@@ -265,7 +273,8 @@ var __kitsui_factory__ = (() => {
       __publicField(this, "queuedListeners", /* @__PURE__ */ new Set());
       assertDefinedStateValue(initialValue);
       this.owner = owner;
-      this.currentValue = initialValue;
+      this.fixFunction = options.fix ?? ident;
+      this.currentValue = fixStateValue(this.fixFunction, initialValue);
       this.equalityFunction = options.equals ?? Object.is;
       this.graph = options.graph ?? createStateGraph();
       if (owner) {
@@ -308,10 +317,11 @@ var __kitsui_factory__ = (() => {
     set(nextValue) {
       this.ensureActive();
       assertDefinedStateValue(nextValue);
-      if (getEqualityFunction(this)(this.currentValue, nextValue)) {
+      const fixedValue = fixStateValue(getFixFunction(this), nextValue);
+      if (getEqualityFunction(this)(this.currentValue, fixedValue)) {
         return this.currentValue;
       }
-      return this.commit(nextValue, false);
+      return this.commit(fixedValue, false);
     }
     commit(nextValue, forceNotify) {
       const previousValue = this.currentValue;
@@ -354,7 +364,7 @@ var __kitsui_factory__ = (() => {
     }
     /**
      * Updates the state by applying a function to the current value.
-     * Returning `undefined` keeps the current value but still emits the update to listeners.
+     * Returning `undefined` keeps the current value, which is still passed through `fix()` and emitted to listeners.
      * Unlike {@link set}, `update` always notifies listeners, even when the effective value is unchanged.
      * @param updater Function that transforms the current value to a new value.
      * @returns The stored state value after the update.
@@ -363,7 +373,7 @@ var __kitsui_factory__ = (() => {
     update(updater) {
       this.ensureActive();
       const nextValue = updater(this.currentValue);
-      return this.commit(nextValue === void 0 ? this.currentValue : nextValue, true);
+      return this.commit(fixStateValue(getFixFunction(this), nextValue === void 0 ? this.currentValue : nextValue), true);
     }
     /**
      * Sets a new equality function for comparing state values.
@@ -4412,9 +4422,9 @@ ${innerRules}
       value: mapper ? mapper(snapshot, oldValue) : snapshot
     };
   }
-  function createGroupedState(owner, states, mapper) {
+  function createGroupedState(owner, states, mapper, options) {
     const initialGroup = readGroupSnapshot(states, mapper, void 0);
-    const grouped = createOwnedState2(owner, initialGroup.value);
+    const grouped = createOwnedState2(owner, initialGroup.value, options);
     const releaseSubscriptions = [];
     let active = true;
     let queued = false;
@@ -4457,14 +4467,16 @@ ${innerRules}
     }
     patched3 = true;
     const StateWithGroup = State;
-    const Group = function Group2(owner, states, mapper) {
+    const Group = function Group2(owner, states, mapperOrOptions, maybeOptions) {
       if (!(owner instanceof Owner)) {
         throw new TypeError("State.Group requires an Owner as the first argument.");
       }
       if (typeof states !== "object" || states === null) {
         throw new TypeError("State.Group requires a states object as the second argument.");
       }
-      return createGroupedState(owner, states, mapper);
+      const mapper = typeof mapperOrOptions === "function" ? mapperOrOptions : void 0;
+      const options = typeof mapperOrOptions === "function" ? maybeOptions : mapperOrOptions;
+      return createGroupedState(owner, states, mapper, options);
     };
     StateWithGroup.Group = Group;
   }
@@ -4475,11 +4487,12 @@ ${innerRules}
   var createOwnedState3 = State;
   var createOwnerlessState = State;
   var patched4 = false;
-  function createMappedState(source, owner, mapValue) {
-    const graphOption = {
+  function createMappedState(source, owner, mapValue, options) {
+    const stateOptions = {
+      ...options,
       graph: source.getGraph()
     };
-    const mapped = owner ? createOwnedState3(owner, mapValue(source.value), graphOption) : createOwnerlessState(mapValue(source.value), graphOption);
+    const mapped = owner ? createOwnedState3(owner, mapValue(source.value), stateOptions) : createOwnerlessState(mapValue(source.value), stateOptions);
     const releaseImplicitOwnerPropagation = mapped._registerImplicitOwnerDependent?.(source) ?? (() => void 0);
     const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
       mapped.set(mapValue(value, oldValue));
@@ -4504,11 +4517,11 @@ ${innerRules}
     patched4 = true;
     const StateClass2 = State.extend();
     const prototype = StateClass2.prototype;
-    prototype.map = function map(ownerOrMapValue, maybeMapValue) {
+    prototype.map = function map(ownerOrMapValue, maybeMapValueOrOptions, maybeOptions) {
       if (ownerOrMapValue instanceof Owner) {
-        return createMappedState(this, ownerOrMapValue, maybeMapValue);
+        return createMappedState(this, ownerOrMapValue, maybeMapValueOrOptions, maybeOptions);
       }
-      return createMappedState(this, null, ownerOrMapValue);
+      return createMappedState(this, null, ownerOrMapValue, maybeMapValueOrOptions);
     };
     Object.defineProperty(prototype, "truthy", {
       configurable: true,
@@ -4534,13 +4547,13 @@ ${innerRules}
         return mapped;
       }
     });
-    prototype.or = function or(getValue) {
+    prototype.or = function or(getValue, options) {
       return createMappedState(this, this, (value) => {
         if (value === null) {
           return getValue();
         }
         return value;
-      });
+      }, options);
     };
     prototype.equals = function equals(compareValue) {
       return createMappedState(this, this, (value) => value === compareValue);

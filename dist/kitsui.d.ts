@@ -1179,17 +1179,19 @@ export interface StateExtensions<T> {
          * The mapped state subscribes to changes in the source and automatically updates.
          * The mapped state must gain an owner before the next tick.
          * @param mapValue Function that transforms each value from the source state.
+         * @param options Optional state configuration for the mapped state.
          * @returns A new ownerless state with the transformed values.
          */
-        map<TMapped>(mapValue: Mapper<T, TMapped>): RecomputableState<TMapped>;
+        map<TMapped>(mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
         /**
          * Creates a new state containing the mapped value of this state.
          * The mapped state subscribes to changes in the source and automatically updates.
          * @param owner The owner responsible for managing the mapped state's lifecycle.
          * @param mapValue Function that transforms each value from the source state.
+         * @param options Optional state configuration for the mapped state.
          * @returns A new state with the transformed values.
          */
-        map<TMapped>(owner: Owner, mapValue: Mapper<T, TMapped>): RecomputableState<TMapped>;
+        map<TMapped>(owner: Owner, mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
         /**
          * A boolean state indicating whether the current value is truthy.
          * The value is memoized per state instance for efficiency.
@@ -1204,9 +1206,10 @@ export interface StateExtensions<T> {
          * Returns a state that falls back to a computed value when this state is null.
          * Otherwise, returns the original value.
          * @param getValue Function invoked to compute the fallback value when needed.
+         * @param options Optional state configuration for the derived state.
          * @returns A new state with the original or fallback value.
          */
-        or<TFallback>(getValue: () => TFallback): RecomputableState<Exclude<T, Nullish> | TFallback>;
+        or<TFallback>(getValue: () => TFallback, options?: StateOptions<Exclude<T, Nullish> | TFallback>): RecomputableState<Exclude<T, Nullish> | TFallback>;
         /**
          * Returns a boolean state that is true when this state equals the provided value.
          * Uses strict equality (===) for comparison.
@@ -1226,6 +1229,8 @@ type WidenStateValue<T> = [T] extends [string] ? string : [T] extends [number] ?
 
 export type StateEqualityFunction<T> = (currentValue: T, nextValue: T) => boolean;
 
+type StateFixFunction<T> = (value: T) => T | void;
+
 export type StateListener<T> = (value: T, previousValue: T) => void;
 
 export type StateUpdater<T> = (currentValue: T) => T | void;
@@ -1236,6 +1241,13 @@ export interface StateOptions<T> {
      * Defaults to `Object.is` if not provided.
      */
     equals?: StateEqualityFunction<T>;
+    /**
+     * Adjusts candidate state values after construction, `set()`, or `update()` resolves them.
+     * Runs before equality checks, storage, and listener emission.
+     *
+     * Like a state updater, it can return a replacement value or `undefined` to keep the candidate value.
+     */
+    fix?: StateFixFunction<T>;
 }
 
 interface StateExtensions<T> {
@@ -1313,6 +1325,8 @@ class StateClass<T> extends Owner {
     private currentValue;
     /** @deprecated Use getEqualityFunction(this) */
     private equalityFunction;
+    /** @deprecated Use getFixFunction(this) */
+    private fixFunction;
     private readonly graph;
     /** @deprecated Use getImmediateListeners(this) */
     private readonly immediateListeners;
@@ -1353,7 +1367,7 @@ class StateClass<T> extends Owner {
     clear(nextValue: T): T;
     /**
      * Updates the state by applying a function to the current value.
-     * Returning `undefined` keeps the current value but still emits the update to listeners.
+     * Returning `undefined` keeps the current value, which is still passed through `fix()` and emitted to listeners.
      * Unlike {@link set}, `update` always notifies listeners, even when the effective value is unchanged.
      * @param updater Function that transforms the current value to a new value.
      * @returns The stored state value after the update.
@@ -1500,9 +1514,10 @@ type GroupConstructor = {
      *
      * @param owner The owner that manages the grouped state's lifecycle.
      * @param states A record of source states to group.
+     * @param options Optional state configuration for the grouped state.
      * @returns A state whose value is an object with the current value of each source state.
      */
-    <T extends GroupedStateObject>(owner: Owner, states: T): State<GroupedValue<T>>;
+    <T extends GroupedStateObject>(owner: Owner, states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
     /**
      * Creates a grouped state that mirrors the current values of multiple states.
      *
@@ -1511,9 +1526,10 @@ type GroupConstructor = {
      *
      * @param owner The owner that manages the grouped state's lifecycle.
      * @param states A record of source states to group.
+     * @param options Optional state configuration for the grouped state.
      * @returns A state whose value is an object with the current value of each source state.
      */
-    new <T extends GroupedStateObject>(owner: Owner, states: T): State<GroupedValue<T>>;
+    new <T extends GroupedStateObject>(owner: Owner, states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
     /**
      * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
      *
@@ -1523,9 +1539,10 @@ type GroupConstructor = {
      * @param owner The owner that manages the grouped state's lifecycle.
      * @param states A record of source states to group.
      * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @param options Optional state configuration for the grouped state.
      * @returns A state whose value is the mapper result for the current grouped snapshot.
      */
-    <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
+    <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
     /**
      * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
      *
@@ -1535,9 +1552,10 @@ type GroupConstructor = {
      * @param owner The owner that manages the grouped state's lifecycle.
      * @param states A record of source states to group.
      * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @param options Optional state configuration for the grouped state.
      * @returns A state whose value is the mapper result for the current grouped snapshot.
      */
-    new <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
+    new <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
 };
 
 export interface StateStaticExtensions {
