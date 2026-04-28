@@ -2051,7 +2051,7 @@ var __kitsui_factory__ = (() => {
     return String(expandVariableAccessShorthand(value));
   }
   function serializeDeclarationBody(definition) {
-    return Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null && !isNestedDefinition(entry[0], entry[1])).sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`).join("; ");
+    return Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null && !isNestedDefinition(entry[0], entry[1])).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`).join("; ");
   }
   function serializeKeyframesRule(name, definition) {
     const keyframes = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).map(([keyframeName, keyframeDefinition]) => `${keyframeName} { ${serializeDeclarationBody(keyframeDefinition)} }`).join("\n");
@@ -2113,7 +2113,7 @@ ${innerRules}
       ownProperties.push([key, value]);
     }
     if (ownProperties.length > 0) {
-      const body = ownProperties.sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`).join("; ");
+      const body = ownProperties.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`).join("; ");
       rules.unshift(`${selector} { ${body} }`);
     }
     return rules;
@@ -2315,7 +2315,7 @@ ${innerRules}
       return `kitsui:font-face-${markerIdCounter++}`;
     },
     build(marker, definition) {
-      const properties = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).sort(([left], [right]) => left.localeCompare(right)).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`).join("; ");
+      const properties = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`).join("; ");
       const rule = `@font-face { ${properties} }`;
       fontFaceRules.push(rule);
       renderStyleSheet();
