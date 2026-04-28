@@ -27,12 +27,40 @@ type GroupConstructor = {
 	 * The grouped state subscribes to all input states and coalesces source updates
 	 * into a single next-tick grouped update per tick.
 	 *
+	 * When called without an owner, the grouped state must gain an implicit or explicit
+	 * owner before the next tick.
+	 *
+	 * @param states A record of source states to group.
+	 * @param options Optional state configuration for the grouped state.
+	 * @returns A state whose value is an object with the current value of each source state.
+	 */
+	<T extends GroupedStateObject> (states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
 	 * @param options Optional state configuration for the grouped state.
 	 * @returns A state whose value is an object with the current value of each source state.
 	 */
 	new <T extends GroupedStateObject> (owner: Owner, states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
+	 * When called without an owner, the grouped state must gain an implicit or explicit
+	 * owner before the next tick.
+	 *
+	 * @param states A record of source states to group.
+	 * @param options Optional state configuration for the grouped state.
+	 * @returns A state whose value is an object with the current value of each source state.
+	 */
+	new <T extends GroupedStateObject> (states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
 	 *
@@ -52,6 +80,21 @@ type GroupConstructor = {
 	 * The grouped state subscribes to all input states and coalesces source updates
 	 * into a single next-tick grouped update per tick.
 	 *
+	 * When called without an owner, the grouped state must gain an implicit or explicit
+	 * owner before the next tick.
+	 *
+	 * @param states A record of source states to group.
+	 * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+	 * @param options Optional state configuration for the grouped state.
+	 * @returns A state whose value is the mapper result for the current grouped snapshot.
+	 */
+	<T extends GroupedStateObject, U> (states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
 	 * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
@@ -59,6 +102,21 @@ type GroupConstructor = {
 	 * @returns A state whose value is the mapper result for the current grouped snapshot.
 	 */
 	new <T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
+	/**
+	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+	 *
+	 * The grouped state subscribes to all input states and coalesces source updates
+	 * into a single next-tick grouped update per tick.
+	 *
+	 * When called without an owner, the grouped state must gain an implicit or explicit
+	 * owner before the next tick.
+	 *
+	 * @param states A record of source states to group.
+	 * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+	 * @param options Optional state configuration for the grouped state.
+	 * @returns A state whose value is the mapper result for the current grouped snapshot.
+	 */
+	new <T extends GroupedStateObject, U> (states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
 };
 
 declare module "../State" {
@@ -78,7 +136,10 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
-const createOwnedState = State as unknown as <T>(owner: Owner, initialValue: T, options?: StateOptions<T>) => State<T>;
+const createState = State as unknown as {
+	<T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
+	<T>(initialValue: T, options?: StateOptions<T>): State<T>;
+};
 
 let patched = false;
 
@@ -119,13 +180,15 @@ function readGroupSnapshot<T extends GroupedStateObject, U> (states: T, mapper: 
 }
 
 function createGroupedState<T extends GroupedStateObject, U> (
-	owner: Owner,
+	owner: Owner | null,
 	states: T,
 	mapper: Mapper<GroupedValue<T>, U> | undefined,
 	options?: StateOptions<GroupedValue<T> | U>,
 ): State<U> {
 	const initialGroup = readGroupSnapshot(states, mapper, undefined);
-	const grouped = createOwnedState(owner, initialGroup.value, options as StateOptions<typeof initialGroup.value> | undefined);
+	const grouped = owner
+		? createState(owner, initialGroup.value, options as StateOptions<typeof initialGroup.value> | undefined)
+		: createState(initialGroup.value, options as StateOptions<typeof initialGroup.value> | undefined);
 	const releaseSubscriptions: CleanupFunction[] = [];
 	let active = true;
 	let queued = false;
@@ -187,25 +250,32 @@ export default function groupExtension (): void {
 
 	const StateWithGroup = State as typeof State & StateStaticExtensions;
 	const Group = function Group<T extends GroupedStateObject, U> (
-		owner: Owner,
-		states: T,
+		ownerOrStates: Owner | T,
+		statesOrMapperOrOptions?: T | Mapper<GroupedValue<T>, U> | StateOptions<GroupedValue<T>>,
 		mapperOrOptions?: Mapper<GroupedValue<T>, U> | StateOptions<GroupedValue<T>>,
 		maybeOptions?: StateOptions<U>,
 	): State<U> {
-		if (!(owner instanceof Owner)) {
-			throw new TypeError("State.Group requires an Owner as the first argument.");
-		}
+		const owner = ownerOrStates instanceof Owner && arguments.length >= 2 ? ownerOrStates : null;
+		const states = owner === null
+			? ownerOrStates as T
+			: statesOrMapperOrOptions as T;
+		const mapperOrStateOptions = owner === null
+			? statesOrMapperOrOptions as Mapper<GroupedValue<T>, U> | StateOptions<GroupedValue<T>> | undefined
+			: mapperOrOptions;
+		const optionsCandidate = owner === null
+			? maybeOptions ?? mapperOrOptions as StateOptions<U> | undefined
+			: maybeOptions;
 
 		if (typeof states !== "object" || states === null) {
-			throw new TypeError("State.Group requires a states object as the second argument.");
+			throw new TypeError("State.Group requires a states object.");
 		}
 
-		const mapper = typeof mapperOrOptions === "function"
-			? mapperOrOptions as Mapper<GroupedValue<T>, U>
+		const mapper = typeof mapperOrStateOptions === "function"
+			? mapperOrStateOptions as Mapper<GroupedValue<T>, U>
 			: undefined;
-		const options = (typeof mapperOrOptions === "function"
-			? maybeOptions
-			: mapperOrOptions) as StateOptions<GroupedValue<T> | U> | undefined;
+		const options = (typeof mapperOrStateOptions === "function"
+			? optionsCandidate
+			: mapperOrStateOptions) as StateOptions<GroupedValue<T> | U> | undefined;
 
 		return createGroupedState(owner, states, mapper, options);
 	} as GroupConstructor;

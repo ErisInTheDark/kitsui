@@ -1232,7 +1232,7 @@ describe("State", () => {
 	});
 
 	/** Verifies ownerless construction preserves the value, reports no owner, and schedules orphan validation through Promise.then. */
-	it("can be constructed without an owner", () => {
+	it("can be constructed without an owner with State.Group", () => {
 		const orphanCheckSpy = captureOrphanCheck();
 
 		try {
@@ -1283,6 +1283,114 @@ describe("State", () => {
 			owner.remove();
 		}
 		finally {
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies ownerless State.Group preserves grouped values, reports no owner, and schedules an orphan check. */
+	it("can be constructed without an owner", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+		const sourceOwner = mountedOwner();
+
+		try {
+			const count = State(sourceOwner, 1);
+			const label = State(sourceOwner, "one");
+			const ownerlessGroup = State.Group as any;
+			const grouped = ownerlessGroup({ count, label });
+
+			expect(grouped.value, "ownerless State.Group should preserve the grouped snapshot").toEqual({
+				count: 1,
+				label: "one",
+			});
+			expect(grouped.getOwner(), "ownerless State.Group should report a null owner").toBeNull();
+			expect(orphanCheckSpy.timeoutHandler, "ownerless State.Group should still arm a timeout-backed tick").toBeTypeOf("function");
+			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group should schedule the orphan check through Promise.then").not.toBeNull();
+		}
+		finally {
+			sourceOwner.remove();
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies ownerless State.Group throws if it still has no owner on the next tick. */
+	it("throws when ownerless State.Group has no owner by next tick", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+		const sourceOwner = mountedOwner();
+
+		try {
+			const count = State(sourceOwner, 1);
+			const label = State(sourceOwner, "one");
+			const ownerlessGroup = State.Group as any;
+
+			ownerlessGroup({ count, label });
+
+			expect(orphanCheckSpy.timeoutHandler, "ownerless State.Group should still arm a timeout-backed tick").toBeTypeOf("function");
+			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group should register the orphan check through Promise.then").not.toBeNull();
+			expect(() => orphanCheckSpy.orphanCheck!(), "ownerless State.Group should defer its uncaught rethrow").not.toThrow();
+			expect(orphanCheckSpy.queuedError, "ownerless State.Group should queue an uncaught rethrow").toBeTypeOf("function");
+			expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the orphan error").toThrowError("States must have an owner before the next tick.");
+		}
+		finally {
+			sourceOwner.remove();
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies ownerless State.Group mapper overload throws the same orphan error if it still has no owner on the next tick. */
+	it("throws the same orphan error when ownerless State.Group mapper overload has no owner by next tick", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+		const sourceOwner = mountedOwner();
+
+		try {
+			const count = State(sourceOwner, 1);
+			const label = State(sourceOwner, "one");
+			const ownerlessGroup = State.Group as any;
+
+			ownerlessGroup(
+				{ count, label },
+				({ count: currentCount, label: currentLabel }: { count: number; label: string }) => `${currentLabel}:${currentCount}`,
+			);
+
+			expect(orphanCheckSpy.timeoutHandler, "ownerless State.Group should still arm a timeout-backed tick").toBeTypeOf("function");
+			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group mapper overload should register the orphan check through Promise.then").not.toBeNull();
+			expect(() => orphanCheckSpy.orphanCheck!(), "ownerless State.Group mapper overload should defer its uncaught rethrow").not.toThrow();
+			expect(orphanCheckSpy.queuedError, "ownerless State.Group mapper overload should queue an uncaught rethrow").toBeTypeOf("function");
+			expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the same orphan error as the non-mapper overload").toThrowError("States must have an owner before the next tick.");
+		}
+		finally {
+			sourceOwner.remove();
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies ownerless State.Group mapper overload can gain an implicit owner before the next tick. */
+	it("does not throw when ownerless State.Group gains an implicit owner before next tick", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+		const sourceOwner = mountedOwner();
+		const owner = mountedOwner();
+
+		try {
+			const count = State(sourceOwner, 1);
+			const label = State(sourceOwner, "one");
+			const ownerlessGroup = State.Group as any;
+			const grouped = ownerlessGroup(
+				{ count, label },
+				({ count: currentCount, label: currentLabel }: { count: number; label: string }) => `${currentLabel}:${currentCount}`,
+			);
+
+			expect(grouped.value, "ownerless State.Group mapper overload should derive the grouped value").toBe("one:1");
+			expect(grouped.getOwner(), "ownerless State.Group should start without an owner").toBeNull();
+
+			grouped.subscribe(owner, () => undefined);
+
+			expect(grouped.getOwner(), "a subscribing Component should become the grouped state's implicit owner").toBe(owner);
+			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group should schedule an orphan check before gaining an owner").not.toBeNull();
+			expect(() => orphanCheckSpy.orphanCheck!(), "the orphan check should not throw after an implicit owner is assigned").not.toThrow();
+			expect(orphanCheckSpy.queuedError, "the orphan check should not queue an error after ownership is assigned").toBeNull();
+		}
+		finally {
+			owner.remove();
+			sourceOwner.remove();
 			orphanCheckSpy.restore();
 		}
 	});
