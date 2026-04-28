@@ -17,6 +17,7 @@ Your workflow is as follows, in order, NEVER skipping any steps unless explicitl
 5. Still in this same turn, you will now completely implement the plan. 
   - If this task is a bug or polish issue: Start by using the Test Infra subagent to create failing regression tests, where possible. The new tests MUST be running red with the expected error messages before implementing changes in the main codebase. (Note that some tasks will not be in the main game code so tests will not be possible.)
   - If this task is a new feature or improvement: Use the Test Infra subagent to create new tests to cover the feature's edges after implementation, locking in that it functions correctly.
+  - Either way, the Test Infra subagent is responsible for creating & modifying the tests, not you — you may only modify its work, following its established patterns.
 6. Once finished implementing, you will then do an initial automated review pass in parallel:
   - You will give a summary with files & symbols changed to the Reviewer subagent.
   - You will run the `agents:check` task, which runs tests & a typecheck.

@@ -146,6 +146,30 @@ describe("State", () => {
 		expect(state.value, "update(current => current) should leave the stored state value unchanged").toBe("ready");
 	});
 
+	it("applies fix when update returns the current value", async () => {
+		const fix = vi.fn((value: string) => value === "ready" ? "READY" : value.trim());
+		const state = State(mountedOwner(), " ready ", { fix });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		expect(state.value).toBe("ready");
+
+		expect(state.update((currentValue) => currentValue)).toBe("READY");
+		await flushEffects();
+
+		expect(state.value).toBe("READY");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("READY", "ready");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("READY", "ready");
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(1, " ready ");
+		expect(fix).toHaveBeenNthCalledWith(2, "ready");
+	});
+
 	it("treats undefined from update as a keep-current sentinel", async () => {
 		const state = State(mountedOwner(), "ready");
 		const immediateListener = vi.fn();
@@ -594,6 +618,18 @@ describe("State", () => {
 		expect(readonlyState.value, "clear should not mutate readonly states").toBe(1);
 	});
 
+	it("does not apply fix when clearing state values", () => {
+		const fix = vi.fn((value: string) => value.trim());
+		const state = State(mountedOwner(), " ready ", { fix });
+
+		expect(state.value).toBe("ready");
+		expect(fix).toHaveBeenCalledTimes(1);
+
+		expect(state.clear("  next  ")).toBe("  next  ");
+		expect(state.value).toBe("  next  ");
+		expect(fix).toHaveBeenCalledTimes(1);
+	});
+
 	it("rejects undefined values at runtime", () => {
 		const owner = mountedOwner();
 		const state = State(owner, "ready");
@@ -612,6 +648,160 @@ describe("State", () => {
 		finally {
 			owner.remove();
 		}
+	});
+
+	it("fixes initial values and applies set normalization before equality checks", async () => {
+		const owner = mountedOwner();
+		const fix = vi.fn((value: string) => value.trim());
+		const equals = vi.fn((currentValue: string, nextValue: string) => currentValue === nextValue);
+		const state = State(owner, "  ready  ", { fix, equals });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		expect(state.value).toBe("ready");
+		expect(fix).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenNthCalledWith(1, "  ready  ");
+
+		expect(state.set(" ready ")).toBe("ready");
+		await flushEffects();
+
+		expect(state.value).toBe("ready");
+		expect(immediateListener).not.toHaveBeenCalled();
+		expect(queuedListener).not.toHaveBeenCalled();
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(2, " ready ");
+		expect(equals).toHaveBeenCalledTimes(1);
+		expect(equals).toHaveBeenNthCalledWith(1, "ready", "ready");
+
+		expect(state.set("  next  ")).toBe("next");
+		await flushEffects();
+
+		expect(state.value).toBe("next");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("next", "ready");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("next", "ready");
+		expect(fix).toHaveBeenCalledTimes(3);
+		expect(fix).toHaveBeenNthCalledWith(3, "  next  ");
+		expect(equals).toHaveBeenCalledTimes(3);
+		expect(equals).toHaveBeenNthCalledWith(2, "ready", "next");
+		expect(equals).toHaveBeenNthCalledWith(3, "ready", "next");
+	});
+
+	it("fixes updated values before storing and emitting them", async () => {
+		const owner = mountedOwner();
+		const fix = vi.fn((value: string) => value.trim());
+		const state = State(owner, " ready ", { fix });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		expect(state.update(() => "  next  ")).toBe("next");
+		await flushEffects();
+
+		expect(state.value).toBe("next");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("next", "ready");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("next", "ready");
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(1, " ready ");
+		expect(fix).toHaveBeenNthCalledWith(2, "  next  ");
+	});
+
+	it("supports updater-style fix functions and keeps the candidate value when they return undefined", async () => {
+		const owner = mountedOwner();
+		const fix = vi.fn((value: string) => value.startsWith("=") ? value.slice(1).trim() : undefined);
+		const state = State<string>(owner, "  ready  ", { fix });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		expect(state.value).toBe("  ready  ");
+		expect(fix).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenNthCalledWith(1, "  ready  ");
+
+		expect(state.set("= next ")).toBe("next");
+		await flushEffects();
+
+		expect(state.value).toBe("next");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("next", "  ready  ");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("next", "  ready  ");
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(2, "= next ");
+
+		immediateListener.mockClear();
+		queuedListener.mockClear();
+
+		expect(state.update(() => "  final  ")).toBe("  final  ");
+		await flushEffects();
+
+		expect(state.value).toBe("  final  ");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("  final  ", "next");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("  final  ", "next");
+		expect(fix).toHaveBeenCalledTimes(3);
+		expect(fix).toHaveBeenNthCalledWith(3, "  final  ");
+	});
+
+	it("reruns fix when update keeps the current value with undefined", async () => {
+		const owner = mountedOwner();
+		const fix = vi.fn((value: string) => value === "ready" ? "READY" : value.trim());
+		const state = State(owner, "  ready  ", { fix });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		expect(state.value).toBe("ready");
+
+		expect(state.update(() => undefined)).toBe("READY");
+		await flushEffects();
+
+		expect(state.value).toBe("READY");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("READY", "ready");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("READY", "ready");
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(1, "  ready  ");
+		expect(fix).toHaveBeenNthCalledWith(2, "ready");
+	});
+
+	it("reruns fix on undefined updates even when fix keeps the candidate value", async () => {
+		const owner = mountedOwner();
+		const fix = vi.fn((value: string) => value.startsWith("=") ? value.slice(1) : undefined);
+		const state = State<string>(owner, " ready ", { fix });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		state.subscribeImmediateUnbound(immediateListener);
+		state.subscribeUnbound(queuedListener);
+
+		expect(state.value).toBe(" ready ");
+
+		expect(state.update(() => undefined)).toBe(" ready ");
+		await flushEffects();
+
+		expect(state.value).toBe(" ready ");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith(" ready ", " ready ");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith(" ready ", " ready ");
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(1, " ready ");
+		expect(fix).toHaveBeenNthCalledWith(2, " ready ");
 	});
 
 	it("supports custom equality functions", async () => {

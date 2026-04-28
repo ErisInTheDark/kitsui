@@ -30,6 +30,13 @@ type WidenStateValue<T> = [T] extends [string]
 export type StateEqualityFunction<T> = (currentValue: T, nextValue: T) => boolean;
 
 /**
+ * Adjusts a candidate state value before it is stored, compared, or emitted.
+ * @param value The candidate value produced during construction, `set()`, or resolved by `update()`.
+ * @returns A replacement state value, or `undefined` to keep the candidate as-is.
+ */
+export type StateFixFunction<T> = (value: T) => T | void;
+
+/**
  * Callback invoked when state value changes.
  * @param value The new state value.
  * @param previousValue The previous state value.
@@ -52,6 +59,13 @@ export interface StateOptions<T> {
 	 * Defaults to `Object.is` if not provided.
 	 */
 	equals?: StateEqualityFunction<T>;
+	/**
+	 * Adjusts candidate state values after construction, `set()`, or `update()` resolves them.
+	 * Runs before equality checks, storage, and listener emission.
+	 * 
+	 * Like a state updater, it can return a replacement value or `undefined` to keep the candidate value.
+	 */
+	fix?: StateFixFunction<T>;
 }
 
 /**
@@ -269,6 +283,14 @@ function getEqualityFunction<T> (state: State<T>): StateEqualityFunction<T> {
 	return state["equalityFunction"] as StateEqualityFunction<T>;
 }
 
+function getFixFunction<T> (state: State<T>): StateFixFunction<T> {
+	return state["fixFunction"] as StateFixFunction<T>;
+}
+
+function fixStateValue<T> (fix: StateFixFunction<T>, value: T): T {
+	return fix(value) ?? value;
+}
+
 function getImmediateListeners<T> (state: State<T>): Set<ImmediateStateListenerRecord<T>> {
 	return state["immediateListeners"] as Set<ImmediateStateListenerRecord<T>>;
 }
@@ -288,6 +310,8 @@ class StateClass<T> extends Owner {
 	private currentValue: T;
 	/** @deprecated Use getEqualityFunction(this) */
 	private equalityFunction: StateEqualityFunction<any>;
+	/** @deprecated Use getFixFunction(this) */
+	private fixFunction: StateFixFunction<any>;
 	private readonly graph: StateGraph;
 	/** @deprecated Use getImmediateListeners(this) */
 	private readonly immediateListeners = new Set<ImmediateStateListenerRecord<any>>();
@@ -298,7 +322,8 @@ class StateClass<T> extends Owner {
 		super();
 		assertDefinedStateValue(initialValue);
 		this.owner = owner;
-		this.currentValue = initialValue;
+		this.fixFunction = options.fix ?? ident;
+		this.currentValue = fixStateValue(this.fixFunction, initialValue);
 		this.equalityFunction = options.equals ?? Object.is;
 		this.graph = options.graph ?? createStateGraph();
 
@@ -347,12 +372,13 @@ class StateClass<T> extends Owner {
 	set (nextValue: T): T {
 		this.ensureActive();
 		assertDefinedStateValue(nextValue);
+		const fixedValue = fixStateValue(getFixFunction(this), nextValue);
 
-		if (getEqualityFunction(this)(this.currentValue, nextValue)) {
+		if (getEqualityFunction(this)(this.currentValue, fixedValue)) {
 			return this.currentValue;
 		}
 
-		return this.commit(nextValue, false);
+		return this.commit(fixedValue, false);
 	}
 
 	private commit (nextValue: T, forceNotify: boolean): T {
@@ -405,7 +431,7 @@ class StateClass<T> extends Owner {
 
 	/**
 	 * Updates the state by applying a function to the current value.
-	 * Returning `undefined` keeps the current value but still emits the update to listeners.
+	 * Returning `undefined` keeps the current value, which is still passed through `fix()` and emitted to listeners.
 	 * Unlike {@link set}, `update` always notifies listeners, even when the effective value is unchanged.
 	 * @param updater Function that transforms the current value to a new value.
 	 * @returns The stored state value after the update.
@@ -414,7 +440,7 @@ class StateClass<T> extends Owner {
 	update (updater: StateUpdater<T>): T {
 		this.ensureActive();
 		const nextValue = updater(this.currentValue);
-		return this.commit((nextValue === undefined ? this.currentValue : nextValue), true);
+		return this.commit(fixStateValue(getFixFunction(this), nextValue === undefined ? this.currentValue : nextValue), true);
 	}
 
 	/**
