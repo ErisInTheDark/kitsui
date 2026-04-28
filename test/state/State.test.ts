@@ -331,6 +331,53 @@ describe("State", () => {
 		expect(mapped.value).toBe("value:4");
 	});
 
+	/** Verifies mapped states apply fix and equality options to initial and updated values. */
+	it("applies fix and equality options to mapped states", async () => {
+		const sourceOwner = mountedOwner();
+		const source = State(sourceOwner, " ready ");
+		const owner = mountedOwner();
+		const fix = vi.fn((value: string) => value.trim());
+		const equals = vi.fn((currentValue: string, nextValue: string) => currentValue === nextValue);
+		const mapped = source.map(owner, (value) => value, { fix, equals });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		mapped.subscribeImmediateUnbound(immediateListener);
+		mapped.subscribeUnbound(queuedListener);
+
+		expect(mapped.value).toBe("ready");
+		expect(fix).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenNthCalledWith(1, " ready ");
+
+		source.set("ready");
+		await flushEffects();
+
+		expect(mapped.value).toBe("ready");
+		expect(immediateListener).not.toHaveBeenCalled();
+		expect(queuedListener).not.toHaveBeenCalled();
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(2, "ready");
+		expect(equals).toHaveBeenCalledTimes(1);
+		expect(equals).toHaveBeenNthCalledWith(1, "ready", "ready");
+
+		source.set(" next ");
+		await flushEffects();
+
+		expect(mapped.value).toBe("next");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("next", "ready");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("next", "ready");
+		expect(fix).toHaveBeenCalledTimes(3);
+		expect(fix).toHaveBeenNthCalledWith(3, " next ");
+		expect(equals).toHaveBeenCalledTimes(3);
+		expect(equals).toHaveBeenNthCalledWith(2, "ready", "next");
+		expect(equals).toHaveBeenNthCalledWith(3, "ready", "next");
+
+		owner.remove();
+		sourceOwner.remove();
+	});
+
 	it("groups state values with both call and constructor forms", () => {
 		const owner = mountedOwner();
 		const count = State(owner, 1);
@@ -392,6 +439,151 @@ describe("State", () => {
 			summary: "two:2",
 			ready: true,
 		});
+	});
+
+	/** Verifies State.Group applies fix and equality options to grouped snapshots. */
+	it("applies fix and equality options to grouped state objects", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 1);
+		const label = State(owner, " one ");
+		const fix = vi.fn((value: { count: number; label: string }) => ({
+			count: value.count,
+			label: value.label.trim(),
+		}));
+		const equals = vi.fn((currentValue: { count: number; label: string }, nextValue: { count: number; label: string }) => {
+			return currentValue.count === nextValue.count && currentValue.label === nextValue.label;
+		});
+		const grouped = State.Group(owner, { count, label }, { fix, equals });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		grouped.subscribeImmediateUnbound(immediateListener);
+		grouped.subscribeUnbound(queuedListener);
+
+		expect(grouped.value).toEqual({
+			count: 1,
+			label: "one",
+		});
+		expect(fix).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenNthCalledWith(1, {
+			count: 1,
+			label: " one ",
+		});
+
+		label.set("one");
+		await flushEffects();
+
+		expect(grouped.value).toEqual({
+			count: 1,
+			label: "one",
+		});
+		expect(immediateListener).not.toHaveBeenCalled();
+		expect(queuedListener).not.toHaveBeenCalled();
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(2, {
+			count: 1,
+			label: "one",
+		});
+		expect(equals).toHaveBeenCalledTimes(1);
+		expect(equals).toHaveBeenNthCalledWith(1, {
+			count: 1,
+			label: "one",
+		}, {
+			count: 1,
+			label: "one",
+		});
+
+		count.set(2);
+		await flushEffects();
+
+		expect(grouped.value).toEqual({
+			count: 2,
+			label: "one",
+		});
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith({
+			count: 2,
+			label: "one",
+		}, {
+			count: 1,
+			label: "one",
+		});
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith({
+			count: 2,
+			label: "one",
+		}, {
+			count: 1,
+			label: "one",
+		});
+		expect(fix).toHaveBeenCalledTimes(3);
+		expect(fix).toHaveBeenNthCalledWith(3, {
+			count: 2,
+			label: "one",
+		});
+		expect(equals).toHaveBeenCalledTimes(3);
+		expect(equals).toHaveBeenNthCalledWith(2, {
+			count: 1,
+			label: "one",
+		}, {
+			count: 2,
+			label: "one",
+		});
+		expect(equals).toHaveBeenNthCalledWith(3, {
+			count: 1,
+			label: "one",
+		}, {
+			count: 2,
+			label: "one",
+		});
+
+		owner.remove();
+	});
+
+	/** Verifies State.Group mapper overloads also honor fix and equality options. */
+	it("applies fix and equality options to grouped mapper overloads", async () => {
+		const owner = mountedOwner();
+		const count = State(owner, 1);
+		const label = State(owner, "one");
+		const fix = vi.fn((value: string) => value.trim().toUpperCase());
+		const equals = vi.fn((currentValue: string, nextValue: string) => currentValue === nextValue);
+		const grouped = State.Group(owner, { count, label }, ({ count: currentCount, label: currentLabel }) => ` ${currentLabel}:${currentCount} `, { fix, equals });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		grouped.subscribeImmediateUnbound(immediateListener);
+		grouped.subscribeUnbound(queuedListener);
+
+		expect(grouped.value).toBe("ONE:1");
+		expect(fix).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenNthCalledWith(1, " one:1 ");
+
+		label.set("One");
+		await flushEffects();
+
+		expect(grouped.value).toBe("ONE:1");
+		expect(immediateListener).not.toHaveBeenCalled();
+		expect(queuedListener).not.toHaveBeenCalled();
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(2, " One:1 ");
+		expect(equals).toHaveBeenCalledTimes(1);
+		expect(equals).toHaveBeenNthCalledWith(1, "ONE:1", "ONE:1");
+
+		count.set(2);
+		await flushEffects();
+
+		expect(grouped.value).toBe("ONE:2");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("ONE:2", "ONE:1");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("ONE:2", "ONE:1");
+		expect(fix).toHaveBeenCalledTimes(3);
+		expect(fix).toHaveBeenNthCalledWith(3, " One:2 ");
+		expect(equals).toHaveBeenCalledTimes(3);
+		expect(equals).toHaveBeenNthCalledWith(2, "ONE:1", "ONE:2");
+		expect(equals).toHaveBeenNthCalledWith(3, "ONE:1", "ONE:2");
+
+		owner.remove();
 	});
 
 	it("passes the previous grouped snapshot to mapper overloads", async () => {
@@ -575,6 +767,54 @@ describe("State", () => {
 		expect(fallbackCalls).toBe(2);
 	});
 
+	/** Verifies or-derived states apply fix and equality options across fallback and source updates. */
+	it("applies fix and equality options to or-derived states", async () => {
+		const owner = mountedOwner();
+		const source = State<string | null>(owner, null);
+		const getValue = vi.fn(() => " fallback ");
+		const fix = vi.fn((value: string) => value.trim());
+		const equals = vi.fn((currentValue: string, nextValue: string) => currentValue === nextValue);
+		const resolved = source.or(getValue, { fix, equals });
+		const immediateListener = vi.fn();
+		const queuedListener = vi.fn();
+
+		resolved.subscribeImmediateUnbound(immediateListener);
+		resolved.subscribeUnbound(queuedListener);
+
+		expect(resolved.value).toBe("fallback");
+		expect(getValue).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenNthCalledWith(1, " fallback ");
+
+		source.set(" fallback ");
+		await flushEffects();
+
+		expect(resolved.value).toBe("fallback");
+		expect(immediateListener).not.toHaveBeenCalled();
+		expect(queuedListener).not.toHaveBeenCalled();
+		expect(getValue).toHaveBeenCalledTimes(1);
+		expect(fix).toHaveBeenCalledTimes(2);
+		expect(fix).toHaveBeenNthCalledWith(2, " fallback ");
+		expect(equals).toHaveBeenCalledTimes(1);
+		expect(equals).toHaveBeenNthCalledWith(1, "fallback", "fallback");
+
+		source.set("value");
+		await flushEffects();
+
+		expect(resolved.value).toBe("value");
+		expect(immediateListener).toHaveBeenCalledTimes(1);
+		expect(immediateListener).toHaveBeenCalledWith("value", "fallback");
+		expect(queuedListener).toHaveBeenCalledTimes(1);
+		expect(queuedListener).toHaveBeenCalledWith("value", "fallback");
+		expect(fix).toHaveBeenCalledTimes(3);
+		expect(fix).toHaveBeenNthCalledWith(3, "value");
+		expect(equals).toHaveBeenCalledTimes(3);
+		expect(equals).toHaveBeenNthCalledWith(2, "fallback", "value");
+		expect(equals).toHaveBeenNthCalledWith(3, "fallback", "value");
+
+		owner.remove();
+	});
+
 	it("disposes derived mapping states when the source is disposed", () => {
 		const source = State(mountedOwner(), 1);
 		const owner = mountedOwner();
@@ -583,6 +823,21 @@ describe("State", () => {
 		source.dispose();
 
 		expect(mapped.disposed).toBe(true);
+	});
+
+	it("disposes or-derived states when the source is disposed", () => {
+		const owner = mountedOwner();
+		const source = State<string | null>(owner, null);
+		const resolved = source.or(() => "fallback");
+
+		expect(resolved.value, "the derived or-state should start with the fallback value").toBe("fallback");
+
+		source.dispose();
+
+		expect(resolved.disposed, "disposing the source should dispose the derived or-state").toBe(true);
+		expect(() => resolved.recompute(), "a disposed or-state should stop responding to recompute calls").toThrowError("Disposed states cannot be modified.");
+
+		owner.remove();
 	});
 
 	it("disposes a state when its creation owner is disposed", () => {
@@ -1083,6 +1338,55 @@ describe("State", () => {
 			sourceOwner.remove();
 		}
 		finally {
+			orphanCheckSpy.restore();
+		}
+	});
+
+	/** Verifies ownerless map(mapper, options) applies fix and equality while remaining ownerless. */
+	it("applies fix and equality options to ownerless mapped states", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+		const sourceOwner = mountedOwner();
+
+		try {
+			const source = State(sourceOwner, " ready ");
+			const fix = vi.fn((value: string) => value.trim());
+			const equals = vi.fn((currentValue: string, nextValue: string) => currentValue === nextValue);
+			const mapped = source.map((value) => value, { fix, equals });
+			const immediateListener = vi.fn();
+
+			mapped.subscribeImmediateUnbound(immediateListener);
+
+			expect(mapped.value, "ownerless map should apply fix to the initial value").toBe("ready");
+			expect(mapped.getOwner(), "ownerless map should start without an owner").toBeNull();
+			expect(orphanCheckSpy.orphanCheck, "ownerless map should schedule an orphan check before cleanup").not.toBeNull();
+			expect(fix).toHaveBeenCalledTimes(1);
+			expect(fix).toHaveBeenNthCalledWith(1, " ready ");
+
+			source.set("ready");
+
+			expect(mapped.value, "ownerless map should keep the normalized value when equality returns true").toBe("ready");
+			expect(immediateListener, "ownerless map should suppress immediate listeners when the normalized value is unchanged").not.toHaveBeenCalled();
+			expect(fix).toHaveBeenCalledTimes(2);
+			expect(fix).toHaveBeenNthCalledWith(2, "ready");
+			expect(equals).toHaveBeenCalledTimes(1);
+			expect(equals).toHaveBeenNthCalledWith(1, "ready", "ready");
+
+			source.set(" next ");
+
+			expect(mapped.value, "ownerless map should still update when the normalized value changes").toBe("next");
+			expect(immediateListener).toHaveBeenCalledTimes(1);
+			expect(immediateListener).toHaveBeenCalledWith("next", "ready");
+			expect(fix).toHaveBeenCalledTimes(3);
+			expect(fix).toHaveBeenNthCalledWith(3, " next ");
+			expect(equals).toHaveBeenCalledTimes(2);
+			expect(equals).toHaveBeenNthCalledWith(2, "ready", "next");
+
+			sourceOwner.remove();
+
+			expect(mapped.disposed, "disposing the source should clean up the ownerless mapped state").toBe(true);
+		}
+		finally {
+			sourceOwner.remove();
 			orphanCheckSpy.restore();
 		}
 	});

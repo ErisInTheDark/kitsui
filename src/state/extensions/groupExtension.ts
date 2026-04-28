@@ -17,9 +17,10 @@ type GroupConstructor = {
 	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
+	 * @param options Optional state configuration for the grouped state.
 	 * @returns A state whose value is an object with the current value of each source state.
 	 */
-	<T extends GroupedStateObject> (owner: Owner, states: T): State<GroupedValue<T>>;
+	<T extends GroupedStateObject> (owner: Owner, states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states.
 	 *
@@ -28,9 +29,10 @@ type GroupConstructor = {
 	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
+	 * @param options Optional state configuration for the grouped state.
 	 * @returns A state whose value is an object with the current value of each source state.
 	 */
-	new <T extends GroupedStateObject> (owner: Owner, states: T): State<GroupedValue<T>>;
+	new <T extends GroupedStateObject> (owner: Owner, states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
 	 *
@@ -40,9 +42,10 @@ type GroupConstructor = {
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
 	 * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+	 * @param options Optional state configuration for the grouped state.
 	 * @returns A state whose value is the mapper result for the current grouped snapshot.
 	 */
-	<T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
+	<T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
 	 *
@@ -52,9 +55,10 @@ type GroupConstructor = {
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
 	 * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+	 * @param options Optional state configuration for the grouped state.
 	 * @returns A state whose value is the mapper result for the current grouped snapshot.
 	 */
-	new <T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>): State<U>;
+	new <T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
 };
 
 declare module "../State" {
@@ -114,9 +118,14 @@ function readGroupSnapshot<T extends GroupedStateObject, U> (states: T, mapper: 
 	};
 }
 
-function createGroupedState<T extends GroupedStateObject, U> (owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U> | undefined): State<U> {
+function createGroupedState<T extends GroupedStateObject, U> (
+	owner: Owner,
+	states: T,
+	mapper: Mapper<GroupedValue<T>, U> | undefined,
+	options?: StateOptions<GroupedValue<T> | U>,
+): State<U> {
 	const initialGroup = readGroupSnapshot(states, mapper, undefined);
-	const grouped = createOwnedState(owner, initialGroup.value);
+	const grouped = createOwnedState(owner, initialGroup.value, options as StateOptions<typeof initialGroup.value> | undefined);
 	const releaseSubscriptions: CleanupFunction[] = [];
 	let active = true;
 	let queued = false;
@@ -177,7 +186,12 @@ export default function groupExtension (): void {
 	patched = true;
 
 	const StateWithGroup = State as typeof State & StateStaticExtensions;
-	const Group = function Group<T extends GroupedStateObject, U> (owner: Owner, states: T, mapper?: Mapper<GroupedValue<T>, U>): State<U> {
+	const Group = function Group<T extends GroupedStateObject, U> (
+		owner: Owner,
+		states: T,
+		mapperOrOptions?: Mapper<GroupedValue<T>, U> | StateOptions<GroupedValue<T>>,
+		maybeOptions?: StateOptions<U>,
+	): State<U> {
 		if (!(owner instanceof Owner)) {
 			throw new TypeError("State.Group requires an Owner as the first argument.");
 		}
@@ -186,7 +200,14 @@ export default function groupExtension (): void {
 			throw new TypeError("State.Group requires a states object as the second argument.");
 		}
 
-		return createGroupedState(owner, states, mapper);
+		const mapper = typeof mapperOrOptions === "function"
+			? mapperOrOptions as Mapper<GroupedValue<T>, U>
+			: undefined;
+		const options = (typeof mapperOrOptions === "function"
+			? maybeOptions
+			: mapperOrOptions) as StateOptions<GroupedValue<T> | U> | undefined;
+
+		return createGroupedState(owner, states, mapper, options);
 	} as GroupConstructor;
 
 	StateWithGroup.Group = Group;
