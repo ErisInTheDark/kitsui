@@ -1921,6 +1921,14 @@ var __kitsui_factory__ = (() => {
     }
     const src = styleValue;
     let i = 0;
+    function peekPreviousNonWhitespaceChar() {
+      for (let j = i - 1; j >= 0; j--) {
+        if (!isWhitespaceCharacter(src[j])) {
+          return src[j];
+        }
+      }
+      return void 0;
+    }
     function consumeChar(expected) {
       if (src[i] === expected) {
         i++;
@@ -1979,6 +1987,22 @@ var __kitsui_factory__ = (() => {
       }
       return `var(${toCssPropertyName(`$${variableName}`)}, ${fallbackValue})`;
     }
+    function consumeNegativeVariableAccess() {
+      const restorePoint = i;
+      const previousChar = peekPreviousNonWhitespaceChar();
+      if (previousChar && !"(,:*/%+-".includes(previousChar)) {
+        return void 0;
+      }
+      if (!consumeChar("-")) {
+        return void 0;
+      }
+      const variableAccess = consumeVariableAccess();
+      if (!variableAccess) {
+        i = restorePoint;
+        return void 0;
+      }
+      return `calc(-1 * ${variableAccess})`;
+    }
     function consumeStyleValue() {
       let result = "";
       do {
@@ -1986,7 +2010,7 @@ var __kitsui_factory__ = (() => {
           awaitingClosingBrace--;
           return result;
         }
-        result += consumeWhitespace() || consumeVariableAccess() || src[i++];
+        result += consumeWhitespace() || consumeNegativeVariableAccess() || consumeVariableAccess() || src[i++];
       } while (i < src.length);
       return result;
     }
