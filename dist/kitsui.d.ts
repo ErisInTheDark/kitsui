@@ -1211,12 +1211,12 @@ export interface StateExtensions<T> {
          */
         or<TFallback>(getValue: () => TFallback, options?: StateOptions<Exclude<T, Nullish> | TFallback>): RecomputableState<Exclude<T, Nullish> | TFallback>;
         /**
-         * Returns a boolean state that is true when this state equals the provided value.
+         * Returns a boolean state that is true when this state equals the provided value or state.
          * Uses strict equality (===) for comparison.
-         * @param compareValue The value to compare against the current state value.
+         * @param compareValue The value or state to compare against the current state value.
          * @returns A new state that is true when the values are strictly equal, false otherwise.
          */
-        equals(compareValue: T): State<boolean>;
+        equals(compareValue: T | State<T>): State<boolean>;
     }
 
 export type CleanupFunction = () => void;

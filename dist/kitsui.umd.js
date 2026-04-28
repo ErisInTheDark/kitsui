@@ -4556,7 +4556,20 @@ ${innerRules}
       }, options);
     };
     prototype.equals = function equals(compareValue) {
-      return createMappedState(this, this, (value) => value === compareValue);
+      const comparator = compareValue instanceof State ? compareValue : null;
+      const equalsState = createMappedState(this, this, (value) => value === (comparator?.value ?? compareValue));
+      if (!comparator || comparator === this) {
+        return equalsState;
+      }
+      const releaseComparatorImplicitOwnerPropagation = equalsState._registerImplicitOwnerDependent?.(comparator) ?? (() => void 0);
+      const releaseComparatorSubscription = comparator.subscribeImmediate(equalsState, () => {
+        equalsState.recompute();
+      });
+      equalsState.onCleanup(() => {
+        releaseComparatorImplicitOwnerPropagation();
+        releaseComparatorSubscription();
+      });
+      return equalsState;
     };
   }
 
