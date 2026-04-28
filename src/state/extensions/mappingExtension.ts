@@ -62,12 +62,12 @@ declare module "../State" {
 		or<TFallback> (getValue: () => TFallback, options?: StateOptions<Exclude<T, Nullish> | TFallback>): RecomputableState<Exclude<T, Nullish> | TFallback>;
 
 		/**
-		 * Returns a boolean state that is true when this state equals the provided value.
+		 * Returns a boolean state that is true when this state equals the provided value or state.
 		 * Uses strict equality (===) for comparison.
-		 * @param compareValue The value to compare against the current state value.
+		 * @param compareValue The value or state to compare against the current state value.
 		 * @returns A new state that is true when the values are strictly equal, false otherwise.
 		 */
-		equals (compareValue: T): State<boolean>;
+		equals (compareValue: T | State<T>): State<boolean>;
 	}
 }
 
@@ -186,6 +186,23 @@ export default function mappingExtension (): void {
 	};
 
 	prototype.equals = function equals (compareValue: unknown): State<boolean> {
-		return createMappedState(this, this, (value) => value === compareValue);
+		const comparator = compareValue instanceof State ? compareValue : null;
+		const equalsState = createMappedState(this, this, (value) => value === (comparator?.value ?? compareValue));
+
+		if (!comparator || comparator === this) {
+			return equalsState;
+		}
+
+		const releaseComparatorImplicitOwnerPropagation = ((equalsState as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(comparator)) ?? (() => undefined);
+		const releaseComparatorSubscription = comparator.subscribeImmediate(equalsState, () => {
+			equalsState.recompute();
+		});
+
+		equalsState.onCleanup(() => {
+			releaseComparatorImplicitOwnerPropagation();
+			releaseComparatorSubscription();
+		});
+
+		return equalsState;
 	};
 }

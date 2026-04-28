@@ -748,6 +748,81 @@ describe("State", () => {
 		expect(source.falsy.value).toBe(false);
 	});
 
+	it("compares against plain values with equals", async () => {
+		const owner = mountedOwner();
+		const source = State(owner, "idle");
+		const equals = source.equals("idle");
+
+		try {
+			expect(equals.value).toBe(true);
+
+			source.set("running");
+			await flushEffects();
+
+			expect(equals.value).toBe(false);
+		}
+		finally {
+			owner.remove();
+		}
+	});
+
+	it("keeps equals true when comparing a state to itself", async () => {
+		const owner = mountedOwner();
+		const source = State(owner, "idle");
+		const equals = source.equals(source);
+
+		try {
+			expect(equals.value).toBe(true);
+
+			source.set("running");
+			await flushEffects();
+
+			expect(equals.value).toBe(true);
+		}
+		finally {
+			owner.remove();
+		}
+	});
+
+	/** Verifies equals can compare against another state, react to both inputs, and keep source ownership. */
+	it("compares against a reactive state comparator", async () => {
+		const sourceOwner = mountedOwner();
+		const comparatorOwner = mountedOwner();
+		const source = State(sourceOwner, "idle");
+		const comparator = State(comparatorOwner, "idle");
+		const equals = source.equals(comparator);
+
+		try {
+			expect(equals.value, "state comparators should compare their current values").toBe(true);
+
+			source.set("running");
+			await flushEffects();
+
+			expect(equals.value, "the derived boolean state should react to source changes").toBe(false);
+
+			comparator.set("running");
+			await flushEffects();
+
+			expect(equals.value, "the derived boolean state should react to comparator changes").toBe(true);
+			expect(equals.getOwner(), "the derived equality state should stay owned by the source state").toBe(source);
+
+			comparatorOwner.remove();
+			expect(equals.disposed, "disposing the comparator owner should not dispose the derived equality state").toBe(false);
+
+			source.set("idle");
+			await flushEffects();
+
+			expect(equals.value, "the derived boolean state should keep reacting to source changes after comparator disposal").toBe(false);
+
+			sourceOwner.remove();
+			expect(equals.disposed, "disposing the source owner should dispose the derived equality state").toBe(true);
+		}
+		finally {
+			comparatorOwner.remove();
+			sourceOwner.remove();
+		}
+	});
+
 	it("creates nullish fallback states with or", () => {
 		const source = State<string | null>(mountedOwner(), null);
 		let fallbackCalls = 0;
