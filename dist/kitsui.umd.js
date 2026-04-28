@@ -4399,7 +4399,7 @@ ${innerRules}
   }
 
   // src/state/extensions/groupExtension.ts
-  var createOwnedState2 = State;
+  var createState = State;
   var patched3 = false;
   function scheduleNextTick(callback) {
     const schedulerRef = globalThis;
@@ -4424,7 +4424,7 @@ ${innerRules}
   }
   function createGroupedState(owner, states, mapper, options) {
     const initialGroup = readGroupSnapshot(states, mapper, void 0);
-    const grouped = createOwnedState2(owner, initialGroup.value, options);
+    const grouped = owner ? createState(owner, initialGroup.value, options) : createState(initialGroup.value, options);
     const releaseSubscriptions = [];
     let active = true;
     let queued = false;
@@ -4467,15 +4467,16 @@ ${innerRules}
     }
     patched3 = true;
     const StateWithGroup = State;
-    const Group = function Group2(owner, states, mapperOrOptions, maybeOptions) {
-      if (!(owner instanceof Owner)) {
-        throw new TypeError("State.Group requires an Owner as the first argument.");
-      }
+    const Group = function Group2(ownerOrStates, statesOrMapperOrOptions, mapperOrOptions, maybeOptions) {
+      const owner = ownerOrStates instanceof Owner && arguments.length >= 2 ? ownerOrStates : null;
+      const states = owner === null ? ownerOrStates : statesOrMapperOrOptions;
+      const mapperOrStateOptions = owner === null ? statesOrMapperOrOptions : mapperOrOptions;
+      const optionsCandidate = owner === null ? maybeOptions ?? mapperOrOptions : maybeOptions;
       if (typeof states !== "object" || states === null) {
-        throw new TypeError("State.Group requires a states object as the second argument.");
+        throw new TypeError("State.Group requires a states object.");
       }
-      const mapper = typeof mapperOrOptions === "function" ? mapperOrOptions : void 0;
-      const options = typeof mapperOrOptions === "function" ? maybeOptions : mapperOrOptions;
+      const mapper = typeof mapperOrStateOptions === "function" ? mapperOrStateOptions : void 0;
+      const options = typeof mapperOrStateOptions === "function" ? optionsCandidate : mapperOrStateOptions;
       return createGroupedState(owner, states, mapper, options);
     };
     StateWithGroup.Group = Group;
@@ -4484,7 +4485,7 @@ ${innerRules}
   // src/state/extensions/mappingExtension.ts
   var truthyStates = /* @__PURE__ */ new WeakMap();
   var falsyStates = /* @__PURE__ */ new WeakMap();
-  var createOwnedState3 = State;
+  var createOwnedState2 = State;
   var createOwnerlessState = State;
   var patched4 = false;
   function createMappedState(source, owner, mapValue, options) {
@@ -4492,7 +4493,7 @@ ${innerRules}
       ...options,
       graph: source.getGraph()
     };
-    const mapped = owner ? createOwnedState3(owner, mapValue(source.value), stateOptions) : createOwnerlessState(mapValue(source.value), stateOptions);
+    const mapped = owner ? createOwnedState2(owner, mapValue(source.value), stateOptions) : createOwnerlessState(mapValue(source.value), stateOptions);
     const releaseImplicitOwnerPropagation = mapped._registerImplicitOwnerDependent?.(source) ?? (() => void 0);
     const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
       mapped.set(mapValue(value, oldValue));
@@ -4509,6 +4510,22 @@ ${innerRules}
       mapped.set(mapValue(source.value, source.value));
     };
     return mapped;
+  }
+  function createComparisonState(source, compareValue, compare) {
+    const comparator = compareValue instanceof State ? compareValue : null;
+    const comparisonState = createMappedState(source, source, (value) => compare(value, comparator?.value ?? compareValue));
+    if (!comparator || comparator === source) {
+      return comparisonState;
+    }
+    const releaseComparatorImplicitOwnerPropagation = comparisonState._registerImplicitOwnerDependent?.(comparator) ?? (() => void 0);
+    const releaseComparatorSubscription = comparator.subscribeImmediate(comparisonState, () => {
+      comparisonState.recompute();
+    });
+    comparisonState.onCleanup(() => {
+      releaseComparatorImplicitOwnerPropagation();
+      releaseComparatorSubscription();
+    });
+    return comparisonState;
   }
   function mappingExtension() {
     if (patched4) {
@@ -4556,20 +4573,10 @@ ${innerRules}
       }, options);
     };
     prototype.equals = function equals(compareValue) {
-      const comparator = compareValue instanceof State ? compareValue : null;
-      const equalsState = createMappedState(this, this, (value) => value === (comparator?.value ?? compareValue));
-      if (!comparator || comparator === this) {
-        return equalsState;
-      }
-      const releaseComparatorImplicitOwnerPropagation = equalsState._registerImplicitOwnerDependent?.(comparator) ?? (() => void 0);
-      const releaseComparatorSubscription = comparator.subscribeImmediate(equalsState, () => {
-        equalsState.recompute();
-      });
-      equalsState.onCleanup(() => {
-        releaseComparatorImplicitOwnerPropagation();
-        releaseComparatorSubscription();
-      });
-      return equalsState;
+      return createComparisonState(this, compareValue, (value, otherValue) => value === otherValue);
+    };
+    prototype.notEquals = function notEquals(compareValue) {
+      return createComparisonState(this, compareValue, (value, otherValue) => value !== otherValue);
     };
   }
 
