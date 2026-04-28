@@ -1,6 +1,7 @@
 import { Owner, State, type CleanupFunction, type StateOptions } from "../State";
 
 type Nullish = null;
+type ComparableValue<T> = T | State<T>;
 
 /** Maps a source state value, and optionally its previous value, into a derived value. */
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
@@ -68,6 +69,14 @@ declare module "../State" {
 		 * @returns A new state that is true when the values are strictly equal, false otherwise.
 		 */
 		equals (compareValue: T | State<T>): State<boolean>;
+
+		/**
+		 * Returns a boolean state that is true when this state does not equal the provided value or state.
+		 * Uses strict inequality (!==) for comparison.
+		 * @param compareValue The value or state to compare against the current state value.
+		 * @returns A new state that is true when the values are not strictly equal, false otherwise.
+		 */
+		notEquals (compareValue: T | State<T>): State<boolean>;
 	}
 }
 
@@ -114,10 +123,36 @@ function createMappedState<T, TMapped> (
 	return mapped;
 }
 
+function createComparisonState<T> (
+	source: State<T>,
+	compareValue: ComparableValue<T>,
+	compare: (value: T, otherValue: T) => boolean,
+): RecomputableState<boolean> {
+	const comparator = compareValue instanceof State ? compareValue : null;
+	const comparisonState = createMappedState(source, source, (value) => compare(value, (comparator?.value ?? compareValue) as T));
+
+	if (!comparator || comparator === source) {
+		return comparisonState;
+	}
+
+	const releaseComparatorImplicitOwnerPropagation = ((comparisonState as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(comparator)) ?? (() => undefined);
+	const releaseComparatorSubscription = comparator.subscribeImmediate(comparisonState, () => {
+		comparisonState.recompute();
+	});
+
+	comparisonState.onCleanup(() => {
+		releaseComparatorImplicitOwnerPropagation();
+		releaseComparatorSubscription();
+	});
+
+	return comparisonState;
+}
+
 /**
  * Extends the State class with mapping and transformation methods.
  * This extension adds the {@link StateExtensions.map}, {@link StateExtensions.truthy},
- * {@link StateExtensions.falsy}, and {@link StateExtensions.or} methods to all State instances.
+ * {@link StateExtensions.falsy}, {@link StateExtensions.or}, {@link StateExtensions.equals},
+ * and {@link StateExtensions.notEquals} methods to all State instances.
  * Safe to call multiple times; subsequent calls are no-ops.
  */
 export default function mappingExtension (): void {
@@ -186,23 +221,10 @@ export default function mappingExtension (): void {
 	};
 
 	prototype.equals = function equals (compareValue: unknown): State<boolean> {
-		const comparator = compareValue instanceof State ? compareValue : null;
-		const equalsState = createMappedState(this, this, (value) => value === (comparator?.value ?? compareValue));
+		return createComparisonState(this, compareValue as ComparableValue<unknown>, (value, otherValue) => value === otherValue);
+	};
 
-		if (!comparator || comparator === this) {
-			return equalsState;
-		}
-
-		const releaseComparatorImplicitOwnerPropagation = ((equalsState as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(comparator)) ?? (() => undefined);
-		const releaseComparatorSubscription = comparator.subscribeImmediate(equalsState, () => {
-			equalsState.recompute();
-		});
-
-		equalsState.onCleanup(() => {
-			releaseComparatorImplicitOwnerPropagation();
-			releaseComparatorSubscription();
-		});
-
-		return equalsState;
+	prototype.notEquals = function notEquals (compareValue: unknown): State<boolean> {
+		return createComparisonState(this, compareValue as ComparableValue<unknown>, (value, otherValue) => value !== otherValue);
 	};
 }

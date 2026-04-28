@@ -766,6 +766,24 @@ describe("State", () => {
 		}
 	});
 
+	it("compares against plain values with notEquals", async () => {
+		const owner = mountedOwner();
+		const source = State(owner, "idle");
+		const notEquals = source.notEquals("idle");
+
+		try {
+			expect(notEquals.value).toBe(false);
+
+			source.set("running");
+			await flushEffects();
+
+			expect(notEquals.value).toBe(true);
+		}
+		finally {
+			owner.remove();
+		}
+	});
+
 	it("keeps equals true when comparing a state to itself", async () => {
 		const owner = mountedOwner();
 		const source = State(owner, "idle");
@@ -778,6 +796,24 @@ describe("State", () => {
 			await flushEffects();
 
 			expect(equals.value).toBe(true);
+		}
+		finally {
+			owner.remove();
+		}
+	});
+
+	it("keeps notEquals false when comparing a state to itself", async () => {
+		const owner = mountedOwner();
+		const source = State(owner, "idle");
+		const notEquals = source.notEquals(source);
+
+		try {
+			expect(notEquals.value).toBe(false);
+
+			source.set("running");
+			await flushEffects();
+
+			expect(notEquals.value).toBe(false);
 		}
 		finally {
 			owner.remove();
@@ -816,6 +852,45 @@ describe("State", () => {
 
 			sourceOwner.remove();
 			expect(equals.disposed, "disposing the source owner should dispose the derived equality state").toBe(true);
+		}
+		finally {
+			comparatorOwner.remove();
+			sourceOwner.remove();
+		}
+	});
+
+	/** Verifies notEquals can compare against another state, react to both inputs, and keep source ownership. */
+	it("compares against a reactive state comparator with notEquals", async () => {
+		const sourceOwner = mountedOwner();
+		const comparatorOwner = mountedOwner();
+		const source = State(sourceOwner, "idle");
+		const comparator = State(comparatorOwner, "idle");
+		const notEquals = source.notEquals(comparator);
+
+		try {
+			expect(notEquals.value, "state comparators should compare their current values").toBe(false);
+
+			source.set("running");
+			await flushEffects();
+
+			expect(notEquals.value, "the derived boolean state should react to source changes").toBe(true);
+
+			comparator.set("running");
+			await flushEffects();
+
+			expect(notEquals.value, "the derived boolean state should react to comparator changes").toBe(false);
+			expect(notEquals.getOwner(), "the derived inequality state should stay owned by the source state").toBe(source);
+
+			comparatorOwner.remove();
+			expect(notEquals.disposed, "disposing the comparator owner should not dispose the derived inequality state").toBe(false);
+
+			source.set("idle");
+			await flushEffects();
+
+			expect(notEquals.value, "the derived boolean state should keep reacting to source changes after comparator disposal").toBe(true);
+
+			sourceOwner.remove();
+			expect(notEquals.disposed, "disposing the source owner should dispose the derived inequality state").toBe(true);
 		}
 		finally {
 			comparatorOwner.remove();
