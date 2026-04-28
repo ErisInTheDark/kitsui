@@ -163,6 +163,23 @@ describe("StyleManipulator", () => {
 		expect(component.element.style.getPropertyValue("--resolved-border-width"), "fallback shorthand values should also allow nested variable shorthand").toBe("var(--border-width, var(--spacing))");
 	});
 
+	/** Verifies negative variable shorthand also expands inside fallback expressions in inline style values. */
+	it("expands negative variable shorthand in inline style values", () => {
+		const component = mountedComponent("div");
+
+		component.style.set({
+			$cssVarName: "8px",
+			$negativeOffset: "-$cssVarName",
+			$resolvedFallback: "${fallback: -$cssVarName}",
+			$negatedResolvedFallback: "-${fallback: $cssVarName}",
+		});
+
+		expect(component.element.style.getPropertyValue("--css-var-name"), "custom properties should still be written alongside shorthand expansion").toBe("8px");
+		expect(component.element.style.getPropertyValue("--negative-offset"), "negative variable shorthand should expand to a calc() expression").toBe("calc(-1 * var(--css-var-name))");
+		expect(component.element.style.getPropertyValue("--resolved-fallback"), "negative shorthand inside a fallback expression should expand to a nested calc() inside var()").toBe("var(--fallback, calc(-1 * var(--css-var-name)))");
+		expect(component.element.style.getPropertyValue("--negated-resolved-fallback"), "negative shorthand should also wrap braced fallback accesses when the negation appears first").toBe("calc(-1 * var(--fallback, var(--css-var-name)))");
+	});
+
 	it("throws when trying to set styles on a disposed component", () => {
 		const component = mountedComponent("div");
 		component.remove();

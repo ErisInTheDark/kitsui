@@ -47,6 +47,27 @@ describe("Style", () => {
 		expect(styleElement?.textContent).toContain(".style-variable-shorthand { --card-gap: 12px; gap: var(--card-gap); padding: calc(var(--card-gap) * 2) }");
 	});
 
+	/** Verifies negative variable shorthand serializes as a calc() expression and still expands inside operator contexts. */
+	it("serializes negative variable shorthand values", () => {
+		Style.Class("style-negative-variable-shorthand", {
+			$cssVarName: "8px",
+			$scaleFactor: "2",
+			paddingTop: "-$cssVarName",
+			marginTop: "calc(10px + -$cssVarName)",
+			marginBottom: "calc(10px % -$cssVarName)",
+			$product: "calc(10 * -$scaleFactor)",
+			$quotient: "calc(10 / -$scaleFactor)",
+		});
+
+		const styleElement = document.querySelector("style[data-kitsui-styles='true']");
+
+		expect(styleElement?.textContent, "negative variable shorthand should serialize as a calc() expression that multiplies the referenced CSS variable by -1").toContain("padding-top: calc(-1 * var(--css-var-name))");
+		expect(styleElement?.textContent, "negative shorthand inside an operator context should expand to a nested calc() around the referenced CSS variable").toContain("margin-top: calc(10px + calc(-1 * var(--css-var-name)))");
+		expect(styleElement?.textContent, "negative shorthand after the modulo operator should expand to a nested calc() around the referenced CSS variable").toContain("margin-bottom: calc(10px % calc(-1 * var(--css-var-name)))");
+		expect(styleElement?.textContent, "negative shorthand after multiplication should expand to a nested calc() around the referenced CSS variable").toContain("--product: calc(10 * calc(-1 * var(--scale-factor)))");
+		expect(styleElement?.textContent, "negative shorthand after division should expand to a nested calc() around the referenced CSS variable").toContain("--quotient: calc(10 / calc(-1 * var(--scale-factor)))");
+	});
+
 	it("supports nested fallback variable shorthand", () => {
 		Style.Class("style-variable-fallback", {
 			color: "${brandColor: ${fallbackColor: blue}}",

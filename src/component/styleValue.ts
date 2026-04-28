@@ -39,6 +39,16 @@ export function expandVariableAccessShorthand (styleValue: string | number): str
 	const src = styleValue;
 
 	let i = 0;
+	function peekPreviousNonWhitespaceChar (): string | undefined {
+		for (let j = i - 1; j >= 0; j--) {
+			if (!isWhitespaceCharacter(src[j])) {
+				return src[j];
+			}
+		}
+
+		return undefined;
+	}
+
 	function consumeChar (expected: string): boolean {
 		if (src[i] === expected) {
 			i++;
@@ -109,6 +119,26 @@ export function expandVariableAccessShorthand (styleValue: string | number): str
 		return `var(${toCssPropertyName(`$${variableName}`)}, ${fallbackValue})`;
 	}
 
+	function consumeNegativeVariableAccess (): string | undefined {
+		const restorePoint = i;
+		const previousChar = peekPreviousNonWhitespaceChar();
+		if (previousChar && !"(,:*/%+-".includes(previousChar)) {
+			return undefined;
+		}
+
+		if (!consumeChar("-")) {
+			return undefined;
+		}
+
+		const variableAccess = consumeVariableAccess();
+		if (!variableAccess) {
+			i = restorePoint;
+			return undefined;
+		}
+
+		return `calc(-1 * ${variableAccess})`;
+	}
+
 	function consumeStyleValue (): string {
 		let result = "";
 		do {
@@ -117,7 +147,7 @@ export function expandVariableAccessShorthand (styleValue: string | number): str
 				return result;
 			}
 
-			result += consumeWhitespace() || consumeVariableAccess() || src[i++];
+			result += consumeWhitespace() || consumeNegativeVariableAccess() || consumeVariableAccess() || src[i++];
 		} while (i < src.length);
 		return result;
 	}
