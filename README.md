@@ -5,6 +5,7 @@ kitsui is a DOM-first UI library built around owned `Component` and `State` obje
 ## Preferred Style
 
 - Write small factory functions that return a `Component`.
+- When a factory should also compose an existing component, give it a `this: Component | void` parameter and mark the initial `Component(...)` call with the factory function.
 - Build most structure in one fluent chain, then use targeted manipulators for classes, inline styles, attributes, and ARIA.
 - Create `State` inside the component or owner that should dispose it.
 - Use derived state and conditional helpers instead of manual DOM bookkeeping.
@@ -22,7 +23,7 @@ const counterStyle = Style.Class("counter", {
 })
 
 function Counter() {
-	const root = Component("section").class.add(counterStyle)
+	const root = Component(this ?? "section", Counter).class.add(counterStyle)
 	
 	const count = State(root, 0)
 	const doubled = count.map(root, (value) => value * 2)
@@ -54,6 +55,27 @@ Counter().appendTo(document.body);
 ```
 
 This style keeps ownership simple: `root` owns the state and child components, so removing `root` also disposes the whole subtree.
+
+## Component Builders
+
+Builder functions can be called directly to create a component, or composed into an existing component with `and`. A builder that participates in composition should mark its initial `Component(...)` call with its own function identity.
+
+```js
+function Button(label) {
+	return Component(this ?? "button", Button)
+		.text.set(label)
+		.attribute.set("type", "button")
+}
+
+const standalone = Button("Save")
+const composed = Component("button").and(Button, "Save")
+
+if (composed.is(Button)) {
+	composed.appendTo(document.body)
+}
+```
+
+`and` injects the current component as `this`, forwards params, and skips builders already applied to that component. `is` and `as` check the same builder identity.
 
 ## State-Driven Rendering
 
@@ -168,8 +190,8 @@ label.set("one")
 
 `Component`
 
-- `Component(tagNameOrElement)`, `Component.wrap(element)`, `Component.extend()`
-- Instance methods: `append`, `prepend`, `insert`, `appendWhen`, `prependWhen`, `insertWhen`, `clear`, `setAttribute`, `use`, `setOwner`, `getOwner`, `remove`
+- `Component(tagNameOrElement)`, `Component(componentOrTagNameOrElement, builder)`, `Component.extend()`
+- Instance methods: `append`, `prepend`, `insert`, `appendWhen`, `prependWhen`, `insertWhen`, `clear`, `use`, `and`, `is`, `as`, `remove`
 - Extension methods: `appendTo`, `prependTo`, `insertTo`, `appendToWhen`, `prependToWhen`, `insertToWhen`, `place`
 - Accessors: `class`, `style`, `attribute`, `aria`, `text`, `event`
 
@@ -193,7 +215,7 @@ label.set("one")
 
 `Useful exported types`
 
-- Components: `ComponentRender`, `ComponentChild`, `AppendableComponentChild`, `ComponentSelection`, `ComponentSelectionState`, `InsertWhere`, `InsertableNode`, `InsertableSelection`, `InsertableComponentChild`, `ExtendableComponentClass`
+- Components: `ComponentBuilderFunction`, `ComponentRender`, `ComponentChild`, `ComponentSelection`, `ComponentSelectionState`, `InsertWhere`, `ExtendableComponentClass`
 - Text: `TextValue`, `TextSelection`, `TextInput`, `TextSource`
 - State: `CleanupFunction`, `StateOptions`, `StateListener`, `StateUpdater`, `StateEqualityFunction`, `ExtendableStateClass`
 - Styling and attributes: `StyleDefinition`, `StyleValue`, `StyleInput`, `StyleSelection`, `StyleAttributeDefinition`, `StyleAttributeInput`, `StyleAttributeValue`, `StyleAttributeValueInput`, `Falsy`, `AttributeEntry`, `AttributeNameInput`, `AttributeNameSelection`, `AttributeValue`, `AttributeValueInput`, `AttributeValueSelection`

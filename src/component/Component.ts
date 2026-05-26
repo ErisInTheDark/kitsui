@@ -10,6 +10,7 @@ import { Marker } from "./Marker";
 import { OwnerManipulator } from "./OwnerManipulator";
 import { StyleManipulator } from "./StyleManipulator";
 import { TextManipulator } from "./TextManipulator";
+import { markComponentBuilder } from "./ComponentComposition";
 
 declare global {
 	interface Node {
@@ -41,6 +42,13 @@ export type ComponentChildren = ComponentChild | Iterable<ComponentChild> | Comp
  * @typeParam TValue - The type of state value being rendered.
  */
 export type ComponentRender<TValue> = (value: TValue, component: Component) => void;
+
+/**
+ * A component builder function that can either create a standalone component or compose an existing one.
+ * When called through {@link ComponentExtensions.and}, the current component is provided as `this`.
+ * Standalone builder calls should mark their result with `Component(source, builder)`.
+ */
+export type ComponentBuilderFunction<PARAMS extends unknown[] = unknown[], RESULT extends Component = Component> = (this: Component | void, ...params: PARAMS) => RESULT;
 
 /**
  * Specifies the direction for inserting a component relative to an anchor.
@@ -97,6 +105,25 @@ type ComponentConstructor = {
 	 * @throws If wrapping an element that already has a component.
 	 */
 	<ELEMENT extends HTMLElement> (element: ELEMENT): Component<ELEMENT>;
+	/**
+	 * @param component - An existing Component to return and mark with a builder identity.
+	 * @param builder - Function identity that marks the component as having been built by that function.
+	 * @returns The same component instance.
+	 */
+	<COMPONENT extends Component> (component: COMPONENT, builder: Function): COMPONENT;
+	/**
+	 * @param tagName - An HTML tag name (creates new element).
+	 * @param builder - Function identity that marks the component as having been built by that function.
+	 * @returns A marked component that wraps a DOM element.
+	 */
+	<NAME extends keyof HTMLElementTagNameMap> (tagName: NAME, builder: Function): Component<HTMLElementTagNameMap[NAME]>;
+	/**
+	 * @param element - An existing HTMLElement to wrap.
+	 * @param builder - Function identity that marks the component as having been built by that function.
+	 * @returns A marked component that wraps a DOM element.
+	 * @throws If wrapping an element that already has a component.
+	 */
+	<ELEMENT extends HTMLElement> (element: ELEMENT, builder: Function): Component<ELEMENT>;
 	new (): Component<HTMLSpanElement>;
 	/**
 	 * @param tagName - An HTML tag name (creates new element).
@@ -110,6 +137,26 @@ type ComponentConstructor = {
 	 * @throws If wrapping an element that already has a component.
 	 */
 	new <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
+	/**
+	 * @param component - An existing Component to return and mark with a builder identity.
+	 * @param builder - Function identity that marks the component as having been built by that function.
+	 * @returns The same component instance.
+	 */
+	new <COMPONENT extends Component>(component: COMPONENT, builder: Function): COMPONENT;
+	/**
+	 * @param tagName - An HTML tag name (creates new element).
+	 * @param builder - Function identity that marks the component as having been built by that function.
+	 * @returns A marked component that wraps a DOM element.
+	 * @throws If wrapping an element that already has a component.
+	 */
+	new<NAME extends keyof HTMLElementTagNameMap> (tagName: NAME, builder: Function): Component<HTMLElementTagNameMap[NAME]>;
+	/**
+	 * @param element - An existing HTMLElement to wrap.
+	 * @param builder - Function identity that marks the component as having been built by that function.
+	 * @returns A marked component that wraps a DOM element.
+	 * @throws If wrapping an element that already has a component.
+	 */
+	new <ELEMENT extends HTMLElement>(element: ELEMENT, builder: Function): Component<ELEMENT>;
 	prototype: Component;
 	/**
 	 * Selects the first element in the document matching the CSS selector and wraps it in a component (or returns the existing).
@@ -1364,9 +1411,24 @@ export type Component<ELEMENT extends HTMLElement = HTMLElement> = ComponentClas
  * @group Component
  */
 export const Component = function Component (
-	tagNameOrElement: string | HTMLElement = "span",
+	tagNameOrElement: string | HTMLElement | Component = "span",
+	builder?: Function,
 ): Component {
-	return new ComponentClass(tagNameOrElement);
+	if (tagNameOrElement instanceof ComponentClass) {
+		if (builder) {
+			markComponentBuilder(tagNameOrElement, builder);
+		}
+
+		return tagNameOrElement;
+	}
+
+	const component = new ComponentClass(tagNameOrElement);
+
+	if (builder) {
+		markComponentBuilder(component, builder);
+	}
+
+	return component;
 } as ComponentConstructor & ComponentStaticExtensions;
 
 Component.prototype = ComponentClass.prototype;

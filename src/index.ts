@@ -8,11 +8,13 @@
  */
 
 import breakdownExtension from "./component/extensions/breakdownExtension";
+import compositionExtension from "./component/extensions/compositionExtension";
 import placeExtension from "./component/extensions/placeExtension";
 import groupExtension from "./state/extensions/groupExtension";
 import mappingExtension from "./state/extensions/mappingExtension";
 
 breakdownExtension();
+compositionExtension();
 placeExtension();
 groupExtension();
 mappingExtension();
@@ -47,6 +49,7 @@ export { ClassManipulator } from "./component/ClassManipulator";
 export type { Falsy, StyleInput, StyleSelection } from "./component/ClassManipulator";
 export { Component } from "./component/Component";
 export type {
+    ComponentBuilderFunction,
     ComponentChild,
     ComponentChildren,
     ComponentRender,
