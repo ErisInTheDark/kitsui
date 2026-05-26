@@ -2929,6 +2929,20 @@ ${innerRules}
     }
   };
 
+  // src/component/ComponentComposition.ts
+  var componentBuilders = /* @__PURE__ */ new WeakMap();
+  function markComponentBuilder(component, builder2) {
+    let builders = componentBuilders.get(component);
+    if (!builders) {
+      builders = /* @__PURE__ */ new Set();
+      componentBuilders.set(component, builders);
+    }
+    builders.add(builder2);
+  }
+  function hasComponentBuilder(component, builder2) {
+    return componentBuilders.get(component)?.has(builder2) ?? false;
+  }
+
   // src/component/Component.ts
   var noop9 = () => {
   };
@@ -3844,8 +3858,18 @@ ${innerRules}
       return components;
     }
   };
-  var Component = function Component2(tagNameOrElement = "span") {
-    return new ComponentClass(tagNameOrElement);
+  var Component = function Component2(tagNameOrElement = "span", builder2) {
+    if (tagNameOrElement instanceof ComponentClass) {
+      if (builder2) {
+        markComponentBuilder(tagNameOrElement, builder2);
+      }
+      return tagNameOrElement;
+    }
+    const component = new ComponentClass(tagNameOrElement);
+    if (builder2) {
+      markComponentBuilder(component, builder2);
+    }
+    return component;
   };
   Component.prototype = ComponentClass.prototype;
   Component.query = function query(selector) {
@@ -4033,6 +4057,49 @@ ${innerRules}
     ComponentWithBreakdown.Breakdown = Breakdown;
   }
 
+  // src/component/extensions/compositionExtension.ts
+  var patched2 = false;
+  function isComponent(value) {
+    return value instanceof Component.extend();
+  }
+  function ensureActive(component) {
+    if (component.disposed) {
+      throw new Error("Disposed components cannot be modified.");
+    }
+  }
+  function compositionExtension() {
+    if (patched2) {
+      return;
+    }
+    patched2 = true;
+    const ComponentClass2 = Component.extend();
+    const prototype = ComponentClass2.prototype;
+    prototype.and = function and(builder2, ...params) {
+      ensureActive(this);
+      if (typeof builder2 !== "function") {
+        throw new TypeError("Component.and requires a builder function.");
+      }
+      if (hasComponentBuilder(this, builder2)) {
+        return this;
+      }
+      const result = builder2.call(this, ...params);
+      if (!isComponent(result)) {
+        throw new TypeError("Component builders must return a Component.");
+      }
+      if (result !== this) {
+        throw new Error("Component.and builders must return the component they were called on.");
+      }
+      markComponentBuilder(this, builder2);
+      return this;
+    };
+    prototype.is = function is(builder2) {
+      return typeof builder2 === "function" && hasComponentBuilder(this, builder2);
+    };
+    prototype.as = function as(builder2) {
+      return this.is(builder2) ? this : void 0;
+    };
+  }
+
   // src/component/extensions/placeExtension.ts
   var noop11 = () => {
   };
@@ -4044,7 +4111,7 @@ ${innerRules}
   var placementLifecycleOwners = /* @__PURE__ */ new WeakMap();
   var recursiveTreeErrorMessage2 = "Cannot move a node into itself or one of its descendants.";
   var componentClass2 = null;
-  var patched2 = false;
+  var patched3 = false;
   function getComponentClass2() {
     componentClass2 ?? (componentClass2 = Component.extend());
     return componentClass2;
@@ -4078,12 +4145,12 @@ ${innerRules}
   function createStorageElement2(documentRef) {
     return documentRef.createElement("kitsui-storage");
   }
-  function ensureActive(component) {
+  function ensureActive2(component) {
     if (component.disposed) {
       throw new Error("Disposed components cannot be modified.");
     }
   }
-  function isComponent(value) {
+  function isComponent2(value) {
     return value instanceof getComponentClass2();
   }
   function clearPlacement(component) {
@@ -4168,7 +4235,7 @@ ${innerRules}
     if (!target) {
       return null;
     }
-    if (isComponent(target)) {
+    if (isComponent2(target)) {
       return target.element;
     }
     if (target instanceof Marker) {
@@ -4180,8 +4247,8 @@ ${innerRules}
     return target;
   }
   function resolvePlacementContainer(target) {
-    if (isComponent(target)) {
-      ensureActive(target);
+    if (isComponent2(target)) {
+      ensureActive2(target);
       return target.element;
     }
     if (isMoveParent2(target)) {
@@ -4212,7 +4279,7 @@ ${innerRules}
     if (!target) {
       return null;
     }
-    if (isComponent(target)) {
+    if (isComponent2(target)) {
       return target === component ? resolveOwnPlacementOwner(component) : resolveOwnPlacementOwner(target);
     }
     if (target instanceof Marker) {
@@ -4228,7 +4295,7 @@ ${innerRules}
     return owner;
   }
   function resolvePlacementContainerOwner(target, component) {
-    if (isComponent(target)) {
+    if (isComponent2(target)) {
       return target === component ? resolveOwnPlacementOwner(component) : target;
     }
     return resolvePlacementOwner(target, component);
@@ -4259,10 +4326,10 @@ ${innerRules}
     marker["dispatchMount"]();
   }
   function placeExtension() {
-    if (patched2) {
+    if (patched3) {
       return;
     }
-    patched2 = true;
+    patched3 = true;
     registerComponentOwnerResolver((component) => {
       return placementOwners.get(component) ?? null;
     });
@@ -4311,7 +4378,7 @@ ${innerRules}
       return this;
     };
     prototype.appendTo = function appendTo(target) {
-      ensureActive(this);
+      ensureActive2(this);
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, null);
       return this;
@@ -4324,7 +4391,7 @@ ${innerRules}
       });
     };
     prototype.prependTo = function prependTo(target) {
-      ensureActive(this);
+      ensureActive2(this);
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, container.firstChild);
       return this;
@@ -4337,7 +4404,7 @@ ${innerRules}
       });
     };
     prototype.insertTo = function insertTo(where, target) {
-      ensureActive(this);
+      ensureActive2(this);
       const referenceNode = resolvePlacementReferenceNode(target);
       if (!referenceNode) {
         return this;
@@ -4357,7 +4424,7 @@ ${innerRules}
       });
     };
     prototype.place = function place(owner, placer) {
-      ensureActive(this);
+      ensureActive2(this);
       const placementOwner = owner === this ? getPlacementLifecycleOwner(this) : owner;
       placementOwners.set(this, placementOwner);
       const documentRef = this.element.ownerDocument;
@@ -4424,7 +4491,7 @@ ${innerRules}
 
   // src/state/extensions/groupExtension.ts
   var createState = State;
-  var patched3 = false;
+  var patched4 = false;
   function scheduleNextTick(callback) {
     const schedulerRef = globalThis;
     if (typeof schedulerRef.scheduler?.yield === "function") {
@@ -4486,10 +4553,10 @@ ${innerRules}
     return grouped;
   }
   function groupExtension() {
-    if (patched3) {
+    if (patched4) {
       return;
     }
-    patched3 = true;
+    patched4 = true;
     const StateWithGroup = State;
     const Group = function Group2(ownerOrStates, statesOrMapperOrOptions, mapperOrOptions, maybeOptions) {
       const owner = ownerOrStates instanceof Owner && arguments.length >= 2 ? ownerOrStates : null;
@@ -4511,7 +4578,7 @@ ${innerRules}
   var falsyStates = /* @__PURE__ */ new WeakMap();
   var createOwnedState2 = State;
   var createOwnerlessState = State;
-  var patched4 = false;
+  var patched5 = false;
   function createMappedState(source, owner, mapValue, options) {
     const stateOptions = {
       ...options,
@@ -4552,10 +4619,10 @@ ${innerRules}
     return comparisonState;
   }
   function mappingExtension() {
-    if (patched4) {
+    if (patched5) {
       return;
     }
-    patched4 = true;
+    patched5 = true;
     const StateClass2 = State.extend();
     const prototype = StateClass2.prototype;
     prototype.map = function map(ownerOrMapValue, maybeMapValueOrOptions, maybeOptions) {
@@ -4606,6 +4673,7 @@ ${innerRules}
 
   // src/index.ts
   breakdownExtension();
+  compositionExtension();
   placeExtension();
   groupExtension();
   mappingExtension();

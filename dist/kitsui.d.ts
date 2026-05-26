@@ -301,6 +301,8 @@ export type ComponentChildren = ComponentChild | Iterable<ComponentChild> | Comp
 
 export type ComponentRender<TValue> = (value: TValue, component: Component) => void;
 
+export type ComponentBuilderFunction<PARAMS extends unknown[] = unknown[], RESULT extends Component = Component> = (this: Component | void, ...params: PARAMS) => RESULT;
+
 export type InsertWhere = "before" | "after";
 
 export type ComponentSelection = Component | Falsy | Iterable<Component | Falsy>;
@@ -334,6 +336,25 @@ type ComponentConstructor = {
      * @throws If wrapping an element that already has a component.
      */
     <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
+    /**
+     * @param component - An existing Component to return and mark with a builder identity.
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns The same component instance.
+     */
+    <COMPONENT extends Component>(component: COMPONENT, builder: Function): COMPONENT;
+    /**
+     * @param tagName - An HTML tag name (creates new element).
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns A marked component that wraps a DOM element.
+     */
+    <NAME extends keyof HTMLElementTagNameMap>(tagName: NAME, builder: Function): Component<HTMLElementTagNameMap[NAME]>;
+    /**
+     * @param element - An existing HTMLElement to wrap.
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns A marked component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    <ELEMENT extends HTMLElement>(element: ELEMENT, builder: Function): Component<ELEMENT>;
     new (): Component<HTMLSpanElement>;
     /**
      * @param tagName - An HTML tag name (creates new element).
@@ -347,6 +368,26 @@ type ComponentConstructor = {
      * @throws If wrapping an element that already has a component.
      */
     new <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
+    /**
+     * @param component - An existing Component to return and mark with a builder identity.
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns The same component instance.
+     */
+    new <COMPONENT extends Component>(component: COMPONENT, builder: Function): COMPONENT;
+    /**
+     * @param tagName - An HTML tag name (creates new element).
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns A marked component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    new <NAME extends keyof HTMLElementTagNameMap>(tagName: NAME, builder: Function): Component<HTMLElementTagNameMap[NAME]>;
+    /**
+     * @param element - An existing HTMLElement to wrap.
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns A marked component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    new <ELEMENT extends HTMLElement>(element: ELEMENT, builder: Function): Component<ELEMENT>;
     prototype: Component;
     /**
      * Selects the first element in the document matching the CSS selector and wraps it in a component (or returns the existing).
@@ -1504,6 +1545,34 @@ export interface ComponentStaticExtensions {
          * @returns A cleanup function that stops the breakdown and disposes its parts.
          */
         Breakdown: BreakdownConstructor;
+    }
+
+export interface ComponentExtensions {
+        /**
+         * Composes this component with a builder function.
+         *
+         * The builder receives this component as its `this` context and must return the same component instance.
+         * Builders that have already been applied are skipped.
+         *
+         * @param builder The component builder function to apply.
+         * @param params Parameters forwarded to the builder.
+         * @returns This component narrowed with the builder's result type.
+         */
+        and<PARAMS extends unknown[], RESULT extends Component>(builder: ComponentBuilderFunction<PARAMS, RESULT>, ...params: PARAMS): this & RESULT;
+        /**
+         * Checks whether this component has been marked with a builder identity.
+         *
+         * @param builder The builder identity to check.
+         * @returns True when the builder has been applied to this component.
+         */
+        is<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): this is this & RESULT;
+        /**
+         * Returns this component narrowed to the builder result type when the builder has been applied.
+         *
+         * @param builder The builder identity to check.
+         * @returns This component when marked with the builder, otherwise undefined.
+         */
+        as<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): (this & RESULT) | undefined;
     }
 
 type GroupedStateObject = Record<string, State<any>>;
