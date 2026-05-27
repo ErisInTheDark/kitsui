@@ -22,9 +22,7 @@ type ButtonComponent = Component<HTMLButtonElement> & {
 };
 
 const Button: ComponentBuilderFunction<[string], ButtonComponent> = function Button (this: Component | void, label: string): ButtonComponent {
-	const component = this
-		? Component(this, Button)
-		: Component("button", Button);
+	const component = Component(this ?? "button", Button);
 
 	component.text.set(label);
 

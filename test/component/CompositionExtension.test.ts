@@ -11,9 +11,7 @@ type ButtonComponent = Component<HTMLButtonElement> & {
 };
 
 function Button (this: Component | void, label: string): ButtonComponent {
-	const component = this
-		? Component(this, Button)
-		: Component("button", Button);
+	const component = Component(this ?? "button", Button);
 
 	component.text.set(label);
 
@@ -29,9 +27,7 @@ type ToggleComponent = Component & {
 };
 
 function Toggle (this: Component | void): ToggleComponent {
-	const component = this
-		? Component(this, Toggle)
-		: Component("span", Toggle);
+	const component = Component(this ?? "span", Toggle);
 
 	return Object.assign(component, {
 		toggle (): void {
@@ -88,9 +84,7 @@ describe("compositionExtension", () => {
 
 	it("skips duplicate builder applications", () => {
 		const builder = vi.fn(function Counted (this: Component | void, label: string) {
-			const component = this
-				? Component(this, builder)
-				: Component("button", builder);
+			const component = Component(this ?? "button", builder);
 
 			component.text.set(label);
 			return component as Component<HTMLButtonElement>;

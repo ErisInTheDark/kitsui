@@ -14,49 +14,49 @@ import {
 } from "kitsui";
 
 interface UpgradeDefinition {
-	buttonLabel: State<string>;
-	canAfford: State<boolean>;
-	cost: State<number>;
-	description: string;
-	effect: string;
-	levelLabel: State<string>;
-	name: string;
-	onBuy (): void;
-	unlocked: State<boolean>;
+	buttonLabel: State<string>
+	canAfford: State<boolean>
+	cost: State<number>
+	description: string
+	effect: string
+	levelLabel: State<string>
+	name: string
+	onBuy (): void
+	unlocked: State<boolean>
 }
 
 interface UpgradeBlueprint {
-	action: string;
-	baseCost: number;
-	description: string;
-	effect: string;
-	growth: number;
-	name: string;
-	onBuy (cost: number): void;
-	unlockAt: number;
+	action: string
+	baseCost: number
+	description: string
+	effect: string
+	growth: number
+	name: string
+	onBuy (cost: number): void
+	unlockAt: number
 }
 
 interface FishPosition {
-	depth: number;
-	left: number;
-	rotate: number;
-	scale: number;
-	top: number;
+	depth: number
+	left: number
+	rotate: number
+	scale: number
+	top: number
 }
 
 interface FishTemplate {
-	name: string;
-	emoji: string;
-	multiplier: number;
-	scale: number;
+	name: string
+	emoji: string
+	multiplier: number
+	scale: number
 }
 
 interface PondFishHandle {
-	catchByGull (): void;
-	intersectsGull (gullRect: DOMRect, pondRect: DOMRect): boolean;
+	catchByGull (): void
+	intersectsGull (gullRect: DOMRect, pondRect: DOMRect): boolean
 }
 
-type FishMultiplier = 1 | 2 | 3 | 4;
+type FishMultiplier = 1 | 2 | 3 | 4
 
 StyleRoot({
 	display: "grid",
@@ -585,11 +585,11 @@ function shuffle<T> (items: readonly T[]): T[] {
 }
 
 function getSchoolComposition (pondFishAdded: number): {
-	minnows: number;
-	puffers: number;
-	reefSnappers: number;
-	tier: 0 | 1 | 2 | 3;
-	whales: number;
+	minnows: number
+	puffers: number
+	reefSnappers: number
+	tier: 0 | 1 | 2 | 3
+	whales: number
 } {
 	let minnows = pondFishAdded + 1
 	let reefSnappers = 0
@@ -905,8 +905,8 @@ function createUpgradeDefinition (
 	purchaseCount: State<number>,
 	blueprint: UpgradeBlueprint,
 	resources: {
-		money: State<number>;
-		unlockProgress: State<number>;
+		money: State<number>
+		unlockProgress: State<number>
 	},
 ): UpgradeDefinition {
 	const cost = purchaseCount.map(root, currentCount => Math.round(blueprint.baseCost * blueprint.growth ** currentCount))
@@ -1061,23 +1061,23 @@ function FishSchool (
 		.appendTo(pond)
 
 	type FishInstance = {
-		button: Component;
-		dispose (): void;
-		handle: PondFishHandle;
-		multiplier: FishMultiplier;
+		button: Component
+		dispose (): void
+		handle: PondFishHandle
+		multiplier: FishMultiplier
 	}
 
 	type FishButtonState = {
-		catchable: State<boolean>;
-		facing: State<number>;
-		filter: State<string>;
-		mutated: State<boolean>;
-		mutationScale: State<number>;
-		offscreen: State<boolean>;
-		position: State<FishPosition>;
-		template: State<FishTemplate>;
-		transition: State<string>;
-		visible: State<boolean>;
+		catchable: State<boolean>
+		facing: State<number>
+		filter: State<string>
+		mutated: State<boolean>
+		mutationScale: State<number>
+		offscreen: State<boolean>
+		position: State<FishPosition>
+		template: State<FishTemplate>
+		transition: State<string>
+		visible: State<boolean>
 	}
 
 	let fish: FishInstance[] = []

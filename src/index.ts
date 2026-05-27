@@ -52,9 +52,11 @@ export type {
     ComponentBuilderFunction,
     ComponentChild,
     ComponentChildren,
+    ComponentFromSource,
     ComponentRender,
     ComponentSelection,
     ComponentSelectionState,
+    ComponentSource,
     InsertWhere
 } from "./component/Component";
 export { EventManipulator } from "./component/EventManipulator";

@@ -308,7 +308,7 @@ describe("build:docs pipeline", () => {
 		const componentSignatureSection = componentDeclaration.split('<div class="docs-declaration-children">')[0] ?? componentDeclaration;
 		const componentSignatureCount = (componentSignatureSection.match(/class="docs-signature docs-signature-accent-method"/gu) ?? []).length;
 		const normalizedComponentDeclaration = componentSignatureSection.replace(/\s+/gu, " ");
-		expect(componentSignatureCount, "Component should render six paired callable/constructable signature groups").toBe(6);
+		expect(componentSignatureCount, "Component should render four paired callable/constructable signature groups").toBe(4);
 		expect(/<span class="docs-parameter-name">tagName<\/span>[\s\S]*?<br><span class="docs-signature-punctuation">new <\/span><span class="docs-signature-name">Component<\/span>[\s\S]*?<span class="docs-parameter-name">tagName<\/span>/u.test(normalizedComponentDeclaration), "Component(tagName) should pair with new Component(tagName)").toBe(true);
 		expect(/<span class="docs-parameter-name">element<\/span>[\s\S]*?<br><span class="docs-signature-punctuation">new <\/span><span class="docs-signature-name">Component<\/span>[\s\S]*?<span class="docs-parameter-name">element<\/span>/u.test(normalizedComponentDeclaration), "Component(element) should pair with new Component(element)").toBe(true);
 		const styleValueDeclaration = declarationSlice(styleHtml, "StyleValue");

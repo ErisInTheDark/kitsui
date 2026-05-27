@@ -10,9 +10,7 @@ Use plain builder functions with an explicit builder identity marker in the init
 
 ```ts
 function Button(this: Component | void): ButtonComponent {
-	const component = this
-		? Component(this, Button)
-		: Component("button", Button);
+	const component = Component(this ?? "button", Button);
 
 	return component as ButtonComponent;
 }
