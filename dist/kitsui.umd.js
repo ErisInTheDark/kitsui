@@ -936,6 +936,17 @@ var __kitsui_factory__ = (() => {
       }
       return this.owner;
     }
+    /**
+     * Toggles valueless attributes on the element based on a boolean.
+     * @param attribute Attribute name or names to toggle.
+     * @param enabled Whether the attributes should be present.
+     * @returns The owning component for fluent chaining.
+     */
+    toggle(attribute, enabled) {
+      this.ensureActive();
+      this.installAttributePresence(attribute, () => enabled ? "" : null, isStateSource(attribute));
+      return this.owner;
+    }
     bind(state2, ...inputs) {
       this.ensureActive();
       if (inputs.some(isAttributeEntry)) {
