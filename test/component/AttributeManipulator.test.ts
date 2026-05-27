@@ -145,6 +145,67 @@ describe("AttributeManipulator", () => {
 		errorSpy.mockRestore();
 	});
 
+	it("toggles valueless attributes from a direct name selection", () => {
+		const component = mountedComponent("button");
+
+		const enabledResult = component.attribute.toggle("disabled", true);
+
+		expect(enabledResult).toBe(component);
+		expect(component.element.hasAttribute("disabled")).toBe(true);
+		expect(component.element.getAttribute("disabled")).toBe("");
+
+		component.attribute.toggle("disabled", false);
+
+		expect(component.element.hasAttribute("disabled")).toBe(false);
+	});
+
+	it("toggles iterable attribute name selections", () => {
+		const component = mountedComponent("button");
+
+		component.attribute.toggle(["disabled", null, "hidden"], true);
+
+		expect(component.element.hasAttribute("disabled")).toBe(true);
+		expect(component.element.hasAttribute("hidden")).toBe(true);
+
+		component.attribute.toggle(["hidden", "disabled"], false);
+
+		expect(component.element.hasAttribute("disabled")).toBe(false);
+		expect(component.element.hasAttribute("hidden")).toBe(false);
+	});
+
+	it("toggles attributes from a state-driven name selection", async () => {
+		const component = mountedComponent("button");
+		const names = State<string | Array<string | null> | null>(component, "disabled");
+
+		component.attribute.toggle(names, true);
+
+		expect(component.element.hasAttribute("disabled")).toBe(true);
+
+		names.set(["hidden", null]);
+		await flushEffects();
+
+		expect(component.element.hasAttribute("disabled")).toBe(false);
+		expect(component.element.hasAttribute("hidden")).toBe(true);
+
+		component.attribute.toggle(names, false);
+
+		expect(component.element.hasAttribute("hidden")).toBe(false);
+	});
+
+	it("logs an error when state-driven toggling replaces an existing determiner", () => {
+		const component = mountedComponent("button");
+		const names = State<string | null>(component, "disabled");
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		component.attribute.add("disabled");
+		component.attribute.toggle(names, false);
+
+		expect(errorSpy).toHaveBeenCalledTimes(1);
+		expect(component.element.hasAttribute("disabled")).toBe(false);
+
+		errorSpy.mockRestore();
+	});
+
 	it("binds valueless attributes to a boolean state", async () => {
 		const component = mountedComponent("button");
 		const visible = State(component, false);

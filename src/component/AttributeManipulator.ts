@@ -209,6 +209,19 @@ export class AttributeManipulator<OWNER extends Component> {
 	}
 
 	/**
+	 * Toggles valueless attributes on the element based on a boolean.
+	 * @param attribute Attribute name or names to toggle.
+	 * @param enabled Whether the attributes should be present.
+	 * @returns The owning component for fluent chaining.
+	 */
+	toggle (attribute: AttributeNameInput, enabled: boolean): OWNER {
+		this.ensureActive();
+		this.installAttributePresence(attribute, () => enabled ? "" : null, isStateSource(attribute));
+
+		return this.owner;
+	}
+
+	/**
 	 * Binds valueless attributes to a boolean state, adding/removing them based on state value.
 	 * @param state A subscribable boolean state.
 	 * @param attributes Attribute names to bind.
