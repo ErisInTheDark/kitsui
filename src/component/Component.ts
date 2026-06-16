@@ -829,7 +829,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * @param setup A setup callback that can perform additional fluent configuration.
 	 * @returns This component for chaining.
 	 */
-	use (setup: (component: Component) => unknown): this;
+	use<PARAMS extends any[]> (setup: (component: Component, ...params: PARAMS) => unknown, ...params: PARAMS): this;
 	/**
 	 * Subscribes this component to state changes and re-renders when the state updates.
 	 * The render function is called immediately with the current state value, then again each time the state changes.
@@ -840,13 +840,15 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * @returns This component for chaining.
 	 */
 	use<TValue> (state: State<TValue>, render: ComponentRender<TValue>): this;
-	use<TValue> (setupOrState: ((component: Component) => unknown) | State<TValue>, render?: ComponentRender<TValue>): this {
+	use<TValue> (setupOrState: ((component: Component, ...params: any[]) => unknown) | State<TValue>, ...params: [ComponentRender<TValue>] | any[]): this {
 		this.ensureActive();
 
 		if (typeof setupOrState === "function") {
-			setupOrState(this);
+			setupOrState(this, ...params);
 			return this;
 		}
+
+		const render = params[0] as ComponentRender<TValue> | undefined;
 
 		if (!render) {
 			throw new Error("Component.use requires a render function when passed a state.");

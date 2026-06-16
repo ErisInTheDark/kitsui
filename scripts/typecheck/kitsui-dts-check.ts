@@ -17,6 +17,12 @@ void state;
 void Style;
 void publicTypes;
 
+const hostAfterParameterizedSetup = host.use((component, label, count) => {
+	component.text.set(`${label}:${count.toFixed(0)}`);
+}, "ready", 2);
+
+void hostAfterParameterizedSetup;
+
 type ButtonComponent = Component<HTMLButtonElement> & {
 	press (): void;
 };

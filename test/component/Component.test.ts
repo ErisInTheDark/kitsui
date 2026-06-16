@@ -396,6 +396,16 @@ describe("Component", () => {
 		expect(component.element.getAttribute("role")).toBe("status");
 	});
 
+	it("passes setup parameters through use without a state", () => {
+		const component = mountedComponent("div");
+		const returned = component.use((target, label: string, count: number) => {
+			target.text.set(`${label}:${count}`);
+		}, "ready", 2);
+
+		expect(returned).toBe(component);
+		expect(component.element.textContent).toBe("ready:2");
+	});
+
 	it("releases use state bindings when the component is removed", () => {
 		const component = mountedComponent("div");
 		const counter = State(component, 0);
