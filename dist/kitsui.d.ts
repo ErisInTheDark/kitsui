@@ -507,7 +507,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * @param setup A setup callback that can perform additional fluent configuration.
      * @returns This component for chaining.
      */
-    use(setup: (component: Component) => unknown): this;
+    use<PARAMS extends any[]>(setup: (component: Component, ...params: PARAMS) => unknown, ...params: PARAMS): this;
     /**
      * Subscribes this component to state changes and re-renders when the state updates.
      * The render function is called immediately with the current state value, then again each time the state changes.

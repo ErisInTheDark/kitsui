@@ -3454,12 +3454,13 @@ ${innerRules}
       this.element.replaceChildren();
       return this;
     }
-    use(setupOrState, render) {
+    use(setupOrState, ...params) {
       this.ensureActive();
       if (typeof setupOrState === "function") {
-        setupOrState(this);
+        setupOrState(this, ...params);
         return this;
       }
+      const render = params[0];
       if (!render) {
         throw new Error("Component.use requires a render function when passed a state.");
       }
