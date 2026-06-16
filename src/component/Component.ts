@@ -68,6 +68,15 @@ export type ComponentFromSource<SOURCE extends ComponentSource> =
 export type ComponentBuilderFunction<PARAMS extends unknown[] = unknown[], RESULT extends Component = Component> = (this: Component | void, ...params: PARAMS) => RESULT;
 
 /**
+ * Builds members to assign onto one component instance through {@link Component.extend}.
+ * @typeParam TComponent - The component being extended.
+ * @typeParam TExtensions - The instance-specific members to assign.
+ */
+export type ComponentExtensionFactory<TComponent extends Component, TExtensions extends object> = (
+	component: TComponent & TExtensions
+) => TExtensions & ThisType<TComponent & TExtensions>;
+
+/**
  * Specifies the direction for inserting a component relative to an anchor.
  */
 export type InsertWhere = "before" | "after";
@@ -859,6 +868,28 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			render(value, this);
 		});
 		return this;
+	}
+
+	/**
+	 * Assigns instance-specific members onto this component and returns the same narrowed component.
+	 * The extension factory receives this component typed as the final intersection.
+	 * @param extensions Builds the object members to assign onto this component.
+	 * @returns This component narrowed with the assigned extension members.
+	 */
+	extend<TExtensions extends object> (extensions: ComponentExtensionFactory<this, TExtensions>): this & TExtensions {
+		this.ensureActive();
+
+		if (typeof extensions !== "function") {
+			throw new TypeError("Component.extend requires an extension factory function.");
+		}
+
+		const extensionMembers = extensions(this as this & TExtensions);
+
+		if (typeof extensionMembers !== "object" || extensionMembers === null) {
+			throw new TypeError("Component.extend extension factories must return an object.");
+		}
+
+		return Object.assign(this, extensionMembers);
 	}
 
 	/**

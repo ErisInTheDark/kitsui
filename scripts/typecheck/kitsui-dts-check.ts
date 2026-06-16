@@ -29,20 +29,23 @@ const hostAfterBreakdown = host.breakdown(state, (component, Part, value) => {
 void hostAfterParameterizedSetup;
 void hostAfterBreakdown;
 
-type ButtonComponent = Component<HTMLButtonElement> & {
-	press (): void;
-};
+interface ButtonExtensions {
+	press (): this;
+}
+
+interface ButtonComponent extends Component, ButtonExtensions { }
 
 const Button: ComponentBuilderFunction<[string], ButtonComponent> = function Button (this: Component | void, label: string): ButtonComponent {
 	const component = Component(this ?? "button", Button);
 
 	component.text.set(label);
 
-	return Object.assign(component, {
-		press (): void {
-			component.element.click();
+	return component.extend<ButtonExtensions>(root => ({
+		press () {
+			root.element.click();
+			return root;
 		},
-	}) as ButtonComponent;
+	}));
 };
 
 const standaloneButton = Button("Save");
@@ -57,3 +60,12 @@ if (composedButton.is(Button)) {
 }
 
 maybeButton?.press();
+
+const directButton = Component("button").extend<ButtonExtensions>(root => ({
+	press () {
+		root.element.click();
+		return root;
+	},
+}));
+
+directButton.press().attribute.set("type", "button");

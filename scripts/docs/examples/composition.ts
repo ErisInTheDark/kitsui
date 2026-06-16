@@ -57,30 +57,34 @@ const buttonStyle = Style.Class("composition-button", {
 	}),
 })
 
-type CardComponent = Component & {
+interface CardExtensions {
 	highlight (): void
 }
+
+interface CardComponent extends Component, CardExtensions { }
 
 function Card (this: Component | void): CardComponent {
 	const card = Component(this ?? "section", Card)
 		.class.add(cardStyle)
 
-	return Object.assign(card, {
-		highlight (): void {
-			card.class.add(cardHighlightStyle)
+	return card.extend<CardExtensions>(root => ({
+		highlight () {
+			root.class.add(cardHighlightStyle)
 
 			setTimeout(() => {
-				if (!card.disposed) {
-					card.class.remove(cardHighlightStyle)
+				if (!root.disposed) {
+					root.class.remove(cardHighlightStyle)
 				}
 			}, 400)
 		},
-	}) as CardComponent
+	}))
 }
 
-type ArticleComponent = Component<HTMLElement> & {
+interface ArticleExtensions {
 	setSummary (summary: string): void
 }
+
+interface ArticleComponent extends Component, ArticleExtensions { }
 
 function Article (this: Component | void, title: string, summary: string): ArticleComponent {
 	const article = Component(this ?? "article", Article)
@@ -94,32 +98,36 @@ function Article (this: Component | void, title: string, summary: string): Artic
 		.text.set(summary)
 		.appendTo(article)
 
-	return Object.assign(article, {
-		setSummary (nextSummary: string): void {
+	return article.extend<ArticleExtensions>(root => ({
+		setSummary (nextSummary) {
 			summaryLine.text.set(nextSummary)
 		},
-	}) as ArticleComponent
+	}))
 }
 
-type LinkComponent = Component<HTMLAnchorElement> & {
+interface LinkExtensions {
 	setHref (href: string): void
 }
+
+interface LinkComponent extends Component, LinkExtensions { }
 
 function Link (this: Component | void, href: string, label: string): LinkComponent {
 	const link = Component(this ?? "a", Link)
 		.attribute.set("href", href)
 		.text.set(label)
 
-	return Object.assign(link, {
-		setHref (nextHref: string): void {
-			link.attribute.set("href", nextHref)
+	return link.extend<LinkExtensions>(root => ({
+		setHref (nextHref) {
+			root.attribute.set("href", nextHref)
 		},
-	}) as LinkComponent
+	}))
 }
 
-type ButtonComponent = Component & {
+interface ButtonExtensions {
 	setPressed (pressed: boolean): void
 }
+
+interface ButtonComponent extends Component, ButtonExtensions { }
 
 function Button (this: Component | void, label?: string): ButtonComponent {
 	const button = Component(this ?? "button", Button)
@@ -133,16 +141,16 @@ function Button (this: Component | void, label?: string): ButtonComponent {
 		button.text.set(label)
 	}
 
-	return Object.assign(button, {
-		setPressed (pressed: boolean): void {
+	return button.extend<ButtonExtensions>(root => ({
+		setPressed (pressed) {
 			if (pressed) {
-				button.attribute.set("aria-pressed", "true")
+				root.attribute.set("aria-pressed", "true")
 				return
 			}
 
-			button.attribute.remove("aria-pressed")
+			root.attribute.remove("aria-pressed")
 		},
-	}) as ButtonComponent
+	}))
 }
 
 export default function CompositionExample (): Component {

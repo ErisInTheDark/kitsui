@@ -681,12 +681,15 @@ function assignSemanticAnchors (
 		const anchorName = isSyntheticExtensionWrapper
 			? `${context.sectionTitle}.${child.name}`
 			: basePath;
+		let uniqueAnchorName = anchorName;
+		let duplicateIndex = 2;
 
-		if (usedAnchors.has(anchorName)) {
-			console.error(`Duplicate docs anchor '${anchorName}' in section '${context.anchorScope}'`);
+		while (usedAnchors.has(uniqueAnchorName)) {
+			uniqueAnchorName = `${anchorName}-${duplicateIndex}`;
+			duplicateIndex++;
 		}
 
-		usedAnchors.add(anchorName);
+		usedAnchors.add(uniqueAnchorName);
 
 		const childParentPath = isSyntheticExtensionWrapper ? child.name : basePath;
 		const anchoredChildren = child.children
@@ -695,7 +698,7 @@ function assignSemanticAnchors (
 
 		return {
 			...child,
-			anchorName,
+			anchorName: uniqueAnchorName,
 			children: anchoredChildren,
 		};
 	});

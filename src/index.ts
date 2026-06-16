@@ -52,6 +52,7 @@ export type {
     ComponentBuilderFunction,
     ComponentChild,
     ComponentChildren,
+    ComponentExtensionFactory,
     ComponentFromSource,
     ComponentRender,
     ComponentSelection,

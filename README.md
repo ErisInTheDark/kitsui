@@ -56,19 +56,21 @@ This style keeps ownership simple: `root` owns the state, event cleanup, and chi
 
 Reusable component files should exactly match the component name and default-export the component function. Use one local symbol as both the interface name and function name, then export it once with `export default Name`.
 
-Do not force assignability with `as Name` in the return statement. Give the function an explicit return type and let `Object.assign(...)` typecheck the result.
+Do not force assignability with `as Name` in the return statement. Give the function an explicit return type and let `component.extend(...)` typecheck the result.
 
 Custom component methods should return `this` unless there is a strong reason to return something else.
 
 ```ts
 import { Component } from "kitsui"
 
-interface Button extends Component<HTMLButtonElement> {
+interface ButtonExtensions {
 	setBusy (busy: boolean): this
 	setLabel (label: string): this
 }
 
-function Button (this: Component | void, label: string): Button {
+interface Button extends Component<HTMLButtonElement>, ButtonExtensions { }
+
+function Button (this: Component<HTMLButtonElement> | void, label: string): Button {
 	const button = Component(this ?? "button", Button)
 		.attribute.set("type", "button")
 
@@ -76,17 +78,17 @@ function Button (this: Component | void, label: string): Button {
 		.text.set(label)
 		.appendTo(button)
 
-	return Object.assign(button, {
-		setBusy (this: Button, busy: boolean): this {
-			this.attribute.toggle("disabled", busy)
-			return this
+	return button.extend<ButtonExtensions>(root => ({
+		setBusy (busy) {
+			root.attribute.toggle("disabled", busy)
+			return root
 		},
 
-		setLabel (this: Button, label: string): this {
+		setLabel (label) {
 			labelText.text.set(label)
-			return this
+			return root
 		},
-	})
+	}))
 }
 
 export default Button
