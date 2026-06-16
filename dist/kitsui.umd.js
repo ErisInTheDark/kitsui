@@ -3471,6 +3471,23 @@ ${innerRules}
       return this;
     }
     /**
+     * Assigns instance-specific members onto this component and returns the same narrowed component.
+     * The extension factory receives this component typed as the final intersection.
+     * @param extensions Builds the object members to assign onto this component.
+     * @returns This component narrowed with the assigned extension members.
+     */
+    extend(extensions) {
+      this.ensureActive();
+      if (typeof extensions !== "function") {
+        throw new TypeError("Component.extend requires an extension factory function.");
+      }
+      const extensionMembers = extensions(this);
+      if (typeof extensionMembers !== "object" || extensionMembers === null) {
+        throw new TypeError("Component.extend extension factories must return an object.");
+      }
+      return Object.assign(this, extensionMembers);
+    }
+    /**
      * Removes this component from the DOM and disposes its resources.
      * Owned child components are also removed.
      * The component cannot be modified after removal.

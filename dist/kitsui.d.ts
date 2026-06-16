@@ -314,6 +314,8 @@ export type ComponentFromSource<SOURCE extends ComponentSource> = SOURCE extends
 
 export type ComponentBuilderFunction<PARAMS extends unknown[] = unknown[], RESULT extends Component = Component> = (this: Component | void, ...params: PARAMS) => RESULT;
 
+export type ComponentExtensionFactory<TComponent extends Component, TExtensions extends object> = (component: TComponent & TExtensions) => TExtensions & ThisType<TComponent & TExtensions>;
+
 export type InsertWhere = "before" | "after";
 
 export type ComponentSelection = Component | Falsy | Iterable<Component | Falsy>;
@@ -518,6 +520,13 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * @returns This component for chaining.
      */
     use<TValue>(state: State<TValue>, render: ComponentRender<TValue>): this;
+    /**
+     * Assigns instance-specific members onto this component and returns the same narrowed component.
+     * The extension factory receives this component typed as the final intersection.
+     * @param extensions Builds the object members to assign onto this component.
+     * @returns This component narrowed with the assigned extension members.
+     */
+    extend<TExtensions extends object>(extensions: ComponentExtensionFactory<this, TExtensions>): this & TExtensions;
     /**
      * Removes this component from the DOM and disposes its resources.
      * Owned child components are also removed.
