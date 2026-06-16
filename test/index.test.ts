@@ -23,6 +23,7 @@ describe("kitsui entrypoint", () => {
 		const state = kitsui.State<string | null>(component, null);
 
 		expect(typeof component.place).toBe("function");
+		expect(typeof component.breakdown).toBe("function");
 		expect(typeof component.appendTo).toBe("function");
 		expect(component.event).toBe(component.event);
 		expect(component.text).toBe(component.text);

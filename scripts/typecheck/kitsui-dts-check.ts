@@ -21,7 +21,13 @@ const hostAfterParameterizedSetup = host.use((component, label, count) => {
 	component.text.set(`${label}:${count.toFixed(0)}`);
 }, "ready", 2);
 
+const hostAfterBreakdown = host.breakdown(state, (component, Part, value) => {
+	component.attribute.set("data-count", value.toFixed(0));
+	component.append(Part("count", value, partState => Component("span").text.set(partState)));
+});
+
 void hostAfterParameterizedSetup;
+void hostAfterBreakdown;
 
 type ButtonComponent = Component<HTMLButtonElement> & {
 	press (): void;

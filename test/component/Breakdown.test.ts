@@ -34,6 +34,51 @@ function textPart (state: State<string>): Component<HTMLSpanElement> {
 }
 
 describe("Component.Breakdown", () => {
+	it("supports fluent instance breakdowns owned by the component", async () => {
+		const owner = mountedComponent("div");
+		const source = State(owner, "one");
+		let handlerOwner: Component | undefined;
+		let firstPart: Component | undefined;
+		let secondPart: Component | undefined;
+		let renderCount = 0;
+
+		try {
+			const returned = owner.breakdown(source, (component, Part, value) => {
+				handlerOwner = component;
+				renderCount += 1;
+				const part = Part("value", value, textPart);
+				component.append(part);
+
+				if (renderCount === 1) {
+					firstPart = part;
+					return;
+				}
+
+				secondPart = part;
+			});
+
+			expect(returned).toBe(owner);
+			expect(handlerOwner).toBe(owner);
+			expect(firstPart, "the first pass should create the keyed part").toBeDefined();
+			expect(firstPart!.owner.get(), "the instance component should own the keyed part").toBe(owner);
+			expect(owner.element.textContent).toBe("one");
+
+			source.set("two");
+			await flushEffects();
+
+			expect(secondPart, "the second pass should reuse the same keyed part").toBe(firstPart);
+			expect(owner.element.textContent).toBe("two");
+
+			owner.remove();
+			expect(firstPart!.disposed, "owner removal should dispose instance breakdown parts").toBe(true);
+		}
+		finally {
+			if (!owner.disposed) {
+				owner.remove();
+			}
+		}
+	});
+
 	/** Verifies keyed parts are reused while their internal state continues to update. */
 	it("reuses keyed parts across updates and updates their part state", async () => {
 		const owner = mountedComponent("div");
