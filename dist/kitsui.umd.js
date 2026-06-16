@@ -3939,6 +3939,11 @@ ${innerRules}
     }
     return component;
   }
+  function ensureActive(component) {
+    if (component.disposed) {
+      throw new Error("Disposed components cannot be modified.");
+    }
+  }
   function breakdownExtension() {
     if (patched) {
       return;
@@ -4067,6 +4072,14 @@ ${innerRules}
       return cleanup;
     };
     ComponentWithBreakdown.Breakdown = Breakdown;
+    const prototype = getComponentClass().prototype;
+    prototype.breakdown = function breakdown(state2, breakdown) {
+      ensureActive(this);
+      Breakdown(this, state2, (Part, value) => {
+        breakdown(this, Part, value);
+      });
+      return this;
+    };
   }
 
   // src/component/extensions/compositionExtension.ts
@@ -4074,7 +4087,7 @@ ${innerRules}
   function isComponent(value) {
     return value instanceof Component.extend();
   }
-  function ensureActive(component) {
+  function ensureActive2(component) {
     if (component.disposed) {
       throw new Error("Disposed components cannot be modified.");
     }
@@ -4087,7 +4100,7 @@ ${innerRules}
     const ComponentClass2 = Component.extend();
     const prototype = ComponentClass2.prototype;
     prototype.and = function and(builder2, ...params) {
-      ensureActive(this);
+      ensureActive2(this);
       if (typeof builder2 !== "function") {
         throw new TypeError("Component.and requires a builder function.");
       }
@@ -4157,7 +4170,7 @@ ${innerRules}
   function createStorageElement2(documentRef) {
     return documentRef.createElement("kitsui-storage");
   }
-  function ensureActive2(component) {
+  function ensureActive3(component) {
     if (component.disposed) {
       throw new Error("Disposed components cannot be modified.");
     }
@@ -4260,7 +4273,7 @@ ${innerRules}
   }
   function resolvePlacementContainer(target) {
     if (isComponent2(target)) {
-      ensureActive2(target);
+      ensureActive3(target);
       return target.element;
     }
     if (isMoveParent2(target)) {
@@ -4390,7 +4403,7 @@ ${innerRules}
       return this;
     };
     prototype.appendTo = function appendTo(target) {
-      ensureActive2(this);
+      ensureActive3(this);
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, null);
       return this;
@@ -4403,7 +4416,7 @@ ${innerRules}
       });
     };
     prototype.prependTo = function prependTo(target) {
-      ensureActive2(this);
+      ensureActive3(this);
       const container = resolvePlacementContainer(target);
       placeComponent(this, container, container.firstChild);
       return this;
@@ -4416,7 +4429,7 @@ ${innerRules}
       });
     };
     prototype.insertTo = function insertTo(where, target) {
-      ensureActive2(this);
+      ensureActive3(this);
       const referenceNode = resolvePlacementReferenceNode(target);
       if (!referenceNode) {
         return this;
@@ -4436,7 +4449,7 @@ ${innerRules}
       });
     };
     prototype.place = function place(owner, placer) {
-      ensureActive2(this);
+      ensureActive3(this);
       const placementOwner = owner === this ? getPlacementLifecycleOwner(this) : owner;
       placementOwners.set(this, placementOwner);
       const documentRef = this.element.ownerDocument;

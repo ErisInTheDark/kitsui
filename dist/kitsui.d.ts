@@ -1511,9 +1511,25 @@ type BreakdownPartRegistrar = {
 
 type BreakdownRenderer<TValue> = (Part: BreakdownPartRegistrar, value: TValue) => void;
 
+type ComponentBreakdownRenderer<TValue, TComponent extends Component = Component> = (component: TComponent, Part: BreakdownPartRegistrar, value: TValue) => void;
+
 type BreakdownConstructor = {
     <TValue>(owner: Owner, state: State<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
 };
+
+export interface ComponentExtensions {
+        /**
+         * Breaks a source state into keyed reusable parts owned by this component.
+         *
+         * The breakdown handler receives this component first, then a keyed Part registrar and the current source value.
+         * Parts are cleaned up when this component is removed.
+         *
+         * @param state The source state to break down on each update.
+         * @param breakdown Called immediately and on each source update to register keyed parts.
+         * @returns This component for chaining.
+         */
+        breakdown<TValue>(this: Component, state: State<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
+    }
 
 export interface ComponentStaticExtensions {
         /**
