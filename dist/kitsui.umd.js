@@ -261,6 +261,7 @@ var __kitsui_factory__ = (() => {
       __publicField(this, "owner");
       __publicField(this, "releaseOwner", noop);
       __publicField(this, "isImplicitOwner", false);
+      __publicField(this, "mutable", true);
       __publicField(this, "requiresExplicitOwner", false);
       __publicField(this, "implicitOwnerDependents", /* @__PURE__ */ new Set());
       __publicField(this, "orphanCheckId", null);
@@ -299,6 +300,12 @@ var __kitsui_factory__ = (() => {
      */
     get value() {
       return this.currentValue;
+    }
+    /**
+     * Whether the public state reference can be safely treated as mutable.
+     */
+    isMutable() {
+      return this.mutable;
     }
     /**
      * Returns the internal state graph used for batching queued listeners.
@@ -614,6 +621,7 @@ var __kitsui_factory__ = (() => {
   State.Readonly = function Readonly(value) {
     const readonlyState = new StateClass(null, value);
     readonlyState["clearOrphanCheck"]();
+    readonlyState["mutable"] = false;
     readonlyState.clear = () => readonlyState.value;
     readonlyState.set = ident;
     readonlyState.update = () => readonlyState.value;

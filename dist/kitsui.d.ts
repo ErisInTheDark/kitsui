@@ -1591,6 +1591,7 @@ export namespace State {
         readonly disposed: boolean;
         readonly value: T;
         getOwner(): Owner | null;
+        isMutable(): this is State<T>;
         subscribe(owner: Owner, listener: StateListener<T>): CleanupFunction;
         subscribeImmediate(owner: Owner, listener: StateListener<T>): CleanupFunction;
         subscribeUnbound(listener: StateListener<T>): CleanupFunction;
@@ -1598,7 +1599,11 @@ export namespace State {
     }
 }
 
-export type ExtendableStateClass = StateConstructor & StateStaticExtensions;
+type MutableStateConstructor = Omit<StateConstructor, "prototype"> & {
+    prototype: State<unknown>;
+};
+
+export type ExtendableStateClass = MutableStateConstructor & StateStaticExtensions;
 
 interface StateGraph {
     pendingListeners: Set<QueuedStateListenerRecord<unknown>>;
@@ -1661,6 +1666,7 @@ class StateClass<T> extends Owner {
     private owner;
     private releaseOwner;
     private isImplicitOwner;
+    private mutable;
     private requiresExplicitOwner;
     private readonly implicitOwnerDependents;
     private orphanCheckId;
@@ -1683,6 +1689,10 @@ class StateClass<T> extends Owner {
      * The current state value. Changes to this value trigger listeners.
      */
     get value(): T;
+    /**
+     * Whether the public state reference can be safely treated as mutable.
+     */
+    isMutable(): this is State<T>;
     /**
      * Returns the internal state graph used for batching queued listeners.
      * This is typically used internally by extensions and should not be accessed directly.
@@ -1759,7 +1769,7 @@ class StateClass<T> extends Owner {
      * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
      */
     subscribe(owner: Owner, listener: StateListener<T>): CleanupFunction;
-    _registerImplicitOwnerDependent(dependent: State<unknown>): CleanupFunction;
+    _registerImplicitOwnerDependent(dependent: State.Readonly<unknown>): CleanupFunction;
     protected beforeDispose(): void;
     private clearOrphanCheck;
     private refreshOrphanCheck;
@@ -1778,7 +1788,7 @@ type StateConstructor = {
     new <T>(owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
     <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
     new <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
-    prototype: State<unknown>;
+    prototype: State.Readonly<unknown>;
     /**
      * Returns the underlying State class for prototype extension.
      * This allows modules to add custom methods and properties to all State instances.
