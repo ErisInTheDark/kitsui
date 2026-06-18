@@ -17,7 +17,7 @@ const noteStyle = Style.Class("append-when-example-note", {
 })
 
 export default function AppendWhenExample (): Component {
-	const root = Component("div")
+	const root = Component()
 		.class.add(shellStyle)
 
 	const visible = new State(root, false)
@@ -28,7 +28,7 @@ export default function AppendWhenExample (): Component {
 		.event.owned.on.click(() => visible.set(!visible.value))
 		.appendTo(root)
 
-	const examplesRow = Component("div")
+	const examplesRow = Component()
 		.class.add(rowStyle)
 		.appendTo(root)
 

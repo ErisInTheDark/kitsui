@@ -27,7 +27,7 @@ const frameStyle = Style.Class("place-iframe-example-frame", {
 type Destination = "left" | "right" | "parked";
 
 export default function PlaceIframeExample (): Component {
-	const root = Component("div")
+	const root = Component()
 		.class.add(shellStyle)
 
 	const destination = new State<Destination>(root, "left")
@@ -36,7 +36,7 @@ export default function PlaceIframeExample (): Component {
 		.text.set("This moves one iframe between explicit place() markers. In browsers with moveBefore(), a modern DOM API for moving connected nodes without recreating them, the playing frame can keep its browsing context while it moves.")
 		.appendTo(root)
 
-	const controls = Component("div")
+	const controls = Component()
 		.class.add(controlsStyle)
 		.appendTo(root)
 
@@ -48,7 +48,7 @@ export default function PlaceIframeExample (): Component {
 			.appendTo(controls)
 	}
 
-	const columns = Component("div")
+	const columns = Component()
 		.class.add(columnsStyle)
 		.appendTo(root)
 

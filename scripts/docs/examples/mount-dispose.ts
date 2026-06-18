@@ -43,16 +43,12 @@ function Widget (log: State<string[]>): Component {
 }
 
 export default function MountDisposeExample (): Component {
-	const root = Component("div")
+	const root = Component()
 		.class.add(shellStyle)
 
 	const log = new State<string[]>(root, [])
-	
-	const host = Component("div")
-		.appendTo(root)
-	
-	const widget = State<Component | null>(host, null)
-	host.append(widget)
+	const widget = State<Component | null>(root, null)
+	root.append(widget)
 
 	Component("button")
 		.attribute.set("type", "button")

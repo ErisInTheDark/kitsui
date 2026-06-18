@@ -14,7 +14,7 @@ const wrapStyle = Style.Class("counter-wrap", {
 })
 
 export default function Counter (): Component {
-	const counter = Component("div")
+	const counter = Component()
 		.class.add(wrapStyle)
 		
 	const count = new State(counter, 0)

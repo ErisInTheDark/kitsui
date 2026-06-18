@@ -11,7 +11,7 @@ const activeStyle = Style.Class("bind-manipulators-example-active", {
 })
 
 export default function BindManipulatorsExample (): Component {
-	const root = Component("div")
+	const root = Component()
 		.class.add(shellStyle)
 
 	const active = new State(root, false)

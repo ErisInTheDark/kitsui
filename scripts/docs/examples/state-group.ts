@@ -12,6 +12,10 @@ const columnsStyle = Style.Class("state-group-example-columns", {
 	gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))"
 })
 
+const optionStyle = Style.Class("state-group-example-option", {
+	display: "block",
+})
+
 interface RadioGroup extends Component {
 	selection: State<string>;
 }
@@ -38,15 +42,16 @@ function RadioGroup (title: string, options: string[]): RadioGroup {
 			})
 
 		Component("label")
+			.class.add(optionStyle)
 			.append(radio, ` ${option}`)
-			.appendTo(Component("div").appendTo(group))
+			.appendTo(group)
 	}
 
 	return Object.assign(group, { selection })
 }
 
 export default function StateGroupExample (): Component {
-	const root = Component("div")
+	const root = Component()
 		.class.add(shellStyle)
 
 	Component("p")
@@ -57,7 +62,7 @@ export default function StateGroupExample (): Component {
 	const verb = RadioGroup("Verb", ["debugs", "launches", "adopts"])
 	const object = RadioGroup("Object", ["three glitter cannons", "the build", "a sandwich"])
 
-	Component("div")
+	Component()
 		.class.add(columnsStyle)
 		.append(subject, verb, object)
 		.appendTo(root)

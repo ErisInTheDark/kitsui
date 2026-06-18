@@ -716,29 +716,29 @@ function randomOffPondPosition (baseScale = 1): FishPosition {
 }
 
 function BubbleSpawner (): Component {
-	const field = Component("div")
+	const field = Component()
 		.class.add(pondDecorStyle)
 		.aria.hidden(true)
 
-	const backField = Component("div")
+	const backField = Component()
 		.class.add(pondBackDecorStyle)
 		.appendTo(field)
 
-	const frontField = Component("div")
+	const frontField = Component()
 		.class.add(pondFrontDecorStyle)
 		.appendTo(field)
 
-	Component("div")
+	Component()
 		.class.add(pondDepthLayerStyle)
 		.class.add(pondDepthBackStyle)
 		.appendTo(field)
 
-	Component("div")
+	Component()
 		.class.add(pondDepthLayerStyle)
 		.class.add(pondDepthMidStyle)
 		.appendTo(field)
 
-	Component("div")
+	Component()
 		.class.add(pondDepthLayerStyle)
 		.class.add(pondDepthFrontStyle)
 		.appendTo(field)
@@ -947,7 +947,7 @@ function createUpgradeDefinition (
 }
 
 function DockWorker (autoFish: State<number>, money: State<number>, captainLog: State<string>): Component {
-	const worker = Component("div")
+	const worker = Component()
 		.attribute.add("hidden")
 		.aria.hidden(true)
 
@@ -1056,7 +1056,7 @@ function FishSchool (
 	fishHandles: PondFishHandle[],
 	onCatch: (fish: FishTemplate, source: "click" | "gull", valueMultiplier: number, mutated: boolean) => void,
 ): Component {
-	const layer = Component("div")
+	const layer = Component()
 		.class.add(fishSchoolStyle)
 		.appendTo(pond)
 
@@ -1434,7 +1434,7 @@ function FishMagnetActor (
 	magnetTarget: State<{ left: number; top: number } | null>,
 	captainLog: State<string>,
 ): Component {
-	const magnet = Component("div")
+	const magnet = Component()
 		.class.add(fishMagnetStyle)
 		.text.set("🧲")
 		.aria.hidden(true)
@@ -1535,7 +1535,7 @@ function GullFleet (
 	internGulls: State<number>,
 	fishHandles: PondFishHandle[],
 ): Component {
-	const fleet = Component("div")
+	const fleet = Component()
 		.class.add(gullFleetStyle)
 		.appendTo(pond)
 
@@ -1662,7 +1662,7 @@ function GullFleet (
 }
 
 function RollingIncomeTracker (money: State<number>, rollingIncome: State<number>, resetVersion: State<number>): Component {
-	const tracker = Component("div")
+	const tracker = Component()
 		.attribute.add("hidden")
 		.aria.hidden(true)
 
@@ -1722,7 +1722,7 @@ function RollingIncomeTracker (money: State<number>, rollingIncome: State<number
 }
 
 export default function FishingSimExample (): Component {
-	const root = Component("div")
+	const root = Component()
 		.class.add(shellStyle)
 
 	const money = new State(root, 0)
@@ -1822,7 +1822,7 @@ export default function FishingSimExample (): Component {
 		)
 		.appendTo(root)
 
-	const mainColumns = Component("div")
+	const mainColumns = Component()
 		.class.add(columnsStyle)
 		.appendTo(root)
 
@@ -1866,11 +1866,11 @@ export default function FishingSimExample (): Component {
 		.text.set("Upgrades")
 		.appendTo(upgradesPanel)
 
-	const panelContent = Component("div")
+	const panelContent = Component()
 		.class.add(panelContentStyle)
 		.appendTo(upgradesPanel)
 
-	const upgradesWrap = Component("div")
+	const upgradesWrap = Component()
 		.class.add(upgradesStyle)
 		.appendTo(panelContent)
 

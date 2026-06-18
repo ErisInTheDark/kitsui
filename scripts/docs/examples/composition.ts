@@ -154,11 +154,11 @@ function Button (this: Component | void, label?: string): ButtonComponent {
 }
 
 export default function CompositionExample (): Component {
-	const root = Component("div")
+	const root = Component()
 		.attribute.set("id", "composition-example")
 		.class.add(shellStyle)
 
-	const grid = Component("div")
+	const grid = Component()
 		.class.add(gridStyle)
 		.appendTo(root)
 
@@ -174,7 +174,7 @@ export default function CompositionExample (): Component {
 		.and(Article, "Composed in place", "This article started as a plain Component and gained both builders through and().")
 		.appendTo(grid)
 
-	const actions = Component("div")
+	const actions = Component()
 		.class.add(actionsStyle)
 		.appendTo(root)
 
