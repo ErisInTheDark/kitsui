@@ -11,7 +11,11 @@ export type TextSelection = TextValue | null | undefined;
 type ReactiveTextSelection = Exclude<TextSelection, undefined>;
 
 /** A direct or subscribable text input. */
-export type TextInput = TextSelection | State<ReactiveTextSelection>;
+export type TextInput = TextSelection | State.Readonly<ReactiveTextSelection>;
+
+function isTextSource (value: TextInput): value is State.Readonly<ReactiveTextSelection> {
+	return value instanceof State;
+}
 
 /**
  * Manages an element's text content with support for direct values and reactive sources.
@@ -35,16 +39,16 @@ export class TextManipulator<OWNER extends Component> extends GenericPropertyMan
 	 * @param value Direct or reactive text input.
 	 * @returns The owning component for fluent chaining.
 	 */
-	override bind (visible: State<boolean>, value: TextInput): OWNER {
+	override bind (visible: State.Readonly<boolean>, value: TextInput): OWNER {
 		return super.bind(visible, value);
 	}
 
-	protected override toSource (value: TextInput): State<ReactiveTextSelection> {
-		if (value instanceof State) {
+	protected override toSource (value: TextInput): State.Readonly<ReactiveTextSelection> {
+		if (isTextSource(value)) {
 			return value;
 		}
 
-		return State.Readonly(value ?? null);
+		return State.Readonly((value ?? null) as ReactiveTextSelection);
 	}
 
 	protected override writeProperty (value: ReactiveTextSelection | undefined): void {

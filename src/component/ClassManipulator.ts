@@ -17,7 +17,7 @@ export type StyleSelection = Style.Class | Falsy | Iterable<Style.Class | Falsy>
 /**
  * A style input: a static style, falsy value, reactive style source, or any combination.
  */
-export type StyleInput = Style.Class | Falsy | State<StyleSelection>;
+export type StyleInput = Style.Class | Falsy | State.Readonly<StyleSelection>;
 
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
@@ -33,7 +33,7 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
-function isStyleInputState (value: StyleInput): value is State<StyleSelection> {
+function isStyleInputState (value: StyleInput): value is State.Readonly<StyleSelection> {
 	return value instanceof State;
 }
 
@@ -176,7 +176,7 @@ export class ClassManipulator<OWNER extends Component> {
 	 * component.class.bind(isActive, activeStyle);
 	 * // activeStyle is present iff isActive.value is true
 	 */
-	bind (state: State<boolean>, ...classes: StyleInput[]): OWNER {
+	bind (state: State.Readonly<boolean>, ...classes: StyleInput[]): OWNER {
 		this.ensureActive();
 
 		for (const style of classes.filter((value): value is Exclude<StyleInput, Falsy> => Boolean(value))) {
@@ -294,7 +294,7 @@ export class ClassManipulator<OWNER extends Component> {
 	}
 
 	private installStateDrivenStyles (
-		selectionState: State<StyleSelection>,
+		selectionState: State.Readonly<StyleSelection>,
 		getPresent: () => boolean,
 		options: {
 			logStateReplacement?: boolean;

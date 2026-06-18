@@ -1,10 +1,10 @@
 import { Owner, State, StateStaticExtensions, type CleanupFunction, type StateOptions } from "../State";
 import type { Mapper } from "./mappingExtension";
 
-type GroupedStateObject = Record<string, State<any>>;
+type GroupedStateObject = Record<string, State.Readonly<any>>;
 
 type GroupedValue<T extends GroupedStateObject> = {
-	[K in keyof T]: T[K] extends State<infer TValue> ? TValue : never;
+	[K in keyof T]: T[K] extends State.Readonly<infer TValue> ? TValue : never;
 };
 
 /** @group Group */

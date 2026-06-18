@@ -23,7 +23,7 @@ type PlaceConstructor = {
 };
 
 /** A function that receives a Place constructor and returns State<Place | null> for reactive placement. */
-export type PlacerFunction = (Place: PlaceConstructor) => State<Place | null>;
+export type PlacerFunction = (Place: PlaceConstructor) => State.Readonly<Place | null>;
 
 declare module "../Component" {
 	interface ComponentExtensions {
@@ -43,7 +43,7 @@ declare module "../Component" {
 		 * @param target The target component or DOM parent.
 		 * @returns This component for chaining.
 		 */
-		appendToWhen (state: State<boolean>, target: PlacementContainer): this;
+		appendToWhen (state: State.Readonly<boolean>, target: PlacementContainer): this;
 
 		/**
 		 * Prepends this component to the start of the target component or DOM parent.
@@ -61,7 +61,7 @@ declare module "../Component" {
 		 * @param target The target component or DOM parent.
 		 * @returns This component for chaining.
 		 */
-		prependToWhen (state: State<boolean>, target: PlacementContainer): this;
+		prependToWhen (state: State.Readonly<boolean>, target: PlacementContainer): this;
 
 		/**
 		 * Inserts this component before or after a reference node, component, or place.
@@ -81,7 +81,7 @@ declare module "../Component" {
 		 * @param target The reference node, component, place, or null.
 		 * @returns This component for chaining.
 		 */
-		insertToWhen (state: State<boolean>, where: InsertWhere, target: PlacementTarget): this;
+		insertToWhen (state: State.Readonly<boolean>, where: InsertWhere, target: PlacementTarget): this;
 
 		/**
 		 * Manually controls component placement with a reactive placer function.
@@ -399,7 +399,7 @@ function resolvePlacementContainerOwner (target: PlacementContainer, component?:
 	return resolvePlacementOwner(target, component);
 }
 
-function toPlaceSource (state: State<boolean>, place: Place): State<Place | null> {
+function toPlaceSource (state: State.Readonly<boolean>, place: Place): State<Place | null> {
 	const placeState = State<Place | null>(place.owner, state.value ? place : null);
 
 	state.subscribe(place.marker, (value) => {

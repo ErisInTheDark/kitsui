@@ -51,7 +51,7 @@ export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT,
 	 * @param value Direct or reactive property input.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (visible: State<boolean>, value: INPUT): OWNER {
+	bind (visible: State.Readonly<boolean>, value: INPUT): OWNER {
 		this.ensureActive();
 		const source = this.toSource(value);
 
@@ -78,7 +78,7 @@ export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT,
 	 * @param value Direct or reactive property input.
 	 * @returns A subscribable source that yields concrete property selections.
 	 */
-	protected abstract toSource (value: INPUT): State<SELECTION>;
+	protected abstract toSource (value: INPUT): State.Readonly<SELECTION>;
 
 	/**
 	 * Writes the current selection to the underlying component property.

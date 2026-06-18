@@ -14,15 +14,15 @@ import {
 } from "kitsui";
 
 interface UpgradeDefinition {
-	buttonLabel: State<string>
-	canAfford: State<boolean>
-	cost: State<number>
+	buttonLabel: State.Readonly<string>
+	canAfford: State.Readonly<boolean>
+	cost: State.Readonly<number>
 	description: string
 	effect: string
-	levelLabel: State<string>
+	levelLabel: State.Readonly<string>
 	name: string
 	onBuy (): void
-	unlocked: State<boolean>
+	unlocked: State.Readonly<boolean>
 }
 
 interface UpgradeBlueprint {

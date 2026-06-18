@@ -86,6 +86,19 @@ export interface StateExtensions<T> { }
  */
 export interface StateStaticExtensions { }
 
+/** Public readonly-looking state surface for derived or internally-owned state values. */
+export namespace State {
+	export interface Readonly<T> extends StateExtensions<T> {
+		readonly disposed: boolean;
+		readonly value: T;
+		getOwner (): Owner | null;
+		subscribe (owner: Owner, listener: StateListener<T>): CleanupFunction;
+		subscribeImmediate (owner: Owner, listener: StateListener<T>): CleanupFunction;
+		subscribeUnbound (listener: StateListener<T>): CleanupFunction;
+		subscribeImmediateUnbound (listener: StateListener<T>): CleanupFunction;
+	}
+}
+
 /**
  * Constructor type for extending the State class with custom methods.
  * Used with {@link State.extend} to access and modify the State prototype.
@@ -710,7 +723,7 @@ class StateClass<T> extends Owner {
 	}
 }
 
-interface StateClass<T> extends StateExtensions<T> { }
+interface StateClass<T> extends State.Readonly<T>, StateExtensions<T> { }
 
 /**
  * Reactive state container that notifies listeners when the value changes.
@@ -773,7 +786,7 @@ type StateConstructor = {
 	 * @param value The fixed value for the readonly state.
 	 * @returns A new readonly state instance with the specified value.
 	 */
-	Readonly<T> (value: RejectUndefined<T>): State<WidenStateValue<T>>;
+	Readonly<T> (value: RejectUndefined<T>): State.Readonly<WidenStateValue<T>>;
 }
 
 /**
@@ -847,11 +860,11 @@ State.extend = function extend (): ExtendableStateClass {
  * @param value The fixed value for the readonly state.
  * @returns A new readonly state instance with the specified value.
  */
-State.Readonly = function Readonly<T> (value: RejectUndefined<T>): State<WidenStateValue<T>> {
+State.Readonly = function Readonly<T> (value: RejectUndefined<T>): State.Readonly<WidenStateValue<T>> {
 	const readonlyState = new StateClass(null, value as WidenStateValue<T>);
 	readonlyState["clearOrphanCheck"]();
 	readonlyState.clear = () => readonlyState.value;
 	readonlyState.set = ident;
 	readonlyState.update = () => readonlyState.value;
-	return readonlyState as State<WidenStateValue<T>>;
+	return readonlyState as State.Readonly<WidenStateValue<T>>;
 };

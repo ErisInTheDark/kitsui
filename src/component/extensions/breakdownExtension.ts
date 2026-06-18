@@ -15,7 +15,7 @@ type ComponentBreakdownRenderer<TValue, TComponent extends Component = Component
 ) => void;
 
 type BreakdownConstructor = {
-	<TValue> (owner: Owner, state: State<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
+	<TValue> (owner: Owner, state: State.Readonly<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
 };
 
 type PartRecord<TPart = unknown> = {
@@ -35,7 +35,7 @@ declare module "../Component" {
 		 * @param breakdown Called immediately and on each source update to register keyed parts.
 		 * @returns This component for chaining.
 		 */
-		breakdown<TValue> (this: Component, state: State<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
+		breakdown<TValue> (this: Component, state: State.Readonly<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
 	}
 
 	interface ComponentStaticExtensions {
@@ -70,12 +70,12 @@ function getComponentClass (): ReturnType<typeof Component.extend> {
 	return componentClass;
 }
 
-function isStateLike<TValue> (value: unknown): value is State<TValue> {
+function isStateLike<TValue> (value: unknown): value is State.Readonly<TValue> {
 	if (typeof value !== "object" || value === null) {
 		return false;
 	}
 
-	const maybeState = value as Partial<State<TValue>>;
+	const maybeState = value as Partial<State.Readonly<TValue>>;
 	return "value" in maybeState && typeof maybeState.subscribe === "function";
 }
 
@@ -117,7 +117,7 @@ export default function breakdownExtension (): void {
 	patched = true;
 
 	const ComponentWithBreakdown = Component as typeof Component & ComponentStaticExtensions;
-	const Breakdown = function Breakdown<TValue> (owner: Owner, state: State<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction {
+	const Breakdown = function Breakdown<TValue> (owner: Owner, state: State.Readonly<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction {
 		if (!(owner instanceof Owner)) {
 			throw new TypeError("Component.Breakdown requires an Owner as the first argument.");
 		}
@@ -190,10 +190,6 @@ export default function breakdownExtension (): void {
 
 						if (typeof build !== "function") {
 							throw new TypeError("Component.Breakdown parts require a builder function.");
-						}
-
-						if (seenKeys.has(key)) {
-							throw new Error(`Component.Breakdown registered the key ${String(key)} more than once in a single pass.`);
 						}
 
 						seenKeys.add(key);
@@ -275,7 +271,7 @@ export default function breakdownExtension (): void {
 	const prototype = getComponentClass().prototype as Component;
 	prototype.breakdown = function breakdown<TValue> (
 		this: Component,
-		state: State<TValue>,
+		state: State.Readonly<TValue>,
 		breakdown: ComponentBreakdownRenderer<TValue>,
 	): Component {
 		ensureActive(this);

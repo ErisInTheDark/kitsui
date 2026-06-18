@@ -9,7 +9,7 @@ export type StyleAttributeValue = StyleValue | null | undefined;
 type ReactiveStyleAttributeValue = StyleValue | null;
 
 /** A direct or subscribable inline style value. */
-export type StyleAttributeValueInput = StyleAttributeValue | State<ReactiveStyleAttributeValue>;
+export type StyleAttributeValueInput = StyleAttributeValue | State.Readonly<ReactiveStyleAttributeValue>;
 
 /**
  * Inline style declarations accepted by {@link StyleManipulator}.
@@ -32,7 +32,7 @@ export type StyleAttributeDefinition = (
 );
 
 /** Inline style definitions accepted directly or through a subscribable source. */
-export type StyleAttributeInput = StyleAttributeDefinition | State<StyleAttributeDefinition | null>;
+export type StyleAttributeInput = StyleAttributeDefinition | State.Readonly<StyleAttributeDefinition | null>;
 
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
@@ -43,11 +43,11 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
-function isStateSource<TValue> (value: unknown): value is State<TValue> {
+function isStateSource<TValue> (value: unknown): value is State.Readonly<TValue> {
 	return value instanceof State;
 }
 
-function toStyleAttributeSource (value: StyleAttributeInput): State<StyleAttributeDefinition | null> {
+function toStyleAttributeSource (value: StyleAttributeInput): State.Readonly<StyleAttributeDefinition | null> {
 	if (isStateSource<StyleAttributeDefinition | null>(value)) {
 		return value;
 	}
@@ -55,7 +55,7 @@ function toStyleAttributeSource (value: StyleAttributeInput): State<StyleAttribu
 	return State.Readonly(value === undefined ? null : value);
 }
 
-function toStyleValueSource (value: StyleAttributeValueInput): State<ReactiveStyleAttributeValue> {
+function toStyleValueSource (value: StyleAttributeValueInput): State.Readonly<ReactiveStyleAttributeValue> {
 	if (isStateSource<ReactiveStyleAttributeValue>(value)) {
 		return value;
 	}

@@ -60,6 +60,31 @@ export type {
     ComponentSource,
     InsertWhere
 } from "./component/Component";
+export { Draggable } from "./component/Draggable";
+export type {
+    DragEventDetail,
+    DragInputCancel,
+    DragInputEnd,
+    DragInputAdapter,
+    DragInputMove,
+    DragInputReceiver,
+    DragInputSource,
+    DragInputStart,
+    DragPhase,
+    DragPoint,
+    DragPreviewContext,
+    DragPreviewRenderer,
+    DragPosition,
+    DragStartContext,
+    DraggableExtensions,
+    DraggableOptions
+} from "./component/Draggable";
+export { DropTarget } from "./component/DropTarget";
+export type {
+    DropTargetContext,
+    DropTargetExtensions,
+    DropTargetOptions
+} from "./component/DropTarget";
 export { EventManipulator } from "./component/EventManipulator";
 export type { ComponentEvent, ComponentEventListener, EventListenerInput } from "./component/EventManipulator";
 export type { Place, PlacementTarget, PlacerFunction } from "./component/extensions/placeExtension";
@@ -86,6 +111,13 @@ export {
 export type { AnimationMarker, FontFaceDefinition, KeyframesDefinition, StyleDefinition, StyleValue } from "./component/Style";
 export { StyleManipulator } from "./component/StyleManipulator";
 export type { StyleAttributeDefinition, StyleAttributeInput, StyleAttributeValue, StyleAttributeValueInput } from "./component/StyleManipulator";
+export { Sortable } from "./component/Sortable";
+export type {
+    SortableExtensions,
+    SortableOptions,
+    SortableTransfer,
+    SortableTransferContext
+} from "./component/Sortable";
 export { TextManipulator } from "./component/TextManipulator";
 export type { TextInput, TextSelection, TextValue } from "./component/TextManipulator";
 export type { Mapper } from "./state/extensions/mappingExtension";

@@ -94,38 +94,38 @@ export type AriaRole =
 /** ARIA text value: a string or falsy value. */
 export type AriaText = string | null | undefined;
 /** ARIA text input: static text or a reactive State. */
-export type AriaTextInput = AriaText | State<string | null>;
+export type AriaTextInput = AriaText | State.Readonly<string | null>;
 /** ARIA role input: static role or a reactive State. */
-export type AriaRoleInput = AriaRole | null | undefined | State<AriaRole | null>;
+export type AriaRoleInput = AriaRole | null | undefined | State.Readonly<AriaRole | null>;
 /** ARIA boolean input: static boolean or a reactive State. */
-export type AriaBooleanInput = boolean | null | undefined | State<boolean | null>;
+export type AriaBooleanInput = boolean | null | undefined | State.Readonly<boolean | null>;
 /** ARIA mixed boolean value: true, false, "mixed", or falsy. */
 export type AriaBooleanMixed = boolean | "mixed" | null | undefined;
 /** ARIA mixed boolean input: static value or a reactive State. */
-export type AriaBooleanMixedInput = AriaBooleanMixed | State<boolean | "mixed" | null>;
+export type AriaBooleanMixedInput = AriaBooleanMixed | State.Readonly<boolean | "mixed" | null>;
 /** ARIA current value: true, or a specific page location type. */
 export type AriaCurrent = boolean | "page" | "step" | "location" | "date" | "time" | null | undefined;
 /** ARIA current input: static value or a reactive State. */
-export type AriaCurrentInput = AriaCurrent | State<boolean | "page" | "step" | "location" | "date" | "time" | null>;
+export type AriaCurrentInput = AriaCurrent | State.Readonly<boolean | "page" | "step" | "location" | "date" | "time" | null>;
 /** ARIA live region politeness level. */
 export type AriaLive = "off" | "polite" | "assertive" | null | undefined;
 /** ARIA live input: static value or a reactive State. */
-export type AriaLiveInput = AriaLive | State<"off" | "polite" | "assertive" | null>;
+export type AriaLiveInput = AriaLive | State.Readonly<"off" | "polite" | "assertive" | null>;
 /** ARIA reference: an element ID string, HTMLElement, component with element, or falsy. */
 export type AriaReference = string | HTMLElement | { readonly element: HTMLElement } | Falsy;
 /** ARIA reference selection: a single reference or iterable of references. */
 export type AriaReferenceSelection = AriaReference | Iterable<AriaReference>;
 /** ARIA reference input: static selection or a reactive State. */
-export type AriaReferenceInput = AriaReferenceSelection | State<AriaReferenceSelection>;
+export type AriaReferenceInput = AriaReferenceSelection | State.Readonly<AriaReferenceSelection>;
 
 const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
 let generatedAriaReferenceId = 0;
-const mappedReferenceStatesByOwner = new WeakMap<Component, WeakMap<State<AriaReferenceSelection>, State<string | null>>>();
+const mappedReferenceStatesByOwner = new WeakMap<Component, WeakMap<State.Readonly<AriaReferenceSelection>, State<string | null>>>();
 
-function isValueSource<TValue> (value: unknown): value is State<TValue> {
+function isValueSource<TValue> (value: unknown): value is State.Readonly<TValue> {
 	return value instanceof State;
 }
 
@@ -221,13 +221,13 @@ function toReferenceValueInput (owner: Component, value: AriaReferenceInput): At
 	}
 
 	const cachedBySource = mappedReferenceStatesByOwner.get(owner);
-	const cachedMapped = cachedBySource?.get(value as State<AriaReferenceSelection>);
+	const cachedMapped = cachedBySource?.get(value as State.Readonly<AriaReferenceSelection>);
 	if (cachedMapped) {
 		return cachedMapped;
 	}
 
 	const mappedValue = State(owner, resolveReferenceSelection(value.value as AriaReferenceSelection));
-	const bySource = cachedBySource ?? new WeakMap<State<AriaReferenceSelection>, State<string | null>>();
+	const bySource = cachedBySource ?? new WeakMap<State.Readonly<AriaReferenceSelection>, State<string | null>>();
 	if (!cachedBySource) {
 		mappedReferenceStatesByOwner.set(owner, bySource);
 		owner.onCleanup(() => {
@@ -235,7 +235,7 @@ function toReferenceValueInput (owner: Component, value: AriaReferenceInput): At
 		});
 	}
 
-	bySource.set(value as State<AriaReferenceSelection>, mappedValue);
+	bySource.set(value as State.Readonly<AriaReferenceSelection>, mappedValue);
 
 	value.subscribe(mappedValue, (nextValue) => {
 		mappedValue.set(resolveReferenceSelection(nextValue as AriaReferenceSelection));

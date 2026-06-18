@@ -23,14 +23,20 @@ const reportPrefix = "__KITSUI_LEAK_REPORT__";
 async function leakProbe (
 	_: {
 		componentUrl: string;
+		draggableUrl: string;
+		dropTargetUrl: string;
 		mappingExtensionUrl: string;
 		placeExtensionUrl: string;
+		sortableUrl: string;
 		stateUrl: string;
 		styleUrl: string;
 	},
 	dependencies: {
 		Component: typeof import("../src/component/Component").Component;
+		Draggable: typeof import("../src/component/Draggable").Draggable;
+		DropTarget: typeof import("../src/component/DropTarget").DropTarget;
 		Owner: typeof import("../src/state/State").Owner;
+		Sortable: typeof import("../src/component/Sortable").Sortable;
 		State: typeof import("../src/state/State").State;
 		Style: typeof import("../src/component/Style").Style;
 		Window: typeof import("happy-dom").Window;
@@ -38,7 +44,10 @@ async function leakProbe (
 ): Promise<LeakProbeReport> {
 	const {
 		Component,
+		Draggable,
+		DropTarget,
 		Owner,
+		Sortable,
 		State,
 		Style,
 		Window,
@@ -563,6 +572,362 @@ async function leakProbe (
 		});
 	});
 
+	describe("drag and sort", () => {
+		const applySortable = <T, K extends PropertyKey = number>(
+			component: Component,
+			input: readonly T[] | import("../src/state/State").State.Readonly<readonly T[]>,
+			options: import("../src/component/Sortable").SortableOptions<T, Component, K>,
+		): Component & import("../src/component/Sortable").SortableExtensions<T, Component, K> => {
+			return (Sortable as any).call(component, input, options) as Component & import("../src/component/Sortable").SortableExtensions<T, Component, K>;
+		};
+
+		it("draggable external adapter cleanup", async ({ track }) => {
+			let component = track("draggable component", Component("div").appendTo(body));
+			const adapterCleanup = track("draggable adapter cleanup", () => {
+				// Intentionally empty.
+			});
+
+			track("draggable element", component.element);
+			Draggable.call(component, {
+				input: () => adapterCleanup,
+			});
+			component.remove();
+
+			component = null as never;
+
+			return {
+				expected: [
+					"draggable component",
+					"draggable element",
+					"draggable adapter cleanup",
+				],
+			};
+		});
+
+		it("draggable pointer listener cleanup", async ({ track }) => {
+			let component = track("draggable pointer component", Component("div").appendTo(body));
+
+			track("draggable pointer element", component.element);
+			Draggable.call(component, { threshold: 10 });
+			component.element.dispatchEvent(new windowRef.MouseEvent("pointerdown", {
+				bubbles: true,
+				clientX: 0,
+				clientY: 0,
+			}) as unknown as Event);
+			component.remove();
+			windowRef.document.dispatchEvent(new windowRef.MouseEvent("pointermove", {
+				bubbles: true,
+				clientX: 10,
+				clientY: 10,
+			}) as unknown as InstanceType<typeof windowRef.Event>);
+
+			component = null as never;
+
+			return {
+				expected: [
+					"draggable pointer component",
+					"draggable pointer element",
+				],
+			};
+		});
+
+		it("drop target registry cleanup", async ({ track }) => {
+			let target = track("drop target component", Component("div").appendTo(body));
+
+			track("drop target element", target.element);
+			DropTarget.call(target, {
+				accepts: () => true,
+				drop: () => {},
+			});
+			target.remove();
+
+			target = null as never;
+
+			return {
+				expected: [
+					"drop target component",
+					"drop target element",
+				],
+			};
+		});
+
+		it("sortable item cleanup after source removal", async ({ hold, track }) => {
+			const stateOwner = hold(new TestOwner());
+			const source = hold(State(stateOwner, [{ id: "one", label: "One" }]));
+			let host = track("sortable host", Component("div").appendTo(body));
+			let itemComponent: Component | null = null;
+
+			track("sortable host element", host.element);
+			applySortable(host, source, {
+				key: item => item.id,
+				placeholder: () => Component("i"),
+				render: (item) => {
+					itemComponent = track("sortable item", Component("div").text.set(item.value.label));
+					track("sortable item element", itemComponent.element);
+					return itemComponent;
+				},
+			});
+
+			source.set([]);
+			await settle();
+			host.remove();
+
+			host = null as never;
+			itemComponent = null;
+
+			return {
+				expected: [
+					"sortable host",
+					"sortable host element",
+					"sortable item",
+					"sortable item element",
+				],
+				release: () => {
+					stateOwner.dispose();
+				},
+			};
+		});
+
+		it("sortable placeholder cleanup after cancel", async ({ track }) => {
+			let host = track("sortable cancel host", Component("div").appendTo(body));
+			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+			let placeholderComponent: Component | null = null;
+
+			track("sortable cancel host element", host.element);
+			applySortable(host, [{ id: "one", label: "One" }], {
+				key: item => item.id,
+				placeholder: () => {
+					placeholderComponent = track("sortable placeholder", Component("i"));
+					track("sortable placeholder element", placeholderComponent.element);
+					return placeholderComponent;
+				},
+				render: (item) => {
+					itemComponent = track("sortable cancel item", Component("div").text.set(item.value.label)) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					track("sortable cancel item element", itemComponent.element);
+					return itemComponent;
+				},
+			});
+
+			itemComponent!.element.dispatchEvent(new windowRef.CustomEvent("DragStart", {
+				bubbles: true,
+				detail: {
+					component: itemComponent,
+					position: {
+						current: { x: 0, y: 0 },
+						delta: { x: 0, y: 0 },
+						initial: { x: 0, y: 0 },
+						offset: { x: 0, y: 0 },
+						previous: null,
+						source: { type: "external" },
+					},
+				},
+			}) as unknown as Event);
+			(host as unknown as Component & import("../src/component/Sortable").SortableExtensions<{ id: string; label: string }>).sortable.cancel();
+			host.remove();
+
+			host = null as never;
+			itemComponent = null;
+			placeholderComponent = null;
+
+			return {
+				expected: [
+					"sortable cancel host",
+					"sortable cancel host element",
+					"sortable cancel item",
+					"sortable cancel item element",
+					"sortable placeholder",
+					"sortable placeholder element",
+				],
+			};
+		});
+
+		it("sortable placeholder cleanup after commit", async ({ track }) => {
+			let host = track("sortable commit host", Component("div").appendTo(body));
+			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+			let placeholderComponent: Component | null = null;
+
+			track("sortable commit host element", host.element);
+			applySortable(host, [{ id: "one", label: "One" }], {
+				key: item => item.id,
+				placeholder: () => {
+					placeholderComponent = track("sortable commit placeholder", Component("i"));
+					track("sortable commit placeholder element", placeholderComponent.element);
+					return placeholderComponent;
+				},
+				render: (item) => {
+					itemComponent = track("sortable commit item", Component("div").text.set(item.value.label)) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					track("sortable commit item element", itemComponent.element);
+					return itemComponent;
+				},
+			});
+
+			const detail = {
+				component: itemComponent,
+				position: {
+					current: { x: 0, y: 0 },
+					delta: { x: 0, y: 0 },
+					initial: { x: 0, y: 0 },
+					offset: { x: 0, y: 0 },
+					previous: null,
+					source: { type: "external" },
+				},
+			};
+			itemComponent!.element.dispatchEvent(new windowRef.CustomEvent("DragStart", {
+				bubbles: true,
+				detail,
+			}) as unknown as Event);
+			itemComponent!.element.dispatchEvent(new windowRef.CustomEvent("DragEnd", {
+				bubbles: true,
+				detail,
+			}) as unknown as Event);
+			host.remove();
+
+			host = null as never;
+			itemComponent = null;
+			placeholderComponent = null;
+
+			return {
+				expected: [
+					"sortable commit host",
+					"sortable commit host element",
+					"sortable commit item",
+					"sortable commit item element",
+					"sortable commit placeholder",
+					"sortable commit placeholder element",
+				],
+			};
+		});
+
+		it("sortable placeholder cleanup after dispose", async ({ track }) => {
+			let host = track("sortable dispose host", Component("div").appendTo(body));
+			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+			let placeholderComponent: Component | null = null;
+
+			track("sortable dispose host element", host.element);
+			applySortable(host, [{ id: "one", label: "One" }], {
+				key: item => item.id,
+				placeholder: () => {
+					placeholderComponent = track("sortable dispose placeholder", Component("i"));
+					track("sortable dispose placeholder element", placeholderComponent.element);
+					return placeholderComponent;
+				},
+				render: (item) => {
+					itemComponent = track("sortable dispose item", Component("div").text.set(item.value.label)) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					track("sortable dispose item element", itemComponent.element);
+					return itemComponent;
+				},
+			});
+
+			itemComponent!.element.dispatchEvent(new windowRef.CustomEvent("DragStart", {
+				bubbles: true,
+				detail: {
+					component: itemComponent,
+					position: {
+						current: { x: 0, y: 0 },
+						delta: { x: 0, y: 0 },
+						initial: { x: 0, y: 0 },
+						offset: { x: 0, y: 0 },
+						previous: null,
+						source: { type: "external" },
+					},
+				},
+			}) as unknown as Event);
+			host.remove();
+
+			host = null as never;
+			itemComponent = null;
+			placeholderComponent = null;
+
+			return {
+				expected: [
+					"sortable dispose host",
+					"sortable dispose host element",
+					"sortable dispose item",
+					"sortable dispose item element",
+					"sortable dispose placeholder",
+					"sortable dispose placeholder element",
+				],
+			};
+		});
+
+		it("sortable transfer hosts cleanup after removal", async ({ track }) => {
+			const transfer = Sortable.Transfer<{ id: string; label: string }>("memory");
+			let source = track("sortable transfer source", Component("div").appendTo(body));
+			let target = track("sortable transfer target", Component("div").appendTo(body));
+			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+
+			track("sortable transfer source element", source.element);
+			track("sortable transfer target element", target.element);
+			applySortable(source, [{ id: "one", label: "One" }], {
+				key: item => item.id,
+				placeholder: () => Component("i"),
+				render: item => {
+					itemComponent = Component("div").text.set(item.value.label) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					return itemComponent;
+				},
+				transfer,
+			});
+			applySortable(target, [] as Array<{ id: string; label: string }>, {
+				key: item => item.id,
+				placeholder: () => Component("i"),
+				render: item => Component("div").text.set(item.value.label),
+				transfer,
+			});
+			Object.defineProperty(target.element, "getBoundingClientRect", {
+				configurable: true,
+				value: () => ({
+					bottom: 20,
+					height: 20,
+					left: 0,
+					right: 100,
+					toJSON: () => ({}),
+					top: 0,
+					width: 100,
+					x: 0,
+					y: 0,
+				}),
+			});
+			const detail = {
+				component: itemComponent,
+				position: {
+					current: { x: 1, y: 1 },
+					delta: { x: 0, y: 0 },
+					initial: { x: 1, y: 1 },
+					offset: { x: 0, y: 0 },
+					previous: null,
+					source: { type: "external" },
+				},
+			};
+			itemComponent!.element.dispatchEvent(new windowRef.CustomEvent("DragStart", {
+				bubbles: true,
+				detail,
+			}) as unknown as Event);
+			itemComponent!.element.dispatchEvent(new windowRef.CustomEvent("DragMove", {
+				bubbles: true,
+				detail,
+			}) as unknown as Event);
+			itemComponent!.element.dispatchEvent(new windowRef.CustomEvent("DragEnd", {
+				bubbles: true,
+				detail,
+			}) as unknown as Event);
+			source.remove();
+			target.remove();
+
+			source = null as never;
+			target = null as never;
+			itemComponent = null;
+
+			return {
+				expected: [
+					"sortable transfer source",
+					"sortable transfer source element",
+					"sortable transfer target",
+					"sortable transfer target element",
+				],
+			};
+		});
+	});
+
 	//#endregion 
 	////////////////////////////////////
 
@@ -584,8 +949,11 @@ async function runLeakProbe (): Promise<LeakProbeReport> {
 	const trackLocations = createLeakTrackLocationMap(sourceFilePath);
 	const payload = JSON.stringify({
 		componentUrl: pathToFileURL(resolve(cwd, "src", "component", "Component.ts")).href,
+		draggableUrl: pathToFileURL(resolve(cwd, "src", "component", "Draggable.ts")).href,
+		dropTargetUrl: pathToFileURL(resolve(cwd, "src", "component", "DropTarget.ts")).href,
 		mappingExtensionUrl: pathToFileURL(resolve(cwd, "src", "state", "extensions", "mappingExtension.ts")).href,
 		placeExtensionUrl: pathToFileURL(resolve(cwd, "src", "component", "extensions", "placeExtension.ts")).href,
+		sortableUrl: pathToFileURL(resolve(cwd, "src", "component", "Sortable.ts")).href,
 		stateUrl: pathToFileURL(resolve(cwd, "src", "state", "State.ts")).href,
 		styleUrl: pathToFileURL(resolve(cwd, "src", "component", "Style.ts")).href,
 	});
@@ -594,26 +962,35 @@ async function runLeakProbe (): Promise<LeakProbeReport> {
 		"try {",
 		"\tconst { Window } = await import(\"happy-dom\");",
 		"\tconst componentModule = await import(args.componentUrl);",
+		"\tconst draggableModule = await import(args.draggableUrl);",
+		"\tconst dropTargetModule = await import(args.dropTargetUrl);",
 		"\tconst stateModule = await import(args.stateUrl);",
 		"\tconst styleModule = await import(args.styleUrl);",
+		"\tconst sortableModule = await import(args.sortableUrl);",
 		"\tconst placeExtensionModule = await import(args.placeExtensionUrl);",
 		"\tconst mappingExtensionModule = await import(args.mappingExtensionUrl);",
 		"\tconst Component = componentModule.Component ?? componentModule.default?.Component;",
+		"\tconst Draggable = draggableModule.Draggable ?? draggableModule.default?.Draggable;",
+		"\tconst DropTarget = dropTargetModule.DropTarget ?? dropTargetModule.default?.DropTarget;",
 		"\tconst Owner = stateModule.Owner ?? stateModule.default?.Owner;",
+		"\tconst Sortable = sortableModule.Sortable ?? sortableModule.default?.Sortable;",
 		"\tconst State = stateModule.State ?? stateModule.default?.State;",
 		"\tconst Style = styleModule.Style ?? styleModule.default?.Style;",
 		"\tconst resolveExtension = (moduleValue) => moduleValue?.default?.default ?? moduleValue?.default ?? moduleValue;",
 		"\tconst placeExtension = resolveExtension(placeExtensionModule);",
 		"\tconst mappingExtension = resolveExtension(mappingExtensionModule);",
 		"\tif (typeof Component !== \"function\") throw new Error(`Component export was not callable: ${Object.keys(componentModule).join(\",\")}`);",
+		"\tif (typeof Draggable !== \"function\") throw new Error(`Draggable export was not callable: ${Object.keys(draggableModule).join(\",\")}`);",
+		"\tif (typeof DropTarget !== \"function\") throw new Error(`DropTarget export was not callable: ${Object.keys(dropTargetModule).join(\",\")}`);",
 		"\tif (typeof Owner !== \"function\") throw new Error(`Owner export was not callable: ${Object.keys(stateModule).join(\",\")}`);",
+		"\tif (typeof Sortable !== \"function\") throw new Error(`Sortable export was not callable: ${Object.keys(sortableModule).join(\",\")}`);",
 		"\tif (typeof State !== \"function\") throw new Error(`State export was not callable: ${Object.keys(stateModule).join(\",\")}`);",
 		"\tif (typeof Style !== \"function\" || typeof Style.Class !== \"function\") throw new Error(`Style export was not callable: ${Object.keys(styleModule).join(\",\")}`);",
 		"\tif (typeof placeExtension !== \"function\") throw new Error(`placeExtension export was not callable: ${Object.keys(placeExtensionModule).join(\",\")}`);",
 		"\tif (typeof mappingExtension !== \"function\") throw new Error(`mappingExtension export was not callable: ${Object.keys(mappingExtensionModule).join(\",\")}`);",
 		"\tplaceExtension();",
 		"\tmappingExtension();",
-		`	const report = await (${leakProbe.toString()})(args, { Component, Owner, State, Style, Window });`,
+		`	const report = await (${leakProbe.toString()})(args, { Component, Draggable, DropTarget, Owner, Sortable, State, Style, Window });`,
 		`	console.log(${JSON.stringify(reportPrefix)} + JSON.stringify(report));`,
 		"} catch (error) {",
 		"\tconsole.error(error instanceof Error ? error.stack ?? error.message : String(error));",

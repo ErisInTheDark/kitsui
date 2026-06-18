@@ -985,7 +985,7 @@ describe("State", () => {
 		source.dispose();
 
 		expect(resolved.disposed, "disposing the source should dispose the derived or-state").toBe(true);
-		expect(() => resolved.recompute(), "a disposed or-state should stop responding to recompute calls").toThrowError("Disposed states cannot be modified.");
+		expect(() => (resolved as unknown as { recompute (): void }).recompute(), "a disposed or-state should stop responding to recompute calls").toThrowError("Disposed states cannot be modified.");
 
 		owner.remove();
 	});
@@ -1017,8 +1017,9 @@ describe("State", () => {
 	/** Verifies readonly states ignore clear to preserve immutability. */
 	it("ignores clear on readonly states", () => {
 		const readonlyState = State.Readonly(1);
+		const internalReadonlyState = readonlyState as State<number>;
 
-		expect(readonlyState.clear(2), "clear should return the retained readonly value").toBe(1);
+		expect(internalReadonlyState.clear(2), "clear should return the retained readonly value").toBe(1);
 
 		expect(readonlyState.value, "clear should not mutate readonly states").toBe(1);
 	});

@@ -1,19 +1,21 @@
 import { Owner, State, type CleanupFunction, type StateOptions } from "../State";
 
 type Nullish = null;
-type ComparableValue<T> = T | State<T>;
+type ComparableValue<T> = T | State.Readonly<T>;
 
 /** Maps a source state value, and optionally its previous value, into a derived value. */
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
 
 /** A mapped state that can be manually recomputed when external mapping inputs change. */
-export interface RecomputableState<T> extends State<T> {
+export interface RecomputableState<T> extends State.Readonly<T> {
 	/**
 	 * Recomputes the current value of the state by reapplying all mapping and transformation functions.
 	 * Useful when external conditions affecting the mapped values have changed and a manual update is needed.
 	 */
 	recompute (): void;
 }
+
+type MutableRecomputableState<T> = State<T> & RecomputableState<T>;
 
 type ImplicitOwnerLinkedState = State<unknown> & {
 	_registerImplicitOwnerDependent?: (dependent: State<unknown>) => CleanupFunction;
@@ -45,13 +47,13 @@ declare module "../State" {
 		 * A boolean state indicating whether the current value is truthy.
 		 * The value is memoized per state instance for efficiency.
 		 */
-		readonly truthy: State<boolean>;
+		readonly truthy: RecomputableState<boolean>;
 
 		/**
 		 * A boolean state indicating whether the current value is falsy.
 		 * The value is memoized per state instance for efficiency.
 		 */
-		readonly falsy: State<boolean>;
+		readonly falsy: RecomputableState<boolean>;
 
 		/**
 		 * Returns a state that falls back to a computed value when this state is null.
@@ -68,7 +70,7 @@ declare module "../State" {
 		 * @param compareValue The value or state to compare against the current state value.
 		 * @returns A new state that is true when the values are strictly equal, false otherwise.
 		 */
-		equals (compareValue: T | State<T>): State<boolean>;
+		equals (compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
 
 		/**
 		 * Returns a boolean state that is true when this state does not equal the provided value or state.
@@ -76,12 +78,12 @@ declare module "../State" {
 		 * @param compareValue The value or state to compare against the current state value.
 		 * @returns A new state that is true when the values are not strictly equal, false otherwise.
 		 */
-		notEquals (compareValue: T | State<T>): State<boolean>;
+		notEquals (compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
 	}
 }
 
-const truthyStates = new WeakMap<State<unknown>, State<boolean>>();
-const falsyStates = new WeakMap<State<unknown>, State<boolean>>();
+const truthyStates = new WeakMap<State<unknown>, MutableRecomputableState<boolean>>();
+const falsyStates = new WeakMap<State<unknown>, MutableRecomputableState<boolean>>();
 
 const createOwnedState = State as unknown as <T>(owner: Owner, initialValue: T, options?: StateOptions<T>) => State<T>;
 const createOwnerlessState = State as unknown as <T>(initialValue: T, options?: StateOptions<T>) => State<T>;
@@ -93,7 +95,7 @@ function createMappedState<T, TMapped> (
 	owner: Owner | null,
 	mapValue: Mapper<T, TMapped>,
 	options?: StateOptions<TMapped>,
-): RecomputableState<TMapped> {
+): MutableRecomputableState<TMapped> {
 	const stateOptions = {
 		...options,
 		graph: source.getGraph(),
@@ -101,7 +103,7 @@ function createMappedState<T, TMapped> (
 	const mapped = (owner
 		? createOwnedState(owner, mapValue(source.value) as Exclude<TMapped, undefined>, stateOptions as StateOptions<Exclude<TMapped, undefined>>)
 		: createOwnerlessState(mapValue(source.value) as Exclude<TMapped, undefined>, stateOptions as StateOptions<Exclude<TMapped, undefined>>)
-	) as unknown as RecomputableState<TMapped>;
+	) as unknown as MutableRecomputableState<TMapped>;
 	const releaseImplicitOwnerPropagation = ((mapped as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(source)) ?? (() => undefined);
 	const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
 		mapped.set(mapValue(value, oldValue));
@@ -127,7 +129,7 @@ function createComparisonState<T> (
 	source: State<T>,
 	compareValue: ComparableValue<T>,
 	compare: (value: T, otherValue: T) => boolean,
-): RecomputableState<boolean> {
+): MutableRecomputableState<boolean> {
 	const comparator = compareValue instanceof State ? compareValue : null;
 	const comparisonState = createMappedState(source, source, (value) => compare(value, (comparator?.value ?? compareValue) as T));
 
@@ -180,7 +182,7 @@ export default function mappingExtension (): void {
 	Object.defineProperty(prototype, "truthy", {
 		configurable: true,
 		enumerable: false,
-		get (this: State<unknown>): State<boolean> {
+		get (this: State<unknown>): RecomputableState<boolean> {
 			let mapped = truthyStates.get(this);
 
 			if (!mapped) {
@@ -195,7 +197,7 @@ export default function mappingExtension (): void {
 	Object.defineProperty(prototype, "falsy", {
 		configurable: true,
 		enumerable: false,
-		get (this: State<unknown>): State<boolean> {
+		get (this: State<unknown>): RecomputableState<boolean> {
 			let mapped = falsyStates.get(this);
 
 			if (!mapped) {
@@ -220,11 +222,11 @@ export default function mappingExtension (): void {
 		}, options);
 	};
 
-	prototype.equals = function equals (compareValue: unknown): State<boolean> {
+	prototype.equals = function equals (compareValue: unknown): RecomputableState<boolean> {
 		return createComparisonState(this, compareValue as ComparableValue<unknown>, (value, otherValue) => value === otherValue);
 	};
 
-	prototype.notEquals = function notEquals (compareValue: unknown): State<boolean> {
+	prototype.notEquals = function notEquals (compareValue: unknown): RecomputableState<boolean> {
 		return createComparisonState(this, compareValue as ComparableValue<unknown>, (value, otherValue) => value !== otherValue);
 	};
 }

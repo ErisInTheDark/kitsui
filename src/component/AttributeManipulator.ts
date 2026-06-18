@@ -27,12 +27,12 @@ type ReactiveAttributeValueSelection = Exclude<AttributeValueSelection, undefine
 /**
  * Attribute name input: either a direct name selection or a subscribable source.
  */
-export type AttributeNameInput = AttributeNameSelection | State<ReactiveAttributeNameSelection>;
+export type AttributeNameInput = AttributeNameSelection | State.Readonly<ReactiveAttributeNameSelection>;
 
 /**
  * Attribute value input: either a direct value or a subscribable source.
  */
-export type AttributeValueInput = AttributeValueSelection | State<ReactiveAttributeValueSelection>;
+export type AttributeValueInput = AttributeValueSelection | State.Readonly<ReactiveAttributeValueSelection>;
 
 /**
  * Maps an attribute name to a value.
@@ -118,7 +118,7 @@ function serializeAttributeValue (value: AttributeValueSelection): string | null
 	return String(value);
 }
 
-function toAttributeNameSource (value: AttributeNameInput): State<ReactiveAttributeNameSelection> {
+function toAttributeNameSource (value: AttributeNameInput): State.Readonly<ReactiveAttributeNameSelection> {
 	if (isStateSource<ReactiveAttributeNameSelection>(value)) {
 		return value as unknown as State<ReactiveAttributeNameSelection>;
 	}
@@ -126,7 +126,7 @@ function toAttributeNameSource (value: AttributeNameInput): State<ReactiveAttrib
 	return State.Readonly(value === undefined ? null : value);
 }
 
-function toAttributeValueSource (value: AttributeValueInput): State<ReactiveAttributeValueSelection> {
+function toAttributeValueSource (value: AttributeValueInput): State.Readonly<ReactiveAttributeValueSelection> {
 	if (isStateSource<ReactiveAttributeValueSelection>(value)) {
 		return value as unknown as State<ReactiveAttributeValueSelection>;
 	}
@@ -227,7 +227,7 @@ export class AttributeManipulator<OWNER extends Component> {
 	 * @param attributes Attribute names to bind.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: State<boolean>, ...attributes: AttributeNameInput[]): OWNER;
+	bind (state: State.Readonly<boolean>, ...attributes: AttributeNameInput[]): OWNER;
 	/**
 	 * Binds attribute entries to a boolean state, setting/removing them based on state value.
 	 * When state is true, attributes are set; when false, they are removed.
@@ -235,9 +235,9 @@ export class AttributeManipulator<OWNER extends Component> {
 	 * @param entries Objects with `name` and `value` properties.
 	 * @returns The owning component for fluent chaining.
 	 */
-	bind (state: State<boolean>, ...entries: AttributeEntry[]): OWNER;
+	bind (state: State.Readonly<boolean>, ...entries: AttributeEntry[]): OWNER;
 	bind (
-		state: State<boolean>,
+		state: State.Readonly<boolean>,
 		...inputs: Array<AttributeNameInput | AttributeEntry>
 	): OWNER {
 		this.ensureActive();
@@ -343,7 +343,7 @@ export class AttributeManipulator<OWNER extends Component> {
 	}
 
 	private installAttributeSelection (
-		nameSource: State<AttributeNameSelection>,
+		nameSource: State.Readonly<AttributeNameSelection>,
 		getValue: () => string | null,
 		options: {
 			logDynamicReplacement?: boolean;

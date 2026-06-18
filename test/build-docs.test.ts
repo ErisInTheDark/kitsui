@@ -356,14 +356,22 @@ describe("build:docs pipeline", () => {
 		expect(whenActiveCommentIndex, "whenActive declaration comment should be present").toBeGreaterThanOrEqual(0);
 		expect(whenActiveSignatureIndex < whenActiveCommentIndex, "Single-signature method declarations should merge declaration comments into signature boxes").toBe(true);
 		expect(recomputableStateDeclaration.includes('class="docs-declaration-relationship-label">extends</span>'), "Missing RecomputableState extends relationship").toBe(true);
-		expect(/href="State\.html#[^"]+"><span class="docs-type-reference">State<\/span>/u.test(recomputableStateDeclaration), "Missing RecomputableState extends link to State").toBe(true);
+		expect(
+			/href="State\.html#State\.Readonly"><span class="docs-type-reference">(?:State\.)?Readonly<\/span>/u.test(recomputableStateDeclaration),
+			"Missing RecomputableState extends link to State.Readonly",
+		).toBe(true);
 		expect(recomputableStateDeclaration.includes('<span class="docs-declaration-name">value</span>'), "RecomputableState should not duplicate inherited State members").toBe(false);
 		const mappingModule = docsModel.children?.find(child => child.name === "state/extensions/mappingExtension");
 		expect(mappingModule, "Missing mappingExtension module in TypeDoc model").toBeDefined();
 		const recomputableStateModel = mappingModule?.children?.find(child => child.name === "RecomputableState");
 		expect(
-			recomputableStateModel?.extendedTypes?.some(type => type.type === "reference" && type.name === "State"),
-			"Test precondition failed: RecomputableState should extend State in TypeDoc output",
+			recomputableStateModel?.extendedTypes?.some(type =>
+				type.type === "reference"
+				&& type.name === "Readonly"
+				&& "qualifiedName" in type
+				&& type.qualifiedName === "State.Readonly"
+			),
+			"Test precondition failed: RecomputableState should extend State.Readonly in TypeDoc output",
 		).toBe(true);
 		const leakedTopLevelStateValue = mappingModule?.children?.some(child =>
 			child.name === "value"
@@ -371,8 +379,8 @@ describe("build:docs pipeline", () => {
 		);
 		expect(
 			leakedTopLevelStateValue,
-			"Test precondition failed: expected TypeDoc model to contain leaked top-level State.value accessor in mappingExtension",
-		).toBe(true);
+			"mappingExtension should not leak inherited State.value as a top-level declaration",
+		).toBe(false);
 		const mappingSectionStart = stateHtml.indexOf('class="docs-component-section-title" id="section-mappingextension">mappingExtension</h2>');
 		expect(mappingSectionStart, "Missing mappingExtension section in rendered State page").toBeGreaterThanOrEqual(0);
 		const mappingSectionHtml = stateHtml.slice(mappingSectionStart);
@@ -416,7 +424,7 @@ describe("build:docs pipeline", () => {
 		expect(docsJson.includes('"name":"Style"'), "Missing Style in JSON").toBe(true);
 
 		// Cross-page links: Component.html should link to State declarations
-		expect(/href="State\.html#[^"]+"><span class="docs-type-reference">State<\/span>/u.test(componentHtml), "Component.html should link State type references to State.html").toBe(true);
+		expect(componentHtml.includes('href="State.html#State.Readonly"'), "Component.html should link State.Readonly type references to State.html").toBe(true);
 	});
 
 	it("dedupes section anchor ids for duplicate section titles", () => {

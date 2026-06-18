@@ -41,7 +41,7 @@ export type ComponentChildren = ComponentChild | Iterable<ComponentChild> | Comp
  * A render function that responds to state changes.
  * @typeParam TValue - The type of state value being rendered.
  */
-export type ComponentRender<TValue> = (value: TValue, component: Component) => void;
+export type ComponentRender<TValue, TComponent extends Component = Component> = (value: TValue, component: TComponent) => void;
 
 /**
  * A source that can be passed to Component to create, wrap, or reuse a component.
@@ -599,7 +599,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * @param nodes - Nodes or iterables of nodes to append conditionally.
 	 * @returns This component for chaining.
 	 */
-	appendWhen (state: State<boolean>, ...nodes: ComponentChildren[]): this {
+	appendWhen (state: State.Readonly<boolean>, ...nodes: ComponentChildren[]): this {
 		this.ensureActive();
 
 		for (const node of this.expandChildren(nodes)) {
@@ -627,7 +627,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * @param nodes - Nodes or iterables of nodes to prepend conditionally.
 	 * @returns This component for chaining.
 	 */
-	prependWhen (state: State<boolean>, ...nodes: ComponentChildren[]): this {
+	prependWhen (state: State.Readonly<boolean>, ...nodes: ComponentChildren[]): this {
 		this.ensureActive();
 		const referenceNode = this.element.firstChild;
 
@@ -657,7 +657,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * @param nodes - Nodes or iterables of nodes to insert conditionally.
 	 * @returns This component for chaining.
 	 */
-	insertWhen (state: State<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): this {
+	insertWhen (state: State.Readonly<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): this {
 		this.ensureActive();
 		const insertables = this.expandChildren(nodes);
 		const orderedInsertables = where === "before"
@@ -683,7 +683,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	}
 
 	private attachConditionalSelectionState (
-		visibleState: State<boolean>,
+		visibleState: State.Readonly<boolean>,
 		selectionState: ComponentSelectionState,
 		options: {
 			getContainer: () => ParentNode | null;
@@ -838,7 +838,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * @param setup A setup callback that can perform additional fluent configuration.
 	 * @returns This component for chaining.
 	 */
-	use<PARAMS extends any[]> (setup: (component: Component, ...params: PARAMS) => unknown, ...params: PARAMS): this;
+	use<PARAMS extends any[]> (setup: (component: this, ...params: PARAMS) => unknown, ...params: PARAMS): this;
 	/**
 	 * Subscribes this component to state changes and re-renders when the state updates.
 	 * The render function is called immediately with the current state value, then again each time the state changes.
@@ -848,8 +848,8 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 * @param render - Function called with the state value and this component, for each update.
 	 * @returns This component for chaining.
 	 */
-	use<TValue> (state: State<TValue>, render: ComponentRender<TValue>): this;
-	use<TValue> (setupOrState: ((component: Component, ...params: any[]) => unknown) | State<TValue>, ...params: [ComponentRender<TValue>] | any[]): this {
+	use<TValue> (state: State.Readonly<TValue>, render: ComponentRender<TValue, this>): this;
+	use<TValue> (setupOrState: ((component: this, ...params: any[]) => unknown) | State.Readonly<TValue>, ...params: [ComponentRender<TValue, this>] | any[]): this {
 		this.ensureActive();
 
 		if (typeof setupOrState === "function") {
@@ -1111,7 +1111,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	}
 
 	private attachConditionalNode (
-		state: State<boolean>,
+		state: State.Readonly<boolean>,
 		node: ComponentChild,
 		options: {
 			getContainer: () => ParentNode | null;

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Component, type ComponentBuilderFunction } from "../../src/component/Component";
 import compositionExtension from "../../src/component/extensions/compositionExtension";
 import placeExtension from "../../src/component/extensions/placeExtension";
+import { State } from "../../src/state/State";
 
 compositionExtension();
 placeExtension();
@@ -79,6 +80,31 @@ describe("compositionExtension", () => {
 			expect(composed.is(Toggle)).toBe(true);
 		} finally {
 			composed.remove();
+		}
+	});
+
+	it("types use callbacks as the current composed component", () => {
+		const setup = Component("button")
+			.and(Button, "Save")
+			.use((target) => {
+				target.press();
+			});
+		const render = Component("button")
+			.and(Button, "Send");
+		const active = State(render, true);
+
+		try {
+			render.use(active, (value, target) => {
+				if (value) {
+					target.press();
+				}
+			});
+
+			expect(setup.element.hasAttribute("data-pressed")).toBe(true);
+			expect(render.element.hasAttribute("data-pressed")).toBe(true);
+		} finally {
+			setup.remove();
+			render.remove();
 		}
 	});
 

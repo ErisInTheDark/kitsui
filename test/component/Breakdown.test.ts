@@ -374,18 +374,45 @@ describe("Component.Breakdown", () => {
 		}
 	});
 
-	/** Verifies duplicate keys are rejected within a single render pass. */
-	it("throws on duplicate keys within one pass", () => {
+	/** Verifies duplicate keys in one pass reuse the existing keyed part instead of failing. */
+	it("reuses duplicate keys within one pass", async () => {
 		const owner = mountedComponent("div");
 		const source = State(owner, "initial");
+		let firstPart: Component | undefined;
+		let secondPart: Component | undefined;
+		let laterPart: Component | undefined;
+		let buildCount = 0;
 
 		try {
-			expect(() => {
-				Component.Breakdown(owner, source, (Part) => {
-					Part("alpha", "one", textPart);
-					Part("alpha", "two", textPart);
+			Component.Breakdown(owner, source, (Part, value) => {
+				const part = Part("alpha", value, (state) => {
+					buildCount += 1;
+					return textPart(state);
 				});
-			}, "duplicate keys should fail during the same breakdown pass").toThrow("registered the key alpha more than once");
+				owner.append(part);
+
+				if (value === "initial") {
+					firstPart = part;
+					secondPart = Part("alpha", "updated-in-pass", textPart);
+					owner.append(secondPart);
+					return;
+				}
+
+				laterPart = part;
+			});
+
+			expect(secondPart, "a duplicate key should return the same part during one pass").toBe(firstPart);
+			expect(buildCount, "a duplicate key should not build a second component").toBe(1);
+			expect(firstPart!.disposed, "a duplicate key should still be marked seen for cleanup").toBe(false);
+			expect(owner.element.children, "a duplicate append should move the existing element, not clone it").toHaveLength(1);
+			await flushEffects();
+			expect(firstPart!.element.textContent, "the duplicate keyed value should update the existing part state").toBe("updated-in-pass");
+
+			source.set("later");
+			await flushEffects();
+
+			expect(laterPart, "later passes should keep reusing the same keyed part").toBe(firstPart);
+			expect(firstPart!.element.textContent, "later passes should update the same part normally").toBe("later");
 		}
 		finally {
 			owner.remove();
