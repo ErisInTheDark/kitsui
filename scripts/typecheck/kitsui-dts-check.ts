@@ -13,6 +13,7 @@ const host = Component("div");
 const state = State(host, 0);
 const mapped = state.map(value => value + 1);
 const staticReadonly = State.Readonly({ count: 1 });
+const readonlySource: State.Readonly<number> = state;
 const publicTypes: {
 	child: ComponentChild;
 	cleanup: CleanupFunction;
@@ -44,6 +45,17 @@ staticReadonly.recompute();
 staticReadonly.set({ count: 2 });
 // @ts-expect-error static readonly state should not expose public update
 staticReadonly.update(value => ({ count: value.count + 1 }));
+if (readonlySource instanceof State) {
+	readonlySource.value.toFixed();
+	readonlySource satisfies State.Readonly<number>;
+	// @ts-expect-error instanceof State should narrow to readonly before mutable checks.
+	readonlySource.set(1);
+
+	if (readonlySource.isMutable()) {
+		readonlySource.set(1);
+		readonlySource.update(value => value + 1);
+	}
+}
 void Style;
 void publicTypes;
 

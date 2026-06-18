@@ -18,7 +18,7 @@ export interface RecomputableState<T> extends State.Readonly<T> {
 type MutableRecomputableState<T> = State<T> & RecomputableState<T>;
 
 type ImplicitOwnerLinkedState = State<unknown> & {
-	_registerImplicitOwnerDependent?: (dependent: State<unknown>) => CleanupFunction;
+	_registerImplicitOwnerDependent?: (dependent: State.Readonly<unknown>) => CleanupFunction;
 };
 
 declare module "../State" {

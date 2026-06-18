@@ -97,6 +97,17 @@ describe("State", () => {
 		expect(withoutNew).toBeInstanceOf(State);
 	});
 
+	it("treats readonly states as State instances without reporting them mutable", () => {
+		const owner = mountedOwner();
+		const mutableState = State(owner, 1);
+		const readonlyState = State.Readonly(1);
+
+		expect(mutableState).toBeInstanceOf(State);
+		expect(readonlyState).toBeInstanceOf(State);
+		expect(mutableState.isMutable()).toBe(true);
+		expect(readonlyState.isMutable()).toBe(false);
+	});
+
 	it("supports prototype extension through State.extend", () => {
 		const StateClass = State.extend<number>();
 		const previousExtension = StateClass.prototype.testStateExtension;

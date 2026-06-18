@@ -92,6 +92,7 @@ export namespace State {
 		readonly disposed: boolean;
 		readonly value: T;
 		getOwner (): Owner | null;
+		isMutable (): this is State<T>;
 		subscribe (owner: Owner, listener: StateListener<T>): CleanupFunction;
 		subscribeImmediate (owner: Owner, listener: StateListener<T>): CleanupFunction;
 		subscribeUnbound (listener: StateListener<T>): CleanupFunction;
@@ -99,11 +100,15 @@ export namespace State {
 	}
 }
 
+type MutableStateConstructor = Omit<StateConstructor, "prototype"> & {
+	prototype: State<unknown>;
+};
+
 /**
  * Constructor type for extending the State class with custom methods.
  * Used with {@link State.extend} to access and modify the State prototype.
  */
-export type ExtendableStateClass = StateConstructor & StateStaticExtensions;
+export type ExtendableStateClass = MutableStateConstructor & StateStaticExtensions;
 
 interface StateGraph {
 	pendingListeners: Set<QueuedStateListenerRecord<unknown>>;
@@ -317,6 +322,7 @@ class StateClass<T> extends Owner {
 	private owner: Owner | null;
 	private releaseOwner: CleanupFunction = noop;
 	private isImplicitOwner = false;
+	private mutable = true;
 	private requiresExplicitOwner = false;
 	private readonly implicitOwnerDependents = new Set<StateClass<unknown>>();
 	private orphanCheckId: DeferredTimeoutHandle | null = null;
@@ -362,6 +368,13 @@ class StateClass<T> extends Owner {
 	 */
 	get value (): T {
 		return this.currentValue;
+	}
+
+	/**
+	 * Whether the public state reference can be safely treated as mutable.
+	 */
+	isMutable (): this is State<T> {
+		return this.mutable;
 	}
 
 	/**
@@ -603,7 +616,7 @@ class StateClass<T> extends Owner {
 		};
 	}
 
-	_registerImplicitOwnerDependent (dependent: State<unknown>): CleanupFunction {
+	_registerImplicitOwnerDependent (dependent: State.Readonly<unknown>): CleanupFunction {
 		const dependentState = dependent as StateClass<unknown>;
 
 		if (this.disposed || dependentState.disposed) {
@@ -760,7 +773,7 @@ type StateConstructor = {
 	new <T>(owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
 	<T> (initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
 	new <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
-	prototype: State<unknown>;
+	prototype: State.Readonly<unknown>;
 	/**
 	 * Returns the underlying State class for prototype extension.
 	 * This allows modules to add custom methods and properties to all State instances.
@@ -850,7 +863,7 @@ State.prototype = StateClass.prototype;
  * ```
  */
 State.extend = function extend (): ExtendableStateClass {
-	return StateClass as ExtendableStateClass;
+	return StateClass as unknown as ExtendableStateClass;
 };
 
 /**
@@ -863,6 +876,7 @@ State.extend = function extend (): ExtendableStateClass {
 State.Readonly = function Readonly<T> (value: RejectUndefined<T>): State.Readonly<WidenStateValue<T>> {
 	const readonlyState = new StateClass(null, value as WidenStateValue<T>);
 	readonlyState["clearOrphanCheck"]();
+	readonlyState["mutable"] = false;
 	readonlyState.clear = () => readonlyState.value;
 	readonlyState.set = ident;
 	readonlyState.update = () => readonlyState.value;
