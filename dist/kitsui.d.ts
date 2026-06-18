@@ -3,23 +3,23 @@ export type AriaRole = "alert" | "alertdialog" | "application" | "article" | "ba
 
 export type AriaText = string | null | undefined;
 
-export type AriaTextInput = AriaText | State<string | null>;
+export type AriaTextInput = AriaText | State.Readonly<string | null>;
 
-export type AriaRoleInput = AriaRole | null | undefined | State<AriaRole | null>;
+export type AriaRoleInput = AriaRole | null | undefined | State.Readonly<AriaRole | null>;
 
-export type AriaBooleanInput = boolean | null | undefined | State<boolean | null>;
+export type AriaBooleanInput = boolean | null | undefined | State.Readonly<boolean | null>;
 
 export type AriaBooleanMixed = boolean | "mixed" | null | undefined;
 
-export type AriaBooleanMixedInput = AriaBooleanMixed | State<boolean | "mixed" | null>;
+export type AriaBooleanMixedInput = AriaBooleanMixed | State.Readonly<boolean | "mixed" | null>;
 
 export type AriaCurrent = boolean | "page" | "step" | "location" | "date" | "time" | null | undefined;
 
-export type AriaCurrentInput = AriaCurrent | State<boolean | "page" | "step" | "location" | "date" | "time" | null>;
+export type AriaCurrentInput = AriaCurrent | State.Readonly<boolean | "page" | "step" | "location" | "date" | "time" | null>;
 
 export type AriaLive = "off" | "polite" | "assertive" | null | undefined;
 
-export type AriaLiveInput = AriaLive | State<"off" | "polite" | "assertive" | null>;
+export type AriaLiveInput = AriaLive | State.Readonly<"off" | "polite" | "assertive" | null>;
 
 export type AriaReference = string | HTMLElement | {
     readonly element: HTMLElement;
@@ -27,7 +27,7 @@ export type AriaReference = string | HTMLElement | {
 
 export type AriaReferenceSelection = AriaReference | Iterable<AriaReference>;
 
-export type AriaReferenceInput = AriaReferenceSelection | State<AriaReferenceSelection>;
+export type AriaReferenceInput = AriaReferenceSelection | State.Readonly<AriaReferenceSelection>;
 
 export class AriaManipulator<OWNER extends Component> {
     private readonly owner;
@@ -141,9 +141,9 @@ export type AttributeValueSelection = AttributeValue | null | undefined;
 
 type ReactiveAttributeValueSelection = Exclude<AttributeValueSelection, undefined>;
 
-export type AttributeNameInput = AttributeNameSelection | State<ReactiveAttributeNameSelection>;
+export type AttributeNameInput = AttributeNameSelection | State.Readonly<ReactiveAttributeNameSelection>;
 
-export type AttributeValueInput = AttributeValueSelection | State<ReactiveAttributeValueSelection>;
+export type AttributeValueInput = AttributeValueSelection | State.Readonly<ReactiveAttributeValueSelection>;
 
 export interface AttributeEntry {
     name: AttributeNameInput;
@@ -199,7 +199,7 @@ export class AttributeManipulator<OWNER extends Component> {
      * @param attributes Attribute names to bind.
      * @returns The owning component for fluent chaining.
      */
-    bind(state: State<boolean>, ...attributes: AttributeNameInput[]): OWNER;
+    bind(state: State.Readonly<boolean>, ...attributes: AttributeNameInput[]): OWNER;
     /**
      * Binds attribute entries to a boolean state, setting/removing them based on state value.
      * When state is true, attributes are set; when false, they are removed.
@@ -207,7 +207,7 @@ export class AttributeManipulator<OWNER extends Component> {
      * @param entries Objects with `name` and `value` properties.
      * @returns The owning component for fluent chaining.
      */
-    bind(state: State<boolean>, ...entries: AttributeEntry[]): OWNER;
+    bind(state: State.Readonly<boolean>, ...entries: AttributeEntry[]): OWNER;
     private ensureActive;
     private resolveSetEntries;
     private installAttributePresence;
@@ -220,7 +220,7 @@ export type Falsy = false | 0 | 0n | "" | null | undefined;
 
 export type StyleSelection = Style.Class | Falsy | Iterable<Style.Class | Falsy>;
 
-export type StyleInput = Style.Class | Falsy | State<StyleSelection>;
+export type StyleInput = Style.Class | Falsy | State.Readonly<StyleSelection>;
 
 export class ClassManipulator<OWNER extends Component> {
     private readonly owner;
@@ -278,7 +278,7 @@ export class ClassManipulator<OWNER extends Component> {
      * component.class.bind(isActive, activeStyle);
      * // activeStyle is present iff isActive.value is true
      */
-    bind(state: State<boolean>, ...classes: StyleInput[]): OWNER;
+    bind(state: State.Readonly<boolean>, ...classes: StyleInput[]): OWNER;
     /**
      * Adds one or more styles under the ownership of another Owner. The styles are
      * automatically removed when that owner is cleaned up. Falsy values and values
@@ -306,7 +306,7 @@ export type ComponentChild = Component | Node | string | Falsy;
 
 export type ComponentChildren = ComponentChild | Iterable<ComponentChild> | ComponentSelectionState;
 
-export type ComponentRender<TValue> = (value: TValue, component: Component) => void;
+export type ComponentRender<TValue, TComponent extends Component = Component> = (value: TValue, component: TComponent) => void;
 
 export type ComponentSource = Component | keyof HTMLElementTagNameMap | HTMLElement;
 
@@ -479,7 +479,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * @param nodes - Nodes or iterables of nodes to append conditionally.
      * @returns This component for chaining.
      */
-    appendWhen(state: State<boolean>, ...nodes: ComponentChildren[]): this;
+    appendWhen(state: State.Readonly<boolean>, ...nodes: ComponentChildren[]): this;
     /**
      * Prepends children conditionally based on state.
      * When the state becomes true, children are inserted before the current first child.
@@ -487,7 +487,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * @param nodes - Nodes or iterables of nodes to prepend conditionally.
      * @returns This component for chaining.
      */
-    prependWhen(state: State<boolean>, ...nodes: ComponentChildren[]): this;
+    prependWhen(state: State.Readonly<boolean>, ...nodes: ComponentChildren[]): this;
     /**
      * Inserts children conditionally before or after this component, based on state.
      * When the state becomes true, children are inserted. When false, they're stored but stay in the DOM as a placeholder.
@@ -496,7 +496,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * @param nodes - Nodes or iterables of nodes to insert conditionally.
      * @returns This component for chaining.
      */
-    insertWhen(state: State<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): this;
+    insertWhen(state: State.Readonly<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): this;
     private attachConditionalSelectionState;
     /**
      * Clears all child nodes from this component.
@@ -509,7 +509,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * @param setup A setup callback that can perform additional fluent configuration.
      * @returns This component for chaining.
      */
-    use<PARAMS extends any[]>(setup: (component: Component, ...params: PARAMS) => unknown, ...params: PARAMS): this;
+    use<PARAMS extends any[]>(setup: (component: this, ...params: PARAMS) => unknown, ...params: PARAMS): this;
     /**
      * Subscribes this component to state changes and re-renders when the state updates.
      * The render function is called immediately with the current state value, then again each time the state changes.
@@ -519,7 +519,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * @param render - Function called with the state value and this component, for each update.
      * @returns This component for chaining.
      */
-    use<TValue>(state: State<TValue>, render: ComponentRender<TValue>): this;
+    use<TValue>(state: State.Readonly<TValue>, render: ComponentRender<TValue, this>): this;
     /**
      * Assigns instance-specific members onto this component and returns the same narrowed component.
      * The extension factory receives this component typed as the final intersection.
@@ -558,13 +558,192 @@ export type Component<ELEMENT extends HTMLElement = HTMLElement> = ComponentClas
 
 export const Component: ComponentConstructor & ComponentStaticExtensions;
 
+export type DragPhase = "idle" | "pending" | "dragging";
+
+export interface DragPoint {
+    readonly x: number;
+    readonly y: number;
+}
+
+export type DragInputSource = {
+    readonly type: "pointer";
+    readonly pointerId: number;
+    readonly pointerType: string;
+} | {
+    readonly type: "external";
+    readonly id?: string;
+};
+
+export interface DragPosition {
+    readonly initial: DragPoint;
+    readonly current: DragPoint;
+    readonly previous: DragPoint | null;
+    readonly offset: DragPoint;
+    readonly delta: DragPoint;
+    readonly source: DragInputSource;
+}
+
+export interface DragStartContext<TComponent extends Component = Component> {
+    readonly component: TComponent & DraggableExtensions;
+    readonly event?: Event;
+    readonly localPosition: DragPoint;
+    readonly position: DragPoint;
+    readonly rect: DOMRectReadOnly;
+    readonly source: DragInputSource;
+}
+
+export interface DragPreviewContext<TComponent extends Component = Component> extends DragStartContext<TComponent> {
+}
+
+export type DragPreviewRenderer<TComponent extends Component = Component> = (context: DragPreviewContext<TComponent>) => Component;
+
+export interface DragInputStart {
+    readonly event?: Event;
+    readonly localPosition?: DragPoint;
+    readonly position: DragPoint;
+    readonly source: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputMove {
+    readonly event?: Event;
+    readonly position: DragPoint;
+    readonly source?: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputEnd {
+    readonly event?: Event;
+    readonly position?: DragPoint;
+    readonly source?: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputCancel {
+    readonly event?: Event;
+    readonly position?: DragPoint;
+    readonly source?: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputReceiver {
+    start(input: DragInputStart): boolean;
+    move(input: DragInputMove): void;
+    end(input: DragInputEnd): void;
+    cancel(input?: DragInputCancel): void;
+}
+
+export type DragInputAdapter<TComponent extends Component = Component> = (component: TComponent & DraggableExtensions, receiver: DragInputReceiver) => CleanupFunction | void;
+
+export interface DraggableOptions<TComponent extends Component = Component> {
+    readonly canStart?: (context: DragStartContext<TComponent>) => boolean;
+    readonly input?: DragInputAdapter<TComponent>;
+    readonly renderPreview?: false | DragPreviewRenderer<TComponent>;
+    readonly threshold?: number;
+}
+
+export interface DraggableExtensions {
+    readonly draggable: Draggable;
+}
+
+export interface Draggable {
+    readonly active: State.Readonly<boolean>;
+    readonly pending: State.Readonly<boolean>;
+    readonly phase: State.Readonly<DragPhase>;
+    readonly position: State.Readonly<DragPosition | null>;
+    readonly preview: State.Readonly<Component | null>;
+    cancel(): void;
+    dispose(): void;
+    end(): void;
+}
+
+export interface DragEventDetail<TComponent extends Component = Component> {
+    readonly component: TComponent & DraggableExtensions;
+    readonly event?: Event;
+    readonly position: DragPosition;
+    readonly target?: Component;
+}
+
+type DragComponentEvent<TComponent extends Component = Component> = ComponentEvent<CustomEvent<DragEventDetail<TComponent>>, TComponent>;
+
+export interface ComponentHTMLElementEventMap {
+        DragCancel: CustomEvent<DragEventDetail>;
+        DragEnd: CustomEvent<DragEventDetail>;
+        DragMove: CustomEvent<DragEventDetail>;
+        DragStart: CustomEvent<DragEventDetail>;
+        DragStartRequested: CustomEvent<DragStartContext>;
+    }
+
+type DraggableConstructor = ComponentBuilderFunction<[DraggableOptions?], Component & DraggableExtensions> & {
+    Input<TComponent extends Component = Component>(input: DragInputAdapter<TComponent>): DragInputAdapter<TComponent>;
+};
+
+export const Draggable: DraggableConstructor;
+
+export interface DropTargetExtensions {
+    readonly dropTarget: DropTarget;
+}
+
+export interface DropTarget {
+    readonly accepting: State.Readonly<boolean>;
+    readonly draggable: State.Readonly<(Component & DraggableExtensions) | null>;
+    readonly hovering: State.Readonly<boolean>;
+    dispose(): void;
+}
+
+export interface DropTargetContext<TTarget extends Component = Component, TDraggable extends Component & DraggableExtensions = Component & DraggableExtensions> {
+    readonly draggable: TDraggable;
+    readonly position: DragPoint;
+    readonly source: DragInputSource;
+    readonly target: TTarget & DropTargetExtensions;
+}
+
+export interface DropTargetOptions<TTarget extends Component = Component, TDraggable extends Component & DraggableExtensions = Component & DraggableExtensions> {
+    accepts(context: DropTargetContext<TTarget, TDraggable>): boolean;
+    drop(context: DropTargetContext<TTarget, TDraggable>): void;
+}
+
+interface ResolvedDropTarget {
+    readonly controller: DropTargetController;
+    readonly target: Component & DropTargetExtensions;
+    drop(): void;
+}
+
+function resolveDropTarget(draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource, explicitTarget?: Component): ResolvedDropTarget | null;
+
+function setActiveDropTarget(documentRef: Document, controller: DropTargetController | null, draggable: (Component & DraggableExtensions) | null): void;
+
+function clearDropTargetState(documentRef: Document): void;
+
+function handleDropTargetDrop(event: Event | null, draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource, explicitTarget?: Component): boolean;
+
+class DropTargetController implements DropTarget {
+    readonly component: Component & DropTargetExtensions;
+    private readonly options;
+    readonly accepting: State<boolean>;
+    readonly draggable: State<(Component & DraggableExtensions) | null>;
+    readonly hovering: State<boolean>;
+    private cleanupRegistration;
+    private disposedValue;
+    constructor(component: Component & DropTargetExtensions, options: DropTargetOptions);
+    accepts(draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource): boolean;
+    dispose(): void;
+    setAccepting(accepting: boolean): void;
+    setHovering(hovering: boolean, draggable: (Component & DraggableExtensions) | null): void;
+    toResolved(draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource): ResolvedDropTarget;
+}
+
+type DropTargetConstructor = ComponentBuilderFunction<[DropTargetOptions], Component & DropTargetExtensions>;
+
+export const DropTarget: DropTargetConstructor;
+
 type HostedEvent<TEvent extends Event, THost extends Owner, THostKey extends string> = TEvent & {
     readonly [KEY in THostKey]: THost;
 };
 
 type EventListenerFor<THost extends Owner, THostKey extends string, TEvent extends Event> = (event: HostedEvent<TEvent, THost, THostKey>) => unknown;
 
-type EventListenerInputFor<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | State<EventListenerFor<THost, THostKey, TEvent> | null> | null | undefined;
+type EventListenerInputFor<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | State.Readonly<EventListenerFor<THost, THostKey, TEvent> | null> | null | undefined;
 
 type EventMapValue<TEventMap, TEventName extends keyof TEventMap & string> = TEventMap[TEventName] extends Event ? TEventMap[TEventName] : Event;
 
@@ -634,7 +813,7 @@ type PlaceConstructor = {
     prototype: Place;
 };
 
-export type PlacerFunction = (Place: PlaceConstructor) => State<Place | null>;
+export type PlacerFunction = (Place: PlaceConstructor) => State.Readonly<Place | null>;
 
 export interface ComponentExtensions {
         /**
@@ -652,7 +831,7 @@ export interface ComponentExtensions {
          * @param target The target component or DOM parent.
          * @returns This component for chaining.
          */
-        appendToWhen(state: State<boolean>, target: PlacementContainer): this;
+        appendToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
         /**
          * Prepends this component to the start of the target component or DOM parent.
          * Sets this component's owner to the target component, or the nearest wrapped ancestor for raw DOM parents.
@@ -668,7 +847,7 @@ export interface ComponentExtensions {
          * @param target The target component or DOM parent.
          * @returns This component for chaining.
          */
-        prependToWhen(state: State<boolean>, target: PlacementContainer): this;
+        prependToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
         /**
          * Inserts this component before or after a reference node, component, or place.
          * Sets the owner based on the target's owner if applicable.
@@ -686,7 +865,7 @@ export interface ComponentExtensions {
          * @param target The reference node, component, place, or null.
          * @returns This component for chaining.
          */
-        insertToWhen(state: State<boolean>, where: InsertWhere, target: PlacementTarget): this;
+        insertToWhen(state: State.Readonly<boolean>, where: InsertWhere, target: PlacementTarget): this;
         /**
          * Manually controls component placement with a reactive placer function.
          * The placer receives a Place constructor and returns State<Place | null> that controls where the component is inserted.
@@ -821,13 +1000,13 @@ export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT,
      * @param value Direct or reactive property input.
      * @returns The owning component for fluent chaining.
      */
-    bind(visible: State<boolean>, value: INPUT): OWNER;
+    bind(visible: State.Readonly<boolean>, value: INPUT): OWNER;
     /**
      * Converts a public input value into the reactive source used by the determiner lifecycle.
      * @param value Direct or reactive property input.
      * @returns A subscribable source that yields concrete property selections.
      */
-    protected abstract toSource(value: INPUT): State<SELECTION>;
+    protected abstract toSource(value: INPUT): State.Readonly<SELECTION>;
     /**
      * Writes the current selection to the underlying component property.
      * Undefined is used internally to clear the property when a binding is hidden or replaced.
@@ -1135,7 +1314,7 @@ export type StyleAttributeValue = StyleValue | null | undefined;
 
 type ReactiveStyleAttributeValue = StyleValue | null;
 
-export type StyleAttributeValueInput = StyleAttributeValue | State<ReactiveStyleAttributeValue>;
+export type StyleAttributeValueInput = StyleAttributeValue | State.Readonly<ReactiveStyleAttributeValue>;
 
 export type StyleAttributeDefinition = ({
     [KEY in keyof CSSStyleDeclaration as KEY extends string ? CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never : never]?: StyleAttributeValueInput;
@@ -1143,7 +1322,7 @@ export type StyleAttributeDefinition = ({
     [KEY in `$${string}`]?: StyleAttributeValueInput;
 });
 
-export type StyleAttributeInput = StyleAttributeDefinition | State<StyleAttributeDefinition | null>;
+export type StyleAttributeInput = StyleAttributeDefinition | State.Readonly<StyleAttributeDefinition | null>;
 
 export class StyleManipulator<OWNER extends Component> {
     private readonly owner;
@@ -1168,13 +1347,122 @@ export class StyleManipulator<OWNER extends Component> {
     private ensureActive;
 }
 
+export interface SortableExtensions<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly sortable: Sortable<T, TItem, K>;
+}
+
+export interface Sortable<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly dragging: State.Readonly<(TItem & DraggableExtensions) | null>;
+    readonly items: State.Readonly<readonly T[]>;
+    readonly phase: State.Readonly<"idle" | "sorting">;
+    readonly preview: State.Readonly<readonly T[]>;
+    cancel(): void;
+    dispose(): void;
+}
+
+export interface SortableTransfer<T> {
+    readonly label: string | undefined;
+    readonly type?: (value: T) => T;
+}
+
+export interface SortableTransferContext<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly item: T;
+    readonly key: K;
+    readonly sortable: Component & SortableExtensions<T, TItem, K>;
+}
+
+export interface SortableOptions<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly canTransferIn?: (context: SortableTransferContext<T, TItem, K>) => boolean;
+    readonly canTransferOut?: (context: SortableTransferContext<T, TItem, K>) => boolean;
+    readonly key?: (item: T, index: number) => K;
+    placeholder(component: TItem & DraggableExtensions, key: K): Component;
+    render(item: State.Readonly<T>, key: K, index: number): TItem;
+    readonly transfer?: SortableTransfer<T>;
+}
+
+type SortableInput<T> = readonly T[] | State.Readonly<readonly T[]>;
+
+interface SortableRecord<T, TItem extends Component, K extends PropertyKey> {
+    readonly cleanup: CleanupFunction;
+    readonly component: TItem & DraggableExtensions;
+    readonly key: K;
+    readonly state: State<T>;
+}
+
+interface ActiveSortSession<T, TItem extends Component, K extends PropertyKey> {
+    readonly dragging: TItem & DraggableExtensions;
+    item: T;
+    readonly key: K;
+    placeholder: Component | null;
+    source: SortableController<T, TItem, K>;
+    target: SortableController<any, any, any>;
+    targetIndex: number;
+}
+
+class SortableController<T, TItem extends Component = Component, K extends PropertyKey = number> implements Sortable<T, TItem, K> {
+    readonly component: Component & SortableExtensions<T, TItem, K>;
+    private readonly input;
+    private readonly options;
+    readonly dragging: State<(TItem & DraggableExtensions) | null>;
+    readonly items: State<readonly T[]>;
+    readonly phase: State<"idle" | "sorting">;
+    readonly preview: State<readonly T[]>;
+    private readonly recordsByKey;
+    private cleanupDisposeEvent;
+    private currentOrder;
+    private disposedValue;
+    private previewOrder;
+    private releaseSourceSubscription;
+    constructor(component: Component & SortableExtensions<T, TItem, K>, input: SortableInput<T>, options: SortableOptions<T, TItem, K>);
+    cancel(): void;
+    canAcceptSession(session: ActiveSortSession<any, any, any>): boolean;
+    dispose(): void;
+    handleDragStart(record: SortableRecord<T, TItem, K>, detail: DragEventDetail): void;
+    handleDragMove(detail: DragEventDetail): void;
+    handleDragEnd(event: Event, detail: DragEventDetail): void;
+    handleDragCancel(): void;
+    previewSession(session: ActiveSortSession<any, any, any>, point: {
+        readonly x: number;
+        readonly y: number;
+    }): void;
+    private cleanupSession;
+    private cancelSession;
+    private cancelDragSession;
+    private clearPreviewFromSession;
+    private suspendPlaceholder;
+    private commitSession;
+    private normalize;
+    private keyFor;
+    private syncItems;
+    private createRecord;
+    private removeRecord;
+    private placeRecords;
+    private placePlaceholder;
+    private baseOrderForSession;
+    private previewOrderForSession;
+    private previewValuesForSession;
+    private recordAtInsertionIndex;
+    private resolveInsertionIndex;
+    private insertionSlotsForSession;
+    private mergeActivePreviewOrder;
+    private insertKeyBySourceNeighbors;
+    private transferContextFor;
+}
+
+type SortableConstructor = {
+    <T, TItem extends Component = Component, K extends PropertyKey = number>(this: Component | void, input: SortableInput<T>, options: SortableOptions<T, TItem, K>): Component & SortableExtensions<T, TItem, K>;
+    Transfer<T>(label?: string): SortableTransfer<T>;
+};
+
+export const Sortable: SortableConstructor;
+
 export type TextValue = string | number | bigint | boolean;
 
 export type TextSelection = TextValue | null | undefined;
 
 type ReactiveTextSelection = Exclude<TextSelection, undefined>;
 
-export type TextInput = TextSelection | State<ReactiveTextSelection>;
+export type TextInput = TextSelection | State.Readonly<ReactiveTextSelection>;
 
 export class TextManipulator<OWNER extends Component> extends GenericPropertyManipulator<OWNER, TextInput, ReactiveTextSelection> {
     /**
@@ -1191,8 +1479,8 @@ export class TextManipulator<OWNER extends Component> extends GenericPropertyMan
      * @param value Direct or reactive text input.
      * @returns The owning component for fluent chaining.
      */
-    bind(visible: State<boolean>, value: TextInput): OWNER;
-    protected toSource(value: TextInput): State<ReactiveTextSelection>;
+    bind(visible: State.Readonly<boolean>, value: TextInput): OWNER;
+    protected toSource(value: TextInput): State.Readonly<ReactiveTextSelection>;
     protected writeProperty(value: ReactiveTextSelection | undefined): void;
 }
 
@@ -1200,7 +1488,7 @@ type Nullish = null;
 
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
 
-interface RecomputableState<T> extends State<T> {
+interface RecomputableState<T> extends State.Readonly<T> {
     /**
      * Recomputes the current value of the state by reapplying all mapping and transformation functions.
      * Useful when external conditions affecting the mapped values have changed and a manual update is needed.
@@ -1231,12 +1519,12 @@ export interface StateExtensions<T> {
          * A boolean state indicating whether the current value is truthy.
          * The value is memoized per state instance for efficiency.
          */
-        readonly truthy: State<boolean>;
+        readonly truthy: RecomputableState<boolean>;
         /**
          * A boolean state indicating whether the current value is falsy.
          * The value is memoized per state instance for efficiency.
          */
-        readonly falsy: State<boolean>;
+        readonly falsy: RecomputableState<boolean>;
         /**
          * Returns a state that falls back to a computed value when this state is null.
          * Otherwise, returns the original value.
@@ -1251,14 +1539,14 @@ export interface StateExtensions<T> {
          * @param compareValue The value or state to compare against the current state value.
          * @returns A new state that is true when the values are strictly equal, false otherwise.
          */
-        equals(compareValue: T | State<T>): State<boolean>;
+        equals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
         /**
          * Returns a boolean state that is true when this state does not equal the provided value or state.
          * Uses strict inequality (!==) for comparison.
          * @param compareValue The value or state to compare against the current state value.
          * @returns A new state that is true when the values are not strictly equal, false otherwise.
          */
-        notEquals(compareValue: T | State<T>): State<boolean>;
+        notEquals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
     }
 
 export type CleanupFunction = () => void;
@@ -1296,6 +1584,18 @@ interface StateExtensions<T> {
 }
 
 interface StateStaticExtensions {
+}
+
+export namespace State {
+    interface Readonly<T> extends StateExtensions<T> {
+        readonly disposed: boolean;
+        readonly value: T;
+        getOwner(): Owner | null;
+        subscribe(owner: Owner, listener: StateListener<T>): CleanupFunction;
+        subscribeImmediate(owner: Owner, listener: StateListener<T>): CleanupFunction;
+        subscribeUnbound(listener: StateListener<T>): CleanupFunction;
+        subscribeImmediateUnbound(listener: StateListener<T>): CleanupFunction;
+    }
 }
 
 export type ExtendableStateClass = StateConstructor & StateStaticExtensions;
@@ -1468,7 +1768,7 @@ class StateClass<T> extends Owner {
     private ensureActive;
 }
 
-interface StateClass<T> extends StateExtensions<T> {
+interface StateClass<T> extends State.Readonly<T>, StateExtensions<T> {
 }
 
 export type State<T> = StateClass<T>;
@@ -1504,7 +1804,7 @@ type StateConstructor = {
      * @param value The fixed value for the readonly state.
      * @returns A new readonly state instance with the specified value.
      */
-    Readonly<T>(value: RejectUndefined<T>): State<WidenStateValue<T>>;
+    Readonly<T>(value: RejectUndefined<T>): State.Readonly<WidenStateValue<T>>;
 };
 
 export const State: StateConstructor & StateStaticExtensions;
@@ -1523,7 +1823,7 @@ type BreakdownRenderer<TValue> = (Part: BreakdownPartRegistrar, value: TValue) =
 type ComponentBreakdownRenderer<TValue, TComponent extends Component = Component> = (component: TComponent, Part: BreakdownPartRegistrar, value: TValue) => void;
 
 type BreakdownConstructor = {
-    <TValue>(owner: Owner, state: State<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
+    <TValue>(owner: Owner, state: State.Readonly<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
 };
 
 export interface ComponentExtensions {
@@ -1537,7 +1837,7 @@ export interface ComponentExtensions {
          * @param breakdown Called immediately and on each source update to register keyed parts.
          * @returns This component for chaining.
          */
-        breakdown<TValue>(this: Component, state: State<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
+        breakdown<TValue>(this: Component, state: State.Readonly<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
     }
 
 export interface ComponentStaticExtensions {
@@ -1585,10 +1885,14 @@ export interface ComponentExtensions {
         as<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): (this & RESULT) | undefined;
     }
 
-type GroupedStateObject = Record<string, State<any>>;
+export interface ComponentExtensions {
+        and<T, TItem extends Component = Component, K extends PropertyKey = number>(builder: typeof Sortable, input: readonly T[] | State.Readonly<readonly T[]>, options: SortableOptions<T, TItem, K>): this & Component & SortableExtensions<T, TItem, K>;
+    }
+
+type GroupedStateObject = Record<string, State.Readonly<any>>;
 
 type GroupedValue<T extends GroupedStateObject> = {
-    [K in keyof T]: T[K] extends State<infer TValue> ? TValue : never;
+    [K in keyof T]: T[K] extends State.Readonly<infer TValue> ? TValue : never;
 };
 
 type GroupConstructor = {

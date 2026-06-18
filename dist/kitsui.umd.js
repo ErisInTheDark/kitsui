@@ -37,12 +37,15 @@ var __kitsui_factory__ = (() => {
     AttributeManipulator: () => AttributeManipulator,
     ClassManipulator: () => ClassManipulator,
     Component: () => Component,
+    Draggable: () => Draggable,
+    DropTarget: () => DropTarget,
     EventManipulator: () => EventManipulator,
     GenericClaimManipulator: () => GenericClaimManipulator,
     GenericPropertyManipulator: () => GenericPropertyManipulator,
     Marker: () => Marker,
     Owner: () => Owner,
     OwnerManipulator: () => OwnerManipulator,
+    Sortable: () => Sortable,
     State: () => State,
     Style: () => Style,
     StyleAnimation: () => StyleAnimation,
@@ -2907,6 +2910,9 @@ ${innerRules}
   };
 
   // src/component/TextManipulator.ts
+  function isTextSource(value) {
+    return value instanceof State;
+  }
   var TextManipulator = class extends GenericPropertyManipulator {
     /**
      * Sets the element's text content from a direct value or subscribable source.
@@ -2928,7 +2934,7 @@ ${innerRules}
       return super.bind(visible, value);
     }
     toSource(value) {
-      if (value instanceof State) {
+      if (isTextSource(value)) {
         return value;
       }
       return State.Readonly(value ?? null);
@@ -4026,9 +4032,6 @@ ${innerRules}
               if (typeof build !== "function") {
                 throw new TypeError("Component.Breakdown parts require a builder function.");
               }
-              if (seenKeys.has(key)) {
-                throw new Error(`Component.Breakdown registered the key ${String(key)} more than once in a single pass.`);
-              }
               seenKeys.add(key);
               const existing = parts.get(key);
               if (existing) {
@@ -4712,6 +4715,1441 @@ ${innerRules}
       return createComparisonState(this, compareValue, (value, otherValue) => value !== otherValue);
     };
   }
+
+  // src/component/Draggable.ts
+  var noop12 = () => {
+  };
+  var createOwnedState3 = State;
+  var activeDragsByDocument = /* @__PURE__ */ new WeakMap();
+  function pointFromPointerEvent(event) {
+    return {
+      x: event.clientX,
+      y: event.clientY
+    };
+  }
+  function subtractPoint(left, right) {
+    return {
+      x: left.x - right.x,
+      y: left.y - right.y
+    };
+  }
+  function distance(point) {
+    return Math.hypot(point.x, point.y);
+  }
+  function localPointFor(component, point) {
+    const rect = component.element.getBoundingClientRect();
+    return {
+      x: point.x - rect.left,
+      y: point.y - rect.top
+    };
+  }
+  function componentFromPoint(documentRef, point) {
+    const element = documentRef.elementFromPoint?.(point.x, point.y);
+    if (element instanceof HTMLElement) {
+      return element.component;
+    }
+    return void 0;
+  }
+  function isComponent3(value) {
+    return value instanceof Component.extend();
+  }
+  function isUnplacedOwnerlessComponent(component) {
+    return component.owner.get() === null && component.element.parentNode === null;
+  }
+  function eachElement(root, callback) {
+    callback(root);
+    for (const element of Array.from(root.querySelectorAll("*"))) {
+      if (element instanceof HTMLElement) {
+        callback(element);
+      }
+    }
+  }
+  function makePreviewInert(element) {
+    eachElement(element, (current) => {
+      current.setAttribute("aria-hidden", "true");
+      current.setAttribute("draggable", "false");
+      current.setAttribute("inert", "");
+      if ("inert" in current) {
+        current.inert = true;
+      }
+    });
+  }
+  function sanitizePreviewClone(element) {
+    eachElement(element, (current) => {
+      for (const attribute of Array.from(current.attributes)) {
+        const name = attribute.name.toLowerCase();
+        const value = attribute.value.trim().toLowerCase();
+        const dangerousUrl = value.startsWith("javascript:");
+        if (name === "id" || name === "autofocus" || name === "srcdoc" || name.startsWith("on") || (name === "href" || name.endsWith(":href") || name === "src") && dangerousUrl) {
+          current.removeAttribute(attribute.name);
+        }
+      }
+    });
+    makePreviewInert(element);
+  }
+  function defaultRenderPreview(context) {
+    const clone = context.component.element.cloneNode(true);
+    if (!(clone instanceof HTMLElement)) {
+      throw new TypeError("Draggable preview clone must be an HTMLElement.");
+    }
+    sanitizePreviewClone(clone);
+    return Component(clone);
+  }
+  function validatePreviewComponent(component) {
+    if (!isComponent3(component)) {
+      throw new TypeError("Draggable preview must return a Component.");
+    }
+    if (!isUnplacedOwnerlessComponent(component)) {
+      throw new Error("Draggable preview must return an ownerless, unplaced Component.");
+    }
+    return component;
+  }
+  function dispatchDragEvent(component, eventName, detail) {
+    component.element.dispatchEvent(new CustomEvent(eventName, {
+      bubbles: true,
+      cancelable: false,
+      detail
+    }));
+  }
+  function defaultPointerInput(component, receiver) {
+    let releaseTracking = noop12;
+    const releaseCurrentTracking = () => {
+      releaseTracking();
+      releaseTracking = noop12;
+    };
+    const releaseCurrentTrackingWithoutCapture = () => {
+      releaseTracking(false);
+      releaseTracking = noop12;
+    };
+    const handlePointerDown = (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      const point = pointFromPointerEvent(event);
+      const accepted = receiver.start({
+        event,
+        localPosition: localPointFor(component, point),
+        position: point,
+        source: {
+          pointerId: event.pointerId,
+          pointerType: event.pointerType,
+          type: "pointer"
+        },
+        target: componentFromPoint(component.element.ownerDocument, point)
+      });
+      if (!accepted) {
+        return;
+      }
+      if (component.draggable.phase.value === "idle") {
+        return;
+      }
+      releaseCurrentTracking();
+      const documentRef = component.element.ownerDocument;
+      const captureElement = documentRef.documentElement;
+      try {
+        captureElement.setPointerCapture?.(event.pointerId);
+      } catch {
+      }
+      const handlePointerMove = (moveEvent) => {
+        if (moveEvent.pointerId !== event.pointerId) {
+          return;
+        }
+        const movePoint = pointFromPointerEvent(moveEvent);
+        receiver.move({
+          event: moveEvent,
+          position: movePoint,
+          target: componentFromPoint(documentRef, movePoint)
+        });
+      };
+      const handlePointerUp = (upEvent) => {
+        if (upEvent.pointerId !== event.pointerId) {
+          return;
+        }
+        const upPoint = pointFromPointerEvent(upEvent);
+        releaseCurrentTracking();
+        receiver.end({
+          event: upEvent,
+          position: upPoint,
+          target: componentFromPoint(documentRef, upPoint)
+        });
+      };
+      const handlePointerCancel = (cancelEvent) => {
+        if (cancelEvent.pointerId !== event.pointerId) {
+          return;
+        }
+        const cancelPoint = pointFromPointerEvent(cancelEvent);
+        releaseCurrentTracking();
+        receiver.cancel({
+          event: cancelEvent,
+          position: cancelPoint,
+          target: componentFromPoint(documentRef, cancelPoint)
+        });
+      };
+      const handleLostPointerCapture = (lostEvent) => {
+        if (lostEvent.pointerId !== event.pointerId) {
+          return;
+        }
+        const lostPoint = pointFromPointerEvent(lostEvent);
+        releaseCurrentTrackingWithoutCapture();
+        receiver.cancel({
+          event: lostEvent,
+          position: lostPoint,
+          target: componentFromPoint(documentRef, lostPoint)
+        });
+      };
+      documentRef.addEventListener("pointermove", handlePointerMove);
+      documentRef.addEventListener("pointerup", handlePointerUp);
+      documentRef.addEventListener("pointercancel", handlePointerCancel);
+      captureElement.addEventListener("lostpointercapture", handleLostPointerCapture);
+      releaseTracking = (releaseCapture = true) => {
+        documentRef.removeEventListener("pointermove", handlePointerMove);
+        documentRef.removeEventListener("pointerup", handlePointerUp);
+        documentRef.removeEventListener("pointercancel", handlePointerCancel);
+        captureElement.removeEventListener("lostpointercapture", handleLostPointerCapture);
+        if (releaseCapture) {
+          try {
+            captureElement.releasePointerCapture?.(event.pointerId);
+          } catch {
+          }
+        }
+      };
+    };
+    const handleDragStop = () => {
+      releaseCurrentTracking();
+    };
+    component.element.addEventListener("pointerdown", handlePointerDown);
+    component.element.addEventListener("DragEnd", handleDragStop);
+    component.element.addEventListener("DragCancel", handleDragStop);
+    return () => {
+      releaseCurrentTracking();
+      component.element.removeEventListener("pointerdown", handlePointerDown);
+      component.element.removeEventListener("DragEnd", handleDragStop);
+      component.element.removeEventListener("DragCancel", handleDragStop);
+    };
+  }
+  var DraggableController = class {
+    constructor(component, options) {
+      this.component = component;
+      this.options = options;
+      __publicField(this, "active");
+      __publicField(this, "pending");
+      __publicField(this, "phase");
+      __publicField(this, "position");
+      __publicField(this, "preview");
+      __publicField(this, "activePreview", null);
+      __publicField(this, "cleanupDisposeEvent", noop12);
+      __publicField(this, "cleanupInput", noop12);
+      __publicField(this, "disposedValue", false);
+      __publicField(this, "startContext", null);
+      this.phase = createOwnedState3(component, "idle");
+      this.position = createOwnedState3(component, null);
+      this.preview = createOwnedState3(component, null);
+      const active = createOwnedState3(component, false);
+      const pending = createOwnedState3(component, false);
+      this.active = active;
+      this.pending = pending;
+      this.phase.subscribeImmediate(component, (phase) => {
+        active.set(phase === "dragging");
+        pending.set(phase === "pending");
+      });
+      this.cleanupInput = (options.input ?? defaultPointerInput)(component, this.createReceiver()) ?? noop12;
+      const handleDispose = () => {
+        this.cancelWith({});
+      };
+      component.element.addEventListener("Dispose", handleDispose);
+      this.cleanupDisposeEvent = () => {
+        component.element.removeEventListener("Dispose", handleDispose);
+      };
+      component.onCleanup(() => {
+        this.dispose();
+      });
+    }
+    cancel() {
+      this.cancelWith({});
+    }
+    dispose() {
+      if (this.disposedValue) {
+        return;
+      }
+      this.disposedValue = true;
+      this.cleanupDisposeEvent();
+      this.cleanupDisposeEvent = noop12;
+      if (!this.phase.disposed && !this.position.disposed) {
+        this.cancelWith({});
+      } else {
+        this.releaseActiveDrag();
+      }
+      this.cleanupInput();
+      this.cleanupInput = noop12;
+    }
+    end() {
+      this.endWith({});
+    }
+    createReceiver() {
+      return {
+        cancel: (input) => {
+          this.cancelWith(input ?? {});
+        },
+        end: (input) => {
+          this.endWith(input);
+        },
+        move: (input) => {
+          this.moveWith(input);
+        },
+        start: (input) => {
+          return this.startWith(input);
+        }
+      };
+    }
+    startWith(input) {
+      if (!this.canUseState() || this.phase.value !== "idle") {
+        return false;
+      }
+      const documentRef = this.component.element.ownerDocument;
+      const activeDrag = activeDragsByDocument.get(documentRef);
+      if (activeDrag && activeDrag !== this) {
+        return false;
+      }
+      const rect = this.component.element.getBoundingClientRect();
+      const context = {
+        component: this.component,
+        event: input.event,
+        localPosition: input.localPosition ?? localPointFor(this.component, input.position),
+        position: input.position,
+        rect,
+        source: input.source
+      };
+      this.startContext = context;
+      dispatchDragEvent(this.component, "DragStartRequested", context);
+      if (!this.canUseState() || this.options.canStart?.(context) === false || !this.canUseState()) {
+        this.startContext = null;
+        return false;
+      }
+      activeDragsByDocument.set(documentRef, this);
+      this.position.set({
+        current: input.position,
+        delta: { x: 0, y: 0 },
+        initial: input.position,
+        offset: { x: 0, y: 0 },
+        previous: null,
+        source: input.source
+      });
+      this.phase.set("pending");
+      if ((this.options.threshold ?? 0) <= 0) {
+        this.startDragging(input);
+      }
+      return true;
+    }
+    moveWith(input) {
+      if (!this.canUseState()) {
+        return;
+      }
+      const current = this.position.value;
+      if (!current || this.phase.value === "idle") {
+        return;
+      }
+      const next = this.nextPosition(input.position, input.source ?? current.source);
+      this.position.set(next);
+      if (this.phase.value === "pending") {
+        if (distance(next.offset) < (this.options.threshold ?? 0)) {
+          return;
+        }
+        this.startDragging(input);
+      }
+      if (!this.canUseState() || this.phase.value !== "dragging") {
+        return;
+      }
+      this.positionPreview(next);
+      dispatchDragEvent(this.component, "DragMove", {
+        component: this.component,
+        event: input.event,
+        position: next,
+        target: input.target
+      });
+    }
+    endWith(input) {
+      if (this.phase.value === "idle") {
+        return;
+      }
+      if (input.position) {
+        this.position.set(this.nextPosition(input.position, input.source ?? this.position.value.source));
+      }
+      const position = this.position.value;
+      const wasDragging = this.phase.value === "dragging";
+      if (wasDragging && position) {
+        this.positionPreview(position);
+        dispatchDragEvent(this.component, "DragEnd", {
+          component: this.component,
+          event: input.event,
+          position,
+          target: input.target
+        });
+      } else if (position) {
+        dispatchDragEvent(this.component, "DragCancel", {
+          component: this.component,
+          event: input.event,
+          position,
+          target: input.target
+        });
+      }
+      this.reset();
+    }
+    cancelWith(input) {
+      if (this.phase.value === "idle") {
+        return;
+      }
+      if (input.position && this.position.value) {
+        this.position.set(this.nextPosition(input.position, input.source ?? this.position.value.source));
+      }
+      const position = this.position.value;
+      if (position) {
+        this.positionPreview(position);
+        dispatchDragEvent(this.component, "DragCancel", {
+          component: this.component,
+          event: input.event,
+          position,
+          target: input.target
+        });
+      }
+      this.reset();
+    }
+    startDragging(input) {
+      const position = this.position.value;
+      const context = this.startContext;
+      if (!position || !context || this.phase.value === "dragging") {
+        return;
+      }
+      try {
+        this.createPreview(context, position);
+      } catch (error) {
+        this.reset();
+        throw error;
+      }
+      this.phase.set("dragging");
+      dispatchDragEvent(this.component, "DragStart", {
+        component: this.component,
+        event: input.event,
+        position,
+        target: input.target
+      });
+    }
+    nextPosition(point, source) {
+      const current = this.position.value;
+      const previous = current.current;
+      return {
+        current: point,
+        delta: subtractPoint(point, previous),
+        initial: current.initial,
+        offset: subtractPoint(point, current.initial),
+        previous,
+        source
+      };
+    }
+    reset() {
+      this.releaseActiveDrag();
+      this.removePreview();
+      this.startContext = null;
+      if (this.phase.disposed || this.position.disposed || this.preview.disposed) {
+        return;
+      }
+      this.phase.set("idle");
+      this.position.set(null);
+      this.preview.set(null);
+    }
+    releaseActiveDrag() {
+      const documentRef = this.component.element.ownerDocument;
+      if (activeDragsByDocument.get(documentRef) === this) {
+        activeDragsByDocument.delete(documentRef);
+      }
+    }
+    canUseState() {
+      return !this.disposedValue && !this.phase.disposed && !this.position.disposed && !this.preview.disposed;
+    }
+    createPreview(context, position) {
+      if (this.options.renderPreview === false) {
+        return;
+      }
+      const renderPreview = this.options.renderPreview ?? defaultRenderPreview;
+      const preview = validatePreviewComponent(renderPreview(context));
+      makePreviewInert(preview.element);
+      preview.owner.add(this.component, "drag-preview");
+      preview.element.style.boxSizing = "border-box";
+      preview.element.style.height = `${context.rect.height}px`;
+      preview.element.style.left = "0px";
+      preview.element.style.pointerEvents = "none";
+      preview.element.style.position = "fixed";
+      preview.element.style.top = "0px";
+      preview.element.style.width = `${context.rect.width}px`;
+      preview.element.style.zIndex = "2147483647";
+      this.component.element.ownerDocument.body.append(preview.element);
+      this.activePreview = {
+        component: preview,
+        localPosition: context.localPosition
+      };
+      this.preview.set(preview);
+      this.positionPreview(position);
+    }
+    positionPreview(position) {
+      const preview = this.activePreview;
+      if (!preview || preview.component.disposed) {
+        return;
+      }
+      preview.component.element.style.left = `${position.current.x - preview.localPosition.x}px`;
+      preview.component.element.style.top = `${position.current.y - preview.localPosition.y}px`;
+    }
+    removePreview() {
+      const preview = this.activePreview?.component ?? null;
+      this.activePreview = null;
+      if (preview && !preview.disposed) {
+        preview.remove();
+      }
+    }
+  };
+  var Draggable = function Draggable2(options = {}) {
+    const component = Component(this ?? "div", Draggable2);
+    if (component.draggable) {
+      return component;
+    }
+    return component.extend((root) => ({
+      draggable: new DraggableController(root, options)
+    }));
+  };
+  Draggable.Input = function Input(input) {
+    if (typeof input !== "function") {
+      throw new TypeError("Draggable.Input requires an input adapter function.");
+    }
+    return input;
+  };
+
+  // src/component/DropTarget.ts
+  var noop13 = () => {
+  };
+  var targetsByDocument = /* @__PURE__ */ new WeakMap();
+  var documentCleanups = /* @__PURE__ */ new WeakMap();
+  var activeHoverByDocument = /* @__PURE__ */ new WeakMap();
+  var handledDropEvents = /* @__PURE__ */ new WeakMap();
+  function isPointInRect(point, rect) {
+    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+  }
+  function getDropTargetController(component) {
+    return component?.dropTarget ?? null;
+  }
+  function contextFor(controller, draggable, position, source) {
+    return {
+      draggable,
+      position,
+      source,
+      target: controller.component
+    };
+  }
+  function installDocumentListeners(documentRef) {
+    if (documentCleanups.has(documentRef)) {
+      return;
+    }
+    const handleDragStart = (event) => {
+      const detail = event.detail;
+      if (!detail) {
+        return;
+      }
+      syncAcceptingTargets(detail.component.element.ownerDocument, detail.component, detail.position.current, detail.position.source);
+    };
+    const handleDragMove = (event) => {
+      const detail = event.detail;
+      if (!detail) {
+        return;
+      }
+      syncAcceptingTargets(detail.component.element.ownerDocument, detail.component, detail.position.current, detail.position.source);
+      const resolved = resolveDropTarget(detail.component, detail.position.current, detail.position.source, detail.target);
+      setActiveDropTarget(detail.component.element.ownerDocument, resolved?.controller ?? null, detail.component);
+    };
+    const handleDragEnd = (event) => {
+      const detail = event.detail;
+      if (!detail) {
+        return;
+      }
+      const handled = handleDropTargetDrop(event, detail.component, detail.position.current, detail.position.source, detail.target);
+      handledDropEvents.set(event, handled);
+      clearDropTargetState(detail.component.element.ownerDocument);
+    };
+    const handleDragCancel = (event) => {
+      const detail = event.detail;
+      if (!detail) {
+        return;
+      }
+      clearDropTargetState(detail.component.element.ownerDocument);
+    };
+    documentRef.addEventListener("DragStart", handleDragStart);
+    documentRef.addEventListener("DragMove", handleDragMove);
+    documentRef.addEventListener("DragEnd", handleDragEnd);
+    documentRef.addEventListener("DragCancel", handleDragCancel);
+    documentCleanups.set(documentRef, () => {
+      documentRef.removeEventListener("DragStart", handleDragStart);
+      documentRef.removeEventListener("DragMove", handleDragMove);
+      documentRef.removeEventListener("DragEnd", handleDragEnd);
+      documentRef.removeEventListener("DragCancel", handleDragCancel);
+      documentCleanups.delete(documentRef);
+    });
+  }
+  function getRegisteredTargets(documentRef) {
+    let targets = targetsByDocument.get(documentRef);
+    if (!targets) {
+      targets = /* @__PURE__ */ new Set();
+      targetsByDocument.set(documentRef, targets);
+      installDocumentListeners(documentRef);
+    }
+    return targets;
+  }
+  function peekRegisteredTargets(documentRef) {
+    return targetsByDocument.get(documentRef);
+  }
+  function syncAcceptingTargets(documentRef, draggable, position, source) {
+    for (const target of peekRegisteredTargets(documentRef) ?? []) {
+      target.setAccepting(target.accepts(draggable, position, source));
+    }
+  }
+  function hoveredDropTargets(documentRef) {
+    const hovered = [];
+    try {
+      for (const element of Array.from(documentRef.querySelectorAll(":hover")).reverse()) {
+        if (!(element instanceof HTMLElement)) {
+          continue;
+        }
+        const controller = getDropTargetController(element.component);
+        if (controller) {
+          hovered.push(controller);
+        }
+      }
+    } catch {
+    }
+    return hovered;
+  }
+  function targetFromExplicitComponent(component) {
+    let current = component?.element ?? null;
+    while (current) {
+      if (current instanceof HTMLElement) {
+        const controller = getDropTargetController(current.component);
+        if (controller) {
+          return controller;
+        }
+      }
+      current = current.parentNode;
+    }
+    return null;
+  }
+  function resolveDropTarget(draggable, position, source, explicitTarget) {
+    const documentRef = draggable.element.ownerDocument;
+    const candidates = [];
+    const explicit = targetFromExplicitComponent(explicitTarget);
+    if (explicit) {
+      candidates.push(explicit);
+    }
+    candidates.push(...hoveredDropTargets(documentRef));
+    const elementAtPoint = documentRef.elementFromPoint?.(position.x, position.y);
+    if (elementAtPoint instanceof HTMLElement) {
+      const pointTarget = targetFromExplicitComponent(elementAtPoint.component);
+      if (pointTarget) {
+        candidates.push(pointTarget);
+      }
+    }
+    for (const candidate of candidates) {
+      if (candidate.accepts(draggable, position, source)) {
+        return candidate.toResolved(draggable, position, source);
+      }
+    }
+    const targets = [...peekRegisteredTargets(documentRef) ?? []].reverse();
+    for (const target of targets) {
+      if (!isPointInRect(position, target.component.element.getBoundingClientRect())) {
+        continue;
+      }
+      if (target.accepts(draggable, position, source)) {
+        return target.toResolved(draggable, position, source);
+      }
+    }
+    return null;
+  }
+  function setActiveDropTarget(documentRef, controller, draggable) {
+    const previous = activeHoverByDocument.get(documentRef);
+    if (previous && previous !== controller) {
+      previous.setHovering(false, null);
+    }
+    if (!controller) {
+      activeHoverByDocument.delete(documentRef);
+      return;
+    }
+    activeHoverByDocument.set(documentRef, controller);
+    controller.setHovering(true, draggable);
+  }
+  function clearDropTargetState(documentRef) {
+    const previous = activeHoverByDocument.get(documentRef);
+    previous?.setHovering(false, null);
+    activeHoverByDocument.delete(documentRef);
+    for (const target of peekRegisteredTargets(documentRef) ?? []) {
+      target.setAccepting(false);
+    }
+  }
+  function handleDropTargetDrop(event, draggable, position, source, explicitTarget) {
+    if (event && handledDropEvents.has(event)) {
+      return handledDropEvents.get(event) ?? false;
+    }
+    const resolved = resolveDropTarget(draggable, position, source, explicitTarget);
+    const handled = Boolean(resolved);
+    resolved?.drop();
+    if (event) {
+      handledDropEvents.set(event, handled);
+    }
+    return handled;
+  }
+  var DropTargetController = class {
+    constructor(component, options) {
+      this.component = component;
+      this.options = options;
+      __publicField(this, "accepting");
+      __publicField(this, "draggable");
+      __publicField(this, "hovering");
+      __publicField(this, "cleanupRegistration", noop13);
+      __publicField(this, "disposedValue", false);
+      this.accepting = State(component, false);
+      this.draggable = State(component, null);
+      this.hovering = State(component, false);
+      const documentRef = component.element.ownerDocument;
+      const targets = getRegisteredTargets(documentRef);
+      targets.add(this);
+      this.cleanupRegistration = () => {
+        targets.delete(this);
+        if (activeHoverByDocument.get(documentRef) === this) {
+          activeHoverByDocument.delete(documentRef);
+        }
+        if (!this.component.disposed) {
+          this.setAccepting(false);
+          this.setHovering(false, null);
+        }
+        if (targets.size === 0) {
+          targetsByDocument.delete(documentRef);
+          documentCleanups.get(documentRef)?.();
+        }
+      };
+      component.onCleanup(() => {
+        this.dispose();
+      });
+    }
+    accepts(draggable, position, source) {
+      return this.options.accepts(contextFor(this, draggable, position, source));
+    }
+    dispose() {
+      if (this.disposedValue) {
+        return;
+      }
+      this.disposedValue = true;
+      this.cleanupRegistration();
+      this.cleanupRegistration = noop13;
+    }
+    setAccepting(accepting) {
+      if (this.accepting.disposed) {
+        return;
+      }
+      this.accepting.set(accepting);
+    }
+    setHovering(hovering, draggable) {
+      if (this.hovering.disposed || this.draggable.disposed) {
+        return;
+      }
+      this.hovering.set(hovering);
+      this.draggable.set(hovering ? draggable : null);
+    }
+    toResolved(draggable, position, source) {
+      return {
+        controller: this,
+        drop: () => {
+          this.options.drop(contextFor(this, draggable, position, source));
+        },
+        target: this.component
+      };
+    }
+  };
+  var DropTarget = function DropTarget2(options) {
+    if (!options || typeof options.accepts !== "function") {
+      throw new TypeError("DropTarget requires an accepts function.");
+    }
+    if (typeof options.drop !== "function") {
+      throw new TypeError("DropTarget requires a drop function.");
+    }
+    const component = Component(this ?? "div", DropTarget2);
+    if (component.dropTarget) {
+      return component;
+    }
+    return component.extend((root) => ({
+      dropTarget: new DropTargetController(root, options)
+    }));
+  };
+
+  // src/component/Sortable.ts
+  var noop14 = () => {
+  };
+  var createOwnedState4 = State;
+  var sortablesByDocument = /* @__PURE__ */ new WeakMap();
+  var activeSessionsByDocument = /* @__PURE__ */ new WeakMap();
+  function isStateLike2(value) {
+    if (typeof value !== "object" || value === null) {
+      return false;
+    }
+    const maybeState = value;
+    return "value" in maybeState && typeof maybeState.subscribe === "function";
+  }
+  function isComponent4(value) {
+    return value instanceof Component.extend();
+  }
+  function isUnplacedOwnerlessComponent2(component) {
+    return component.owner.get() === null && component.element.parentNode === null;
+  }
+  function validateRenderedComponent(component, message) {
+    if (!isComponent4(component)) {
+      throw new TypeError(`${message} must return a Component.`);
+    }
+    if (!isUnplacedOwnerlessComponent2(component)) {
+      throw new Error(`${message} must return an ownerless, unplaced Component.`);
+    }
+    return component;
+  }
+  function valuesFromRecords(records, order) {
+    const values = [];
+    for (const key of order) {
+      const record = records.get(key);
+      if (record) {
+        values.push(record.state.value);
+      }
+    }
+    return values;
+  }
+  function getSortableController(component) {
+    return component?.sortable ?? null;
+  }
+  function closestSortableController(component) {
+    let current = component?.element ?? null;
+    while (current) {
+      if (current instanceof HTMLElement) {
+        const controller = getSortableController(current.component);
+        if (controller) {
+          return controller;
+        }
+      }
+      current = current.parentNode;
+    }
+    return null;
+  }
+  function pointInRect(point, rect) {
+    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+  }
+  function sortableRegistryFor(documentRef) {
+    let registry = sortablesByDocument.get(documentRef);
+    if (!registry) {
+      registry = /* @__PURE__ */ new Set();
+      sortablesByDocument.set(documentRef, registry);
+    }
+    return registry;
+  }
+  function activeSessionFor(documentRef) {
+    return activeSessionsByDocument.get(documentRef) ?? null;
+  }
+  function activeSessionForSortable(sortable) {
+    return activeSessionFor(sortable.component.element.ownerDocument);
+  }
+  function setActiveSession(session) {
+    if (!session) {
+      return;
+    }
+    activeSessionsByDocument.set(session.source.component.element.ownerDocument, session);
+  }
+  function clearActiveSession(session) {
+    const documentRef = session.source.component.element.ownerDocument;
+    if (activeSessionsByDocument.get(documentRef) === session) {
+      activeSessionsByDocument.delete(documentRef);
+    }
+  }
+  function resolveSortableTarget(session, detail) {
+    const explicit = closestSortableController(detail.target);
+    if (explicit?.canAcceptSession(session)) {
+      return explicit;
+    }
+    const registry = [...sortableRegistryFor(detail.component.element.ownerDocument)].reverse();
+    for (const sortable of registry) {
+      if (!pointInRect(detail.position.current, sortable.component.element.getBoundingClientRect())) {
+        continue;
+      }
+      if (sortable.canAcceptSession(session)) {
+        return sortable;
+      }
+    }
+    return session.source;
+  }
+  var SortableController = class {
+    constructor(component, input, options) {
+      this.component = component;
+      this.input = input;
+      this.options = options;
+      __publicField(this, "dragging");
+      __publicField(this, "items");
+      __publicField(this, "phase");
+      __publicField(this, "preview");
+      __publicField(this, "recordsByKey", /* @__PURE__ */ new Map());
+      __publicField(this, "cleanupDisposeEvent", noop14);
+      __publicField(this, "currentOrder", []);
+      __publicField(this, "disposedValue", false);
+      __publicField(this, "previewOrder", []);
+      __publicField(this, "releaseSourceSubscription", noop14);
+      const initial = isStateLike2(input) ? input.value : input;
+      this.items = createOwnedState4(component, []);
+      this.preview = createOwnedState4(component, []);
+      this.phase = createOwnedState4(component, "idle");
+      this.dragging = createOwnedState4(component, null);
+      sortableRegistryFor(component.element.ownerDocument).add(this);
+      const handleDispose = () => {
+        this.dispose();
+      };
+      component.element.addEventListener("Dispose", handleDispose);
+      this.cleanupDisposeEvent = () => {
+        component.element.removeEventListener("Dispose", handleDispose);
+      };
+      component.onCleanup(() => {
+        this.dispose();
+      });
+      if (isStateLike2(input)) {
+        this.releaseSourceSubscription = input.subscribe(component, (items) => {
+          this.syncItems(items);
+        });
+      }
+      this.syncItems(initial);
+    }
+    cancel() {
+      const session = activeSessionForSortable(this);
+      if (session?.source === this || session?.target === this) {
+        this.cancelDragSession(session);
+      }
+    }
+    canAcceptSession(session) {
+      if (session.source === this) {
+        return true;
+      }
+      if (!this.options.transfer || this.options.transfer !== session.source.options.transfer) {
+        return false;
+      }
+      if (this.recordsByKey.has(session.key)) {
+        return false;
+      }
+      const sourceContext = session.source.transferContextFor(session);
+      const targetContext = this.transferContextFor(session);
+      if (session.source.options.canTransferOut?.(sourceContext) === false) {
+        return false;
+      }
+      if (this.options.canTransferIn?.(targetContext) === false) {
+        return false;
+      }
+      return true;
+    }
+    dispose() {
+      if (this.disposedValue) {
+        return;
+      }
+      this.disposedValue = true;
+      const session = activeSessionForSortable(this);
+      if (session?.source === this || session?.target === this) {
+        this.cancelDragSession(session);
+      }
+      this.cleanupDisposeEvent();
+      this.cleanupDisposeEvent = noop14;
+      this.releaseSourceSubscription();
+      sortableRegistryFor(this.component.element.ownerDocument).delete(this);
+      for (const record of [...this.recordsByKey.values()]) {
+        this.removeRecord(record);
+      }
+    }
+    handleDragStart(record, detail) {
+      if (activeSessionForSortable(this) || this.disposedValue || !this.recordsByKey.has(record.key)) {
+        return;
+      }
+      const placeholder = validateRenderedComponent(this.options.placeholder(record.component, record.key), "Sortable placeholder");
+      placeholder.owner.add(this.component, "sortable-placeholder");
+      const session = {
+        dragging: record.component,
+        item: record.state.value,
+        key: record.key,
+        placeholder,
+        source: this,
+        target: this,
+        targetIndex: this.currentOrder.indexOf(record.key)
+      };
+      setActiveSession(session);
+      this.phase.set("sorting");
+      this.dragging.set(record.component);
+      this.previewOrder = [...this.currentOrder];
+      this.preview.set(valuesFromRecords(this.recordsByKey, this.previewOrder));
+      this.placePlaceholder(this, session.targetIndex);
+      this.handleDragMove(detail);
+      record.component.element.remove();
+    }
+    handleDragMove(detail) {
+      const session = activeSessionForSortable(this);
+      if (!session || session.source !== this) {
+        return;
+      }
+      const dropTarget = resolveDropTarget(detail.component, detail.position.current, detail.position.source, detail.target);
+      if (dropTarget) {
+        session.target.clearPreviewFromSession(session);
+        session.target = session.source;
+        session.targetIndex = session.source.currentOrder.indexOf(session.key);
+        this.suspendPlaceholder(session);
+        return;
+      }
+      const target = resolveSortableTarget(session, detail);
+      target.previewSession(session, detail.position.current);
+    }
+    handleDragEnd(event, detail) {
+      const session = activeSessionForSortable(this);
+      if (!session || session.source !== this) {
+        return;
+      }
+      const handled = handleDropTargetDrop(event, detail.component, detail.position.current, detail.position.source, detail.target);
+      if (handled) {
+        this.cleanupSession();
+        return;
+      }
+      session.target.commitSession(session);
+    }
+    handleDragCancel() {
+      if (activeSessionForSortable(this)?.source === this) {
+        this.cancelSession();
+      }
+    }
+    previewSession(session, point) {
+      if (!this.canAcceptSession(session)) {
+        session.source.previewSession(session, point);
+        return;
+      }
+      if (session.target !== this) {
+        session.target.clearPreviewFromSession(session);
+      }
+      session.target = this;
+      session.targetIndex = this.resolveInsertionIndex(session, point);
+      this.placePlaceholder(this, session.targetIndex);
+      this.previewOrder = this.previewOrderForSession(session, session.targetIndex);
+      this.preview.set(this.previewValuesForSession(session));
+      this.phase.set("sorting");
+      this.dragging.set(session.dragging);
+    }
+    cleanupSession() {
+      const session = activeSessionForSortable(this);
+      if (!session || session.source !== this) {
+        return;
+      }
+      session.placeholder?.remove();
+      session.placeholder = null;
+      session.target.clearPreviewFromSession(session);
+      session.source.phase.set("idle");
+      session.source.dragging.set(null);
+      session.source.previewOrder = [...session.source.currentOrder];
+      session.source.preview.set(valuesFromRecords(session.source.recordsByKey, session.source.previewOrder));
+      if (session.target !== session.source) {
+        session.target.phase.set("idle");
+        session.target.dragging.set(null);
+      }
+      clearActiveSession(session);
+      if (!session.source.disposedValue && !session.source.component.disposed) {
+        session.source.placeRecords();
+      }
+      if (session.target !== session.source && !session.target.disposedValue && !session.target.component.disposed) {
+        session.target.placeRecords();
+      }
+    }
+    cancelSession() {
+      const session = activeSessionForSortable(this);
+      if (!session || session.source !== this && session.target !== this) {
+        return;
+      }
+      session.placeholder?.remove();
+      session.placeholder = null;
+      session.source.phase.set("idle");
+      session.source.dragging.set(null);
+      session.source.previewOrder = [...session.source.currentOrder];
+      session.source.preview.set(valuesFromRecords(session.source.recordsByKey, session.source.previewOrder));
+      if (session.target !== session.source) {
+        session.target.phase.set("idle");
+        session.target.dragging.set(null);
+        session.target.previewOrder = [...session.target.currentOrder];
+        session.target.preview.set(valuesFromRecords(session.target.recordsByKey, session.target.previewOrder));
+      }
+      clearActiveSession(session);
+      if (!session.source.disposedValue && !session.source.component.disposed) {
+        session.source.placeRecords();
+      }
+      if (session.target !== session.source && !session.target.disposedValue && !session.target.component.disposed) {
+        session.target.placeRecords();
+      }
+    }
+    cancelDragSession(session) {
+      if (session.dragging.draggable.phase.value !== "idle") {
+        session.dragging.draggable.cancel();
+        return;
+      }
+      this.cancelSession();
+    }
+    clearPreviewFromSession(session) {
+      this.previewOrder = [...this.currentOrder];
+      this.preview.set(valuesFromRecords(this.recordsByKey, this.previewOrder));
+      if (session.target === this && session.source !== this) {
+        this.phase.set("idle");
+        this.dragging.set(null);
+      }
+    }
+    suspendPlaceholder(session) {
+      session.placeholder?.element.remove();
+    }
+    commitSession(session) {
+      if (session.target !== this) {
+        return;
+      }
+      if (session.source === this) {
+        const nextItems = this.previewValuesForSession(session);
+        this.syncItems(nextItems);
+        this.cleanupSession();
+        return;
+      }
+      const sourceItems = session.source.items.value.filter((item, index) => {
+        return session.source.keyFor(item, index) !== session.key;
+      });
+      const targetItems = [...this.items.value];
+      targetItems.splice(session.targetIndex, 0, session.item);
+      session.source.syncItems(sourceItems);
+      this.syncItems(targetItems);
+      session.source.cleanupSession();
+    }
+    normalize(items) {
+      const normalized = [];
+      const seen = /* @__PURE__ */ new Set();
+      items.forEach((item, index) => {
+        const key = this.keyFor(item, index);
+        if (seen.has(key)) {
+          console.error(`Sortable ignored duplicate key ${String(key)}.`);
+          return;
+        }
+        seen.add(key);
+        normalized.push({ index, item, key });
+      });
+      return normalized;
+    }
+    keyFor(item, index) {
+      return this.options.key?.(item, index) ?? index;
+    }
+    syncItems(items) {
+      if (this.disposedValue) {
+        return;
+      }
+      const sessionBeforeSync = activeSessionForSortable(this);
+      const normalized = this.normalize(items);
+      const nextKeys = new Set(normalized.map((item) => item.key));
+      const draggingKey = sessionBeforeSync?.source === this ? sessionBeforeSync.key : null;
+      if (draggingKey !== null && !nextKeys.has(draggingKey)) {
+        this.cancelSession();
+      }
+      for (const entry of normalized) {
+        const existing = this.recordsByKey.get(entry.key);
+        if (existing) {
+          existing.state.set(entry.item);
+          if (sessionBeforeSync?.key === entry.key && sessionBeforeSync.source === this) {
+            sessionBeforeSync.item = entry.item;
+          }
+          continue;
+        }
+        this.recordsByKey.set(entry.key, this.createRecord(entry));
+      }
+      for (const [key, record] of [...this.recordsByKey]) {
+        if (nextKeys.has(key)) {
+          continue;
+        }
+        this.removeRecord(record);
+      }
+      this.currentOrder = normalized.map((item) => item.key);
+      const committedItems = normalized.map((item) => item.item);
+      this.items.set(committedItems);
+      this.placeRecords();
+      const session = activeSessionForSortable(this);
+      if (session && session === sessionBeforeSync && session.target === this) {
+        this.previewOrder = this.mergeActivePreviewOrder(session);
+        this.preview.set(this.previewValuesForSession(session));
+        this.placePlaceholder(this, session.targetIndex);
+      } else {
+        this.previewOrder = [...this.currentOrder];
+        this.preview.set(committedItems);
+      }
+    }
+    createRecord(entry) {
+      const state2 = createOwnedState4(this.component, entry.item);
+      const rendered = validateRenderedComponent(this.options.render(state2, entry.key, entry.index), "Sortable render");
+      const draggable = Draggable.call(rendered);
+      draggable.owner.add(this.component, "sortable-item");
+      let record;
+      const isRecordDragDetail = (detail) => {
+        return detail?.component === record.component;
+      };
+      const handleDragStart = (event) => {
+        const detail = event.detail;
+        if (isRecordDragDetail(detail)) {
+          this.handleDragStart(record, detail);
+        }
+      };
+      const handleDragMove = (event) => {
+        const detail = event.detail;
+        if (isRecordDragDetail(detail)) {
+          this.handleDragMove(detail);
+        }
+      };
+      const handleDragEnd = (event) => {
+        const detail = event.detail;
+        if (isRecordDragDetail(detail)) {
+          this.handleDragEnd(event, detail);
+        }
+      };
+      const handleDragCancel = (event) => {
+        const detail = event.detail;
+        if (isRecordDragDetail(detail)) {
+          this.handleDragCancel();
+        }
+      };
+      const cleanup = () => {
+        draggable.element.removeEventListener("DragStart", handleDragStart);
+        draggable.element.removeEventListener("DragMove", handleDragMove);
+        draggable.element.removeEventListener("DragEnd", handleDragEnd);
+        draggable.element.removeEventListener("DragCancel", handleDragCancel);
+        state2.dispose();
+        draggable.remove();
+      };
+      record = {
+        cleanup,
+        component: draggable,
+        key: entry.key,
+        state: state2
+      };
+      draggable.element.addEventListener("DragStart", handleDragStart);
+      draggable.element.addEventListener("DragMove", handleDragMove);
+      draggable.element.addEventListener("DragEnd", handleDragEnd);
+      draggable.element.addEventListener("DragCancel", handleDragCancel);
+      return record;
+    }
+    removeRecord(record) {
+      if (this.recordsByKey.get(record.key) !== record) {
+        return;
+      }
+      this.recordsByKey.delete(record.key);
+      record.cleanup();
+    }
+    placeRecords() {
+      const session = activeSessionForSortable(this);
+      const hiddenKey = session?.source === this ? session.key : null;
+      for (const key of this.currentOrder) {
+        if (key === hiddenKey) {
+          continue;
+        }
+        const record = this.recordsByKey.get(key);
+        if (record) {
+          this.component.append(record.component);
+        }
+      }
+    }
+    placePlaceholder(target, index) {
+      const session = activeSessionForSortable(target);
+      const placeholder = session?.placeholder;
+      if (!placeholder) {
+        return;
+      }
+      const referenceRecord = target.recordAtInsertionIndex(session, index);
+      const referenceNode = referenceRecord?.component.element ?? null;
+      target.component.element.insertBefore(placeholder.element, referenceNode);
+    }
+    baseOrderForSession(session) {
+      const order = [...this.currentOrder];
+      if (session.source === this) {
+        return order.filter((key) => key !== session.key);
+      }
+      return order;
+    }
+    previewOrderForSession(session, index) {
+      const order = [...this.currentOrder];
+      if (session.source === this) {
+        const existingIndex = order.indexOf(session.key);
+        if (existingIndex >= 0) {
+          order.splice(existingIndex, 1);
+        }
+      }
+      order.splice(index, 0, session.key);
+      return order;
+    }
+    previewValuesForSession(session) {
+      const values = [];
+      for (const key of this.previewOrder) {
+        if (key === session.key) {
+          values.push(session.item);
+          continue;
+        }
+        const record = this.recordsByKey.get(key);
+        if (record) {
+          values.push(record.state.value);
+        }
+      }
+      return values;
+    }
+    recordAtInsertionIndex(session, index) {
+      const order = this.baseOrderForSession(session);
+      const referenceKey = order[index];
+      if (referenceKey === void 0) {
+        return null;
+      }
+      return this.recordsByKey.get(referenceKey) ?? null;
+    }
+    resolveInsertionIndex(session, point) {
+      const slots = this.insertionSlotsForSession(session);
+      let nearest = slots[0] ?? { index: 0, x: point.x, y: point.y };
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const slot of slots) {
+        const distanceX = point.x - slot.x;
+        const distanceY = point.y - slot.y;
+        const distance2 = distanceX * distanceX + distanceY * distanceY;
+        if (distance2 < nearestDistance) {
+          nearest = slot;
+          nearestDistance = distance2;
+        }
+      }
+      return nearest.index;
+    }
+    insertionSlotsForSession(session) {
+      const order = this.baseOrderForSession(session);
+      const hostRect = this.component.element.getBoundingClientRect();
+      const slots = [];
+      if (order.length === 0) {
+        return [{
+          index: 0,
+          x: hostRect.left + hostRect.width / 2,
+          y: hostRect.top + hostRect.height / 2
+        }];
+      }
+      for (let index = 0; index <= order.length; index += 1) {
+        const before = index > 0 ? this.recordsByKey.get(order[index - 1]) ?? null : null;
+        const after = index < order.length ? this.recordsByKey.get(order[index]) ?? null : null;
+        const beforeRect = before?.component.element.getBoundingClientRect();
+        const afterRect = after?.component.element.getBoundingClientRect();
+        if (beforeRect && afterRect) {
+          slots.push({
+            index,
+            x: (beforeRect.left + beforeRect.width / 2 + afterRect.left + afterRect.width / 2) / 2,
+            y: (beforeRect.bottom + afterRect.top) / 2
+          });
+          continue;
+        }
+        if (afterRect) {
+          slots.push({
+            index,
+            x: afterRect.left + afterRect.width / 2,
+            y: afterRect.top
+          });
+          continue;
+        }
+        if (beforeRect) {
+          slots.push({
+            index,
+            x: beforeRect.left + beforeRect.width / 2,
+            y: beforeRect.bottom
+          });
+        }
+      }
+      return slots;
+    }
+    mergeActivePreviewOrder(session) {
+      const currentKeys = new Set(this.currentOrder);
+      const merged = [];
+      for (const key of this.previewOrder) {
+        if (key !== session.key && !currentKeys.has(key)) {
+          continue;
+        }
+        if (!merged.includes(key)) {
+          merged.push(key);
+        }
+      }
+      for (const key of this.currentOrder) {
+        if (merged.includes(key)) {
+          continue;
+        }
+        this.insertKeyBySourceNeighbors(merged, key, session);
+      }
+      if (session.target === this) {
+        const sessionKeyIndex = merged.indexOf(session.key);
+        if (sessionKeyIndex >= 0) {
+          session.targetIndex = merged.slice(0, sessionKeyIndex).filter((key) => key !== session.key).length;
+        }
+      }
+      return merged;
+    }
+    insertKeyBySourceNeighbors(merged, key, session) {
+      const sourceIndex = this.currentOrder.indexOf(key);
+      const sessionKey = session.key;
+      const sessionKeyIndex = this.currentOrder.indexOf(sessionKey);
+      const mergedSessionIndex = merged.indexOf(sessionKey);
+      let previousNeighborIndex = -1;
+      let nextNeighborIndex = -1;
+      for (let index = sourceIndex - 1; index >= 0; index -= 1) {
+        const previousKey = this.currentOrder[index];
+        if (previousKey === sessionKey) {
+          continue;
+        }
+        previousNeighborIndex = merged.indexOf(previousKey);
+        break;
+      }
+      for (let index = sourceIndex + 1; index < this.currentOrder.length; index += 1) {
+        const nextKey = this.currentOrder[index];
+        if (nextKey === sessionKey) {
+          continue;
+        }
+        nextNeighborIndex = merged.indexOf(nextKey);
+        break;
+      }
+      if (previousNeighborIndex >= 0 && nextNeighborIndex >= 0) {
+        merged.splice(Math.min(previousNeighborIndex + 1, nextNeighborIndex), 0, key);
+        return;
+      }
+      if (session.source === this && sessionKeyIndex >= 0 && mergedSessionIndex >= 0) {
+        if (sourceIndex > sessionKeyIndex) {
+          merged.splice(mergedSessionIndex + 1, 0, key);
+          return;
+        }
+        if (sourceIndex < sessionKeyIndex) {
+          merged.splice(mergedSessionIndex, 0, key);
+          return;
+        }
+      }
+      merged.push(key);
+    }
+    transferContextFor(session) {
+      return {
+        item: session.item,
+        key: session.key,
+        sortable: this.component
+      };
+    }
+  };
+  var Sortable = function Sortable2(input, options) {
+    if (!options || typeof options.render !== "function") {
+      throw new TypeError("Sortable requires a render function.");
+    }
+    if (typeof options.placeholder !== "function") {
+      throw new TypeError("Sortable requires a placeholder function.");
+    }
+    const component = Component(this ?? "div", Sortable2);
+    if (component.sortable) {
+      return component;
+    }
+    return component.extend((root) => ({
+      sortable: new SortableController(root, input, options)
+    }));
+  };
+  Sortable.Transfer = function Transfer(label) {
+    return { label };
+  };
 
   // src/index.ts
   breakdownExtension();
