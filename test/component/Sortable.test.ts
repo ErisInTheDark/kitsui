@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Component, Draggable, DropTarget, Sortable, State, type DragEventDetail, type DragInputReceiver } from "../../src";
+import { Component, Draggable, DropTarget, Sortable, State, type DragEventDetail, type DragInputReceiver, type DraggableComponent } from "../../src";
 
 function mountedComponent<NAME extends keyof HTMLElementTagNameMap = "div"> (tagName: NAME = "div" as NAME): Component<HTMLElementTagNameMap[NAME]> {
 	return Component(tagName).appendTo(document.body);
@@ -63,7 +63,7 @@ async function flushEffects (): Promise<void> {
 }
 
 function dragDetail (
-	component: Component & import("../../src").DraggableExtensions,
+	component: DraggableComponent,
 	position: { readonly x: number; readonly y: number },
 	target?: Component,
 ): DragEventDetail {
@@ -152,7 +152,7 @@ describe("Sortable", () => {
 		});
 
 		try {
-			const item = rendered[0] as Component & import("../../src").DraggableExtensions;
+			const item = rendered[0] as DraggableComponent;
 			expect(item.draggable).toBeDefined();
 
 			item.element.dispatchEvent(pointerEvent("pointerdown", { clientX: 0, clientY: 0 }));
@@ -354,7 +354,7 @@ describe("Sortable", () => {
 
 			rendered[0].element.dispatchEvent(new CustomEvent("DragMove", {
 				bubbles: true,
-				detail: dragDetail(rendered[0] as Component & import("../../src").DraggableExtensions, { x: 20, y: 20 }, dropTarget),
+				detail: dragDetail(rendered[0] as DraggableComponent, { x: 20, y: 20 }, dropTarget),
 			}));
 
 			expect(host.element.textContent).not.toContain("placeholder");
@@ -543,18 +543,18 @@ describe("Sortable", () => {
 			rendered[0].element.dispatchEvent(pointerEvent("pointerdown", { clientX: 1, clientY: 1 }));
 			rendered[0].element.dispatchEvent(new CustomEvent("DragEnd", {
 				bubbles: true,
-				detail: dragDetail(rendered[0] as Component & import("../../src").DraggableExtensions, { x: 20, y: 20 }, trueReturningTarget),
+				detail: dragDetail(rendered[0] as DraggableComponent, { x: 20, y: 20 }, trueReturningTarget),
 			}));
 
 			expect(trueReturningDrop).toHaveBeenCalledOnce();
 			expect(host.sortable.items.value.map(item => item.id)).toEqual(["a", "b"]);
-			(rendered[0] as Component & import("../../src").DraggableExtensions).draggable.cancel();
+			(rendered[0] as DraggableComponent).draggable.cancel();
 
 			rendered[0].element.dispatchEvent(pointerEvent("pointerdown", { clientX: 1, clientY: 1 }));
 			document.dispatchEvent(pointerEvent("pointermove", { clientX: 1, clientY: 30 }));
 			rendered[0].element.dispatchEvent(new CustomEvent("DragEnd", {
 				bubbles: true,
-				detail: dragDetail(rendered[0] as Component & import("../../src").DraggableExtensions, { x: 1, y: 30 }, falseReturningTarget),
+				detail: dragDetail(rendered[0] as DraggableComponent, { x: 1, y: 30 }, falseReturningTarget),
 			}));
 
 			expect(falseReturningDrop).toHaveBeenCalledOnce();
@@ -594,11 +594,11 @@ describe("Sortable", () => {
 			document.dispatchEvent(pointerEvent("pointermove", { clientX: 1, clientY: 35 }));
 			sourceRendered[0].element.dispatchEvent(new CustomEvent("DragMove", {
 				bubbles: true,
-				detail: dragDetail(sourceRendered[0] as Component & import("../../src").DraggableExtensions, { x: 1, y: 60 }, claimingDropTarget),
+				detail: dragDetail(sourceRendered[0] as DraggableComponent, { x: 1, y: 60 }, claimingDropTarget),
 			}));
 			sourceRendered[0].element.dispatchEvent(new CustomEvent("DragEnd", {
 				bubbles: true,
-				detail: dragDetail(sourceRendered[0] as Component & import("../../src").DraggableExtensions, { x: 1, y: 60 }, claimingDropTarget),
+				detail: dragDetail(sourceRendered[0] as DraggableComponent, { x: 1, y: 60 }, claimingDropTarget),
 			}));
 
 			expect(source.sortable.items.value.map(item => item.id)).toEqual(["a"]);

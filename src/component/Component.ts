@@ -1422,6 +1422,14 @@ interface ComponentClass<ELEMENT extends HTMLElement> extends ComponentExtension
 /** @group Component */
 export type Component<ELEMENT extends HTMLElement = HTMLElement> = ComponentClass<ELEMENT>;
 
+export namespace Component {
+	export type EventMap<TEvents extends { readonly [K in keyof TEvents]: Event }> = ComponentHTMLElementEventMap & TEvents;
+
+	export interface WithEvents<TEvents extends { readonly [K in keyof TEvents]: Event }> extends Component {
+		readonly event: EventManipulator<this, "component", EventMap<TEvents>>;
+	}
+}
+
 /**
  * Creates a new component that wraps or creates an HTMLElement.
  * Can be called with or without the `new` keyword.

@@ -3,7 +3,7 @@ import { State, type CleanupFunction } from "../state/State";
 import type {
 	DragInputSource,
 	DragPoint,
-	DraggableExtensions,
+	DraggableComponent,
 	DragEventDetail,
 } from "./Draggable";
 
@@ -13,14 +13,14 @@ export interface DropTargetExtensions {
 
 export interface DropTarget {
 	readonly accepting: State.Readonly<boolean>;
-	readonly draggable: State.Readonly<(Component & DraggableExtensions) | null>;
+	readonly draggable: State.Readonly<DraggableComponent | null>;
 	readonly hovering: State.Readonly<boolean>;
 	dispose (): void;
 }
 
 export interface DropTargetContext<
 	TTarget extends Component = Component,
-	TDraggable extends Component & DraggableExtensions = Component & DraggableExtensions,
+	TDraggable extends DraggableComponent = DraggableComponent,
 > {
 	readonly draggable: TDraggable;
 	readonly position: DragPoint;
@@ -30,7 +30,7 @@ export interface DropTargetContext<
 
 export interface DropTargetOptions<
 	TTarget extends Component = Component,
-	TDraggable extends Component & DraggableExtensions = Component & DraggableExtensions,
+	TDraggable extends DraggableComponent = DraggableComponent,
 > {
 	accepts (context: DropTargetContext<TTarget, TDraggable>): boolean;
 	drop (context: DropTargetContext<TTarget, TDraggable>): void;
@@ -64,7 +64,7 @@ function getDropTargetController (component: Component | null | undefined): Drop
 
 function contextFor (
 	controller: DropTargetController,
-	draggable: Component & DraggableExtensions,
+	draggable: DraggableComponent,
 	position: DragPoint,
 	source: DragInputSource,
 ): DropTargetContext {
@@ -149,7 +149,7 @@ function peekRegisteredTargets (documentRef: Document): Set<DropTargetController
 
 function syncAcceptingTargets (
 	documentRef: Document,
-	draggable: Component & DraggableExtensions,
+	draggable: DraggableComponent,
 	position: DragPoint,
 	source: DragInputSource,
 ): void {
@@ -197,7 +197,7 @@ function targetFromExplicitComponent (component: Component | undefined): DropTar
 }
 
 export function resolveDropTarget (
-	draggable: Component & DraggableExtensions,
+	draggable: DraggableComponent,
 	position: DragPoint,
 	source: DragInputSource,
 	explicitTarget?: Component,
@@ -244,7 +244,7 @@ export function resolveDropTarget (
 export function setActiveDropTarget (
 	documentRef: Document,
 	controller: DropTargetController | null,
-	draggable: (Component & DraggableExtensions) | null,
+	draggable: DraggableComponent | null,
 ): void {
 	const previous = activeHoverByDocument.get(documentRef);
 
@@ -273,7 +273,7 @@ export function clearDropTargetState (documentRef: Document): void {
 
 export function handleDropTargetDrop (
 	event: Event | null,
-	draggable: Component & DraggableExtensions,
+	draggable: DraggableComponent,
 	position: DragPoint,
 	source: DragInputSource,
 	explicitTarget?: Component,
@@ -295,7 +295,7 @@ export function handleDropTargetDrop (
 
 export class DropTargetController implements DropTarget {
 	readonly accepting: State<boolean>;
-	readonly draggable: State<(Component & DraggableExtensions) | null>;
+	readonly draggable: State<DraggableComponent | null>;
 	readonly hovering: State<boolean>;
 
 	private cleanupRegistration: CleanupFunction = noop;
@@ -306,7 +306,7 @@ export class DropTargetController implements DropTarget {
 		private readonly options: DropTargetOptions,
 	) {
 		this.accepting = State(component, false);
-		this.draggable = State<(Component & DraggableExtensions) | null>(component, null);
+		this.draggable = State<DraggableComponent | null>(component, null);
 		this.hovering = State(component, false);
 
 		const documentRef = component.element.ownerDocument;
@@ -334,7 +334,7 @@ export class DropTargetController implements DropTarget {
 	}
 
 	accepts (
-		draggable: Component & DraggableExtensions,
+		draggable: DraggableComponent,
 		position: DragPoint,
 		source: DragInputSource,
 	): boolean {
@@ -359,7 +359,7 @@ export class DropTargetController implements DropTarget {
 		this.accepting.set(accepting);
 	}
 
-	setHovering (hovering: boolean, draggable: (Component & DraggableExtensions) | null): void {
+	setHovering (hovering: boolean, draggable: DraggableComponent | null): void {
 		if (this.hovering.disposed || this.draggable.disposed) {
 			return;
 		}
@@ -369,7 +369,7 @@ export class DropTargetController implements DropTarget {
 	}
 
 	toResolved (
-		draggable: Component & DraggableExtensions,
+		draggable: DraggableComponent,
 		position: DragPoint,
 		source: DragInputSource,
 	): ResolvedDropTarget {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Component, Draggable, DropTarget, type DragInputReceiver } from "../../src";
+import { Component, Draggable, DropTarget, type DragInputReceiver, type DraggableComponent } from "../../src";
 import { handleDropTargetDrop, resolveDropTarget } from "../../src/component/DropTarget";
 
 function mountedComponent<NAME extends keyof HTMLElementTagNameMap = "div"> (tagName: NAME = "div" as NAME): Component<HTMLElementTagNameMap[NAME]> {
@@ -7,7 +7,7 @@ function mountedComponent<NAME extends keyof HTMLElementTagNameMap = "div"> (tag
 }
 
 function externalDraggable (): {
-	component: Component & import("../../src").DraggableExtensions;
+	component: DraggableComponent;
 	receiver: DragInputReceiver;
 } {
 	let receiver: DragInputReceiver | undefined;

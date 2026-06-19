@@ -121,7 +121,7 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 		readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
 	};
  
-	private readonly listenerRecords = new Map<keyof TEventMap & string, Map<ListenerKey, ListenerRecord>>();
+	private readonly listenerRecords = new Map<string, Map<ListenerKey, ListenerRecord>>();
 
 	constructor (
 		private readonly owner: THost,

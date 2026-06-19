@@ -1,7 +1,9 @@
 import { Component } from "./Component";
 import { State, type CleanupFunction } from "../state/State";
-import { Draggable, type DragEventDetail, type DraggableExtensions } from "./Draggable";
+import { Draggable, type DragEventDetail, type DraggableComponent } from "./Draggable";
 import { handleDropTargetDrop, resolveDropTarget } from "./DropTarget";
+
+type SortableDraggableItem<TItem extends Component> = TItem & DraggableComponent<TItem>;
 
 export interface SortableExtensions<
 	T,
@@ -16,7 +18,7 @@ export interface Sortable<
 	TItem extends Component = Component,
 	K extends PropertyKey = number,
 > {
-	readonly dragging: State.Readonly<(TItem & DraggableExtensions) | null>;
+	readonly dragging: State.Readonly<SortableDraggableItem<TItem> | null>;
 	readonly items: State.Readonly<readonly T[]>;
 	readonly phase: State.Readonly<"idle" | "sorting">;
 	readonly preview: State.Readonly<readonly T[]>;
@@ -47,7 +49,7 @@ export interface SortableOptions<
 	readonly canTransferIn?: (context: SortableTransferContext<T, TItem, K>) => boolean;
 	readonly canTransferOut?: (context: SortableTransferContext<T, TItem, K>) => boolean;
 	readonly key?: (item: T, index: number) => K;
-	placeholder (component: TItem & DraggableExtensions, key: K): Component;
+	placeholder (component: SortableDraggableItem<TItem>, key: K): Component;
 	render (item: State.Readonly<T>, key: K, index: number): TItem;
 	readonly transfer?: SortableTransfer<T>;
 }
@@ -62,13 +64,13 @@ interface NormalizedItem<T, K extends PropertyKey> {
 
 interface SortableRecord<T, TItem extends Component, K extends PropertyKey> {
 	readonly cleanup: CleanupFunction;
-	readonly component: TItem & DraggableExtensions;
+	readonly component: SortableDraggableItem<TItem>;
 	readonly key: K;
 	readonly state: State<T>;
 }
 
 interface ActiveSortSession<T, TItem extends Component, K extends PropertyKey> {
-	readonly dragging: TItem & DraggableExtensions;
+	readonly dragging: SortableDraggableItem<TItem>;
 	item: T;
 	readonly key: K;
 	placeholder: Component | null;
@@ -222,7 +224,7 @@ export class SortableController<
 	TItem extends Component = Component,
 	K extends PropertyKey = number,
 > implements Sortable<T, TItem, K> {
-	readonly dragging: State<(TItem & DraggableExtensions) | null>;
+	readonly dragging: State<SortableDraggableItem<TItem> | null>;
 	readonly items: State<readonly T[]>;
 	readonly phase: State<"idle" | "sorting">;
 	readonly preview: State<readonly T[]>;
@@ -243,7 +245,7 @@ export class SortableController<
 		this.items = createOwnedState<readonly T[]>(component, []);
 		this.preview = createOwnedState<readonly T[]>(component, []);
 		this.phase = createOwnedState<"idle" | "sorting">(component, "idle");
-		this.dragging = createOwnedState<(TItem & DraggableExtensions) | null>(component, null);
+		this.dragging = createOwnedState<SortableDraggableItem<TItem> | null>(component, null);
 
 		sortableRegistryFor(component.element.ownerDocument).add(this);
 		const handleDispose = () => {
@@ -594,13 +596,13 @@ export class SortableController<
 	private createRecord (entry: NormalizedItem<T, K>): SortableRecord<T, TItem, K> {
 		const state = createOwnedState<T>(this.component, entry.item);
 		const rendered = validateRenderedComponent(this.options.render(state, entry.key, entry.index), "Sortable render") as TItem;
-		const draggable = Draggable.call(rendered) as unknown as TItem & DraggableExtensions;
+		const draggable = Draggable.call(rendered) as SortableDraggableItem<TItem>;
 
 		draggable.owner.add(this.component, "sortable-item");
 
 		let record: SortableRecord<T, TItem, K>;
 		const isRecordDragDetail = (detail: DragEventDetail | undefined): detail is DragEventDetail => {
-			return detail?.component === (record.component as unknown as Component & DraggableExtensions);
+			return detail?.component === record.component;
 		};
 		const handleDragStart = (event: Event) => {
 			const detail = (event as CustomEvent<DragEventDetail>).detail;

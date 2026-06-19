@@ -23,7 +23,7 @@ export interface DragPosition {
 }
 
 export interface DragStartContext<TComponent extends Component = Component> {
-	readonly component: TComponent & DraggableExtensions;
+	readonly component: DraggableHost<TComponent>;
 	readonly event?: Event;
 	readonly localPosition: DragPoint;
 	readonly position: DragPoint;
@@ -72,7 +72,7 @@ export interface DragInputReceiver {
 }
 
 export type DragInputAdapter<TComponent extends Component = Component> = (
-	component: TComponent & DraggableExtensions,
+	component: DraggableHost<TComponent>,
 	receiver: DragInputReceiver,
 ) => CleanupFunction | void;
 
@@ -99,23 +99,25 @@ export interface Draggable {
 }
 
 export interface DragEventDetail<TComponent extends Component = Component> {
-	readonly component: TComponent & DraggableExtensions;
+	readonly component: DraggableHost<TComponent>;
 	readonly event?: Event;
 	readonly position: DragPosition;
 	readonly target?: Component;
 }
 
-export type DragComponentEvent<TComponent extends Component = Component> = ComponentEvent<CustomEvent<DragEventDetail<TComponent>>, TComponent>;
-
-declare module "./EventManipulator" {
-	interface ComponentHTMLElementEventMap {
-		DragCancel: CustomEvent<DragEventDetail>;
-		DragEnd: CustomEvent<DragEventDetail>;
-		DragMove: CustomEvent<DragEventDetail>;
-		DragStart: CustomEvent<DragEventDetail>;
-		DragStartRequested: CustomEvent<DragStartContext>;
-	}
+export interface DraggableEvents<TComponent extends Component = Component> {
+	DragCancel: CustomEvent<DragEventDetail<TComponent>>;
+	DragEnd: CustomEvent<DragEventDetail<TComponent>>;
+	DragMove: CustomEvent<DragEventDetail<TComponent>>;
+	DragStart: CustomEvent<DragEventDetail<TComponent>>;
+	DragStartRequested: CustomEvent<DragStartContext<TComponent>>;
 }
+
+export interface DraggableComponent<TComponent extends Component = Component> extends Component.WithEvents<DraggableEvents<TComponent>>, DraggableExtensions {}
+
+type DraggableHost<TComponent extends Component = Component> = TComponent & DraggableComponent<TComponent>;
+
+export type DragComponentEvent<TComponent extends Component = Component> = ComponentEvent<CustomEvent<DragEventDetail<TComponent>>, DraggableHost<TComponent>>;
 
 const noop: CleanupFunction = () => {
 	// Intentionally empty.
@@ -249,7 +251,7 @@ function dispatchDragEvent<TDetail> (component: Component, eventName: string, de
 	}));
 }
 
-function defaultPointerInput (component: Component & DraggableExtensions, receiver: DragInputReceiver): CleanupFunction {
+function defaultPointerInput (component: DraggableComponent, receiver: DragInputReceiver): CleanupFunction {
 	let releaseTracking: (releaseCapture?: boolean) => void = noop;
 
 	const releaseCurrentTracking = () => {
@@ -400,7 +402,7 @@ class DraggableController implements Draggable {
 	private startContext: DragStartContext | null = null;
 
 	constructor (
-		private readonly component: Component & DraggableExtensions,
+		private readonly component: DraggableComponent,
 		private readonly options: DraggableOptions,
 	) {
 		this.phase = createOwnedState<DragPhase>(component, "idle");
@@ -723,23 +725,23 @@ class DraggableController implements Draggable {
 	}
 }
 
-type DraggableConstructor = ComponentBuilderFunction<[DraggableOptions?], Component & DraggableExtensions> & {
+type DraggableConstructor = ComponentBuilderFunction<[DraggableOptions?], DraggableComponent> & {
 	Input<TComponent extends Component = Component> (input: DragInputAdapter<TComponent>): DragInputAdapter<TComponent>;
 };
 
 export const Draggable = function Draggable (
 	this: Component | void,
 	options: DraggableOptions = {},
-): Component & DraggableExtensions {
+): DraggableComponent {
 	const component = Component(this ?? "div", Draggable) as Component & Partial<DraggableExtensions>;
 
 	if (component.draggable) {
-		return component as Component & DraggableExtensions;
+		return component as DraggableComponent;
 	}
 
 	return component.extend<DraggableExtensions>((root) => ({
-		draggable: new DraggableController(root, options),
-	}));
+		draggable: new DraggableController(root as DraggableComponent, options),
+	})) as DraggableComponent;
 } as DraggableConstructor;
 
 Draggable.Input = function Input<TComponent extends Component = Component> (

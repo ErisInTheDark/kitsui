@@ -62,6 +62,7 @@ export type {
 } from "./component/Component";
 export { Draggable } from "./component/Draggable";
 export type {
+    DragComponentEvent,
     DragEventDetail,
     DragInputCancel,
     DragInputEnd,
@@ -76,6 +77,8 @@ export type {
     DragPreviewRenderer,
     DragPosition,
     DragStartContext,
+    DraggableComponent,
+    DraggableEvents,
     DraggableExtensions,
     DraggableOptions
 } from "./component/Draggable";

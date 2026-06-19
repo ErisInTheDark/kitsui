@@ -690,7 +690,7 @@ async function leakProbe (
 
 		it("sortable placeholder cleanup after cancel", async ({ track }) => {
 			let host = track("sortable cancel host", Component("div").appendTo(body));
-			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+			let itemComponent: import("../src/component/Draggable").DraggableComponent | null = null;
 			let placeholderComponent: Component | null = null;
 
 			track("sortable cancel host element", host.element);
@@ -702,7 +702,7 @@ async function leakProbe (
 					return placeholderComponent;
 				},
 				render: (item) => {
-					itemComponent = track("sortable cancel item", Component("div").text.set(item.value.label)) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					itemComponent = track("sortable cancel item", Component("div").text.set(item.value.label)) as unknown as import("../src/component/Draggable").DraggableComponent;
 					track("sortable cancel item element", itemComponent.element);
 					return itemComponent;
 				},
@@ -743,7 +743,7 @@ async function leakProbe (
 
 		it("sortable placeholder cleanup after commit", async ({ track }) => {
 			let host = track("sortable commit host", Component("div").appendTo(body));
-			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+			let itemComponent: import("../src/component/Draggable").DraggableComponent | null = null;
 			let placeholderComponent: Component | null = null;
 
 			track("sortable commit host element", host.element);
@@ -755,7 +755,7 @@ async function leakProbe (
 					return placeholderComponent;
 				},
 				render: (item) => {
-					itemComponent = track("sortable commit item", Component("div").text.set(item.value.label)) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					itemComponent = track("sortable commit item", Component("div").text.set(item.value.label)) as unknown as import("../src/component/Draggable").DraggableComponent;
 					track("sortable commit item element", itemComponent.element);
 					return itemComponent;
 				},
@@ -800,7 +800,7 @@ async function leakProbe (
 
 		it("sortable placeholder cleanup after dispose", async ({ track }) => {
 			let host = track("sortable dispose host", Component("div").appendTo(body));
-			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+			let itemComponent: import("../src/component/Draggable").DraggableComponent | null = null;
 			let placeholderComponent: Component | null = null;
 
 			track("sortable dispose host element", host.element);
@@ -812,7 +812,7 @@ async function leakProbe (
 					return placeholderComponent;
 				},
 				render: (item) => {
-					itemComponent = track("sortable dispose item", Component("div").text.set(item.value.label)) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					itemComponent = track("sortable dispose item", Component("div").text.set(item.value.label)) as unknown as import("../src/component/Draggable").DraggableComponent;
 					track("sortable dispose item element", itemComponent.element);
 					return itemComponent;
 				},
@@ -854,7 +854,7 @@ async function leakProbe (
 			const transfer = Sortable.Transfer<{ id: string; label: string }>("memory");
 			let source = track("sortable transfer source", Component("div").appendTo(body));
 			let target = track("sortable transfer target", Component("div").appendTo(body));
-			let itemComponent: (Component & import("../src/component/Draggable").DraggableExtensions) | null = null;
+			let itemComponent: import("../src/component/Draggable").DraggableComponent | null = null;
 
 			track("sortable transfer source element", source.element);
 			track("sortable transfer target element", target.element);
@@ -862,7 +862,7 @@ async function leakProbe (
 				key: item => item.id,
 				placeholder: () => Component("i"),
 				render: item => {
-					itemComponent = Component("div").text.set(item.value.label) as unknown as Component & import("../src/component/Draggable").DraggableExtensions;
+					itemComponent = Component("div").text.set(item.value.label) as unknown as import("../src/component/Draggable").DraggableComponent;
 					return itemComponent;
 				},
 				transfer,

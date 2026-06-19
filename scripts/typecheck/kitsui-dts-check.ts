@@ -118,6 +118,14 @@ const draggableHost = Component("div").and(Draggable, {
 draggableHost.draggable.phase.subscribe(draggableHost, phase => {
 	phase satisfies "idle" | "pending" | "dragging";
 });
+const plainDragEventHost = Component();
+// @ts-expect-error Drag events should only be exposed by Draggable components.
+plainDragEventHost.event.owned.on.DragStart(() => undefined);
+draggableHost.event.owned.on.DragStart(event => {
+	event.component.draggable.cancel();
+	event.detail.component.draggable.cancel();
+	event.detail.position.current.x.toFixed();
+});
 
 const dropTargetHost = Component("div").and(DropTarget, {
 	accepts: ({ draggable }) => draggable.is(Draggable),

@@ -105,6 +105,41 @@ if (composed.is(Button)) {
 }
 ```
 
+### Component-Specific Events
+
+Base component events are only for events available on every component, such as `Mount` and `Dispose`. Feature-specific components should expose custom events through `Component.WithEvents<Events>` instead of augmenting the shared component event map.
+
+Custom kitsui component event names should be `PascalCase`, such as `DragStart` or `WidgetCommit`, so they stay distinct from native DOM events like `click` and `pointerdown`.
+
+```ts
+import { Component } from "kitsui"
+
+interface WidgetEvents {
+	WidgetCommit: CustomEvent<{
+		readonly value: string
+	}>
+}
+
+interface WidgetExtensions {
+	commit (value: string): this
+}
+
+interface Widget extends Component.WithEvents<WidgetEvents>, WidgetExtensions { }
+
+function emitWidgetCommit (widget: Widget, value: string): void {
+	widget.element.dispatchEvent(new CustomEvent("WidgetCommit", {
+		bubbles: true,
+		detail: { value },
+	}))
+}
+
+declare const widget: Widget
+
+widget.event.owned.on.WidgetCommit(event => {
+	event.detail.value.toUpperCase()
+})
+```
+
 ## State And Derived Values
 
 Use short-form derived state when the derived value is consumed immediately. Use owner-explicit derived state when the derived state is reused, grouped, passed around, or otherwise needs an obvious owner.
