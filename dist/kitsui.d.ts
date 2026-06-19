@@ -556,6 +556,17 @@ interface ComponentClass<ELEMENT extends HTMLElement> extends ComponentExtension
 
 export type Component<ELEMENT extends HTMLElement = HTMLElement> = ComponentClass<ELEMENT>;
 
+export namespace Component {
+    type EventMap<TEvents extends {
+        readonly [K in keyof TEvents]: Event;
+    }> = ComponentHTMLElementEventMap & TEvents;
+    interface WithEvents<TEvents extends {
+        readonly [K in keyof TEvents]: Event;
+    }> extends Component {
+        readonly event: EventManipulator<this, "component", EventMap<TEvents>>;
+    }
+}
+
 export const Component: ComponentConstructor & ComponentStaticExtensions;
 
 export type DragPhase = "idle" | "pending" | "dragging";
@@ -584,7 +595,7 @@ export interface DragPosition {
 }
 
 export interface DragStartContext<TComponent extends Component = Component> {
-    readonly component: TComponent & DraggableExtensions;
+    readonly component: DraggableHost<TComponent>;
     readonly event?: Event;
     readonly localPosition: DragPoint;
     readonly position: DragPoint;
@@ -633,7 +644,7 @@ export interface DragInputReceiver {
     cancel(input?: DragInputCancel): void;
 }
 
-export type DragInputAdapter<TComponent extends Component = Component> = (component: TComponent & DraggableExtensions, receiver: DragInputReceiver) => CleanupFunction | void;
+export type DragInputAdapter<TComponent extends Component = Component> = (component: DraggableHost<TComponent>, receiver: DragInputReceiver) => CleanupFunction | void;
 
 export interface DraggableOptions<TComponent extends Component = Component> {
     readonly canStart?: (context: DragStartContext<TComponent>) => boolean;
@@ -658,23 +669,28 @@ export interface Draggable {
 }
 
 export interface DragEventDetail<TComponent extends Component = Component> {
-    readonly component: TComponent & DraggableExtensions;
+    readonly component: DraggableHost<TComponent>;
     readonly event?: Event;
     readonly position: DragPosition;
     readonly target?: Component;
 }
 
-type DragComponentEvent<TComponent extends Component = Component> = ComponentEvent<CustomEvent<DragEventDetail<TComponent>>, TComponent>;
+export interface DraggableEvents<TComponent extends Component = Component> {
+    DragCancel: CustomEvent<DragEventDetail<TComponent>>;
+    DragEnd: CustomEvent<DragEventDetail<TComponent>>;
+    DragMove: CustomEvent<DragEventDetail<TComponent>>;
+    DragStart: CustomEvent<DragEventDetail<TComponent>>;
+    DragStartRequested: CustomEvent<DragStartContext<TComponent>>;
+}
 
-export interface ComponentHTMLElementEventMap {
-        DragCancel: CustomEvent<DragEventDetail>;
-        DragEnd: CustomEvent<DragEventDetail>;
-        DragMove: CustomEvent<DragEventDetail>;
-        DragStart: CustomEvent<DragEventDetail>;
-        DragStartRequested: CustomEvent<DragStartContext>;
-    }
+export interface DraggableComponent<TComponent extends Component = Component> extends Component.WithEvents<DraggableEvents<TComponent>>, DraggableExtensions {
+}
 
-type DraggableConstructor = ComponentBuilderFunction<[DraggableOptions?], Component & DraggableExtensions> & {
+type DraggableHost<TComponent extends Component = Component> = TComponent & DraggableComponent<TComponent>;
+
+export type DragComponentEvent<TComponent extends Component = Component> = ComponentEvent<CustomEvent<DragEventDetail<TComponent>>, DraggableHost<TComponent>>;
+
+type DraggableConstructor = ComponentBuilderFunction<[DraggableOptions?], DraggableComponent> & {
     Input<TComponent extends Component = Component>(input: DragInputAdapter<TComponent>): DragInputAdapter<TComponent>;
 };
 
@@ -686,19 +702,19 @@ export interface DropTargetExtensions {
 
 export interface DropTarget {
     readonly accepting: State.Readonly<boolean>;
-    readonly draggable: State.Readonly<(Component & DraggableExtensions) | null>;
+    readonly draggable: State.Readonly<DraggableComponent | null>;
     readonly hovering: State.Readonly<boolean>;
     dispose(): void;
 }
 
-export interface DropTargetContext<TTarget extends Component = Component, TDraggable extends Component & DraggableExtensions = Component & DraggableExtensions> {
+export interface DropTargetContext<TTarget extends Component = Component, TDraggable extends DraggableComponent = DraggableComponent> {
     readonly draggable: TDraggable;
     readonly position: DragPoint;
     readonly source: DragInputSource;
     readonly target: TTarget & DropTargetExtensions;
 }
 
-export interface DropTargetOptions<TTarget extends Component = Component, TDraggable extends Component & DraggableExtensions = Component & DraggableExtensions> {
+export interface DropTargetOptions<TTarget extends Component = Component, TDraggable extends DraggableComponent = DraggableComponent> {
     accepts(context: DropTargetContext<TTarget, TDraggable>): boolean;
     drop(context: DropTargetContext<TTarget, TDraggable>): void;
 }
@@ -709,28 +725,28 @@ interface ResolvedDropTarget {
     drop(): void;
 }
 
-function resolveDropTarget(draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource, explicitTarget?: Component): ResolvedDropTarget | null;
+function resolveDropTarget(draggable: DraggableComponent, position: DragPoint, source: DragInputSource, explicitTarget?: Component): ResolvedDropTarget | null;
 
-function setActiveDropTarget(documentRef: Document, controller: DropTargetController | null, draggable: (Component & DraggableExtensions) | null): void;
+function setActiveDropTarget(documentRef: Document, controller: DropTargetController | null, draggable: DraggableComponent | null): void;
 
 function clearDropTargetState(documentRef: Document): void;
 
-function handleDropTargetDrop(event: Event | null, draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource, explicitTarget?: Component): boolean;
+function handleDropTargetDrop(event: Event | null, draggable: DraggableComponent, position: DragPoint, source: DragInputSource, explicitTarget?: Component): boolean;
 
 class DropTargetController implements DropTarget {
     readonly component: Component & DropTargetExtensions;
     private readonly options;
     readonly accepting: State<boolean>;
-    readonly draggable: State<(Component & DraggableExtensions) | null>;
+    readonly draggable: State<DraggableComponent | null>;
     readonly hovering: State<boolean>;
     private cleanupRegistration;
     private disposedValue;
     constructor(component: Component & DropTargetExtensions, options: DropTargetOptions);
-    accepts(draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource): boolean;
+    accepts(draggable: DraggableComponent, position: DragPoint, source: DragInputSource): boolean;
     dispose(): void;
     setAccepting(accepting: boolean): void;
-    setHovering(hovering: boolean, draggable: (Component & DraggableExtensions) | null): void;
-    toResolved(draggable: Component & DraggableExtensions, position: DragPoint, source: DragInputSource): ResolvedDropTarget;
+    setHovering(hovering: boolean, draggable: DraggableComponent | null): void;
+    toResolved(draggable: DraggableComponent, position: DragPoint, source: DragInputSource): ResolvedDropTarget;
 }
 
 type DropTargetConstructor = ComponentBuilderFunction<[DropTargetOptions], Component & DropTargetExtensions>;
@@ -1347,12 +1363,14 @@ export class StyleManipulator<OWNER extends Component> {
     private ensureActive;
 }
 
+type SortableDraggableItem<TItem extends Component> = TItem & DraggableComponent<TItem>;
+
 export interface SortableExtensions<T, TItem extends Component = Component, K extends PropertyKey = number> {
     readonly sortable: Sortable<T, TItem, K>;
 }
 
 export interface Sortable<T, TItem extends Component = Component, K extends PropertyKey = number> {
-    readonly dragging: State.Readonly<(TItem & DraggableExtensions) | null>;
+    readonly dragging: State.Readonly<SortableDraggableItem<TItem> | null>;
     readonly items: State.Readonly<readonly T[]>;
     readonly phase: State.Readonly<"idle" | "sorting">;
     readonly preview: State.Readonly<readonly T[]>;
@@ -1375,7 +1393,7 @@ export interface SortableOptions<T, TItem extends Component = Component, K exten
     readonly canTransferIn?: (context: SortableTransferContext<T, TItem, K>) => boolean;
     readonly canTransferOut?: (context: SortableTransferContext<T, TItem, K>) => boolean;
     readonly key?: (item: T, index: number) => K;
-    placeholder(component: TItem & DraggableExtensions, key: K): Component;
+    placeholder(component: SortableDraggableItem<TItem>, key: K): Component;
     render(item: State.Readonly<T>, key: K, index: number): TItem;
     readonly transfer?: SortableTransfer<T>;
 }
@@ -1384,13 +1402,13 @@ type SortableInput<T> = readonly T[] | State.Readonly<readonly T[]>;
 
 interface SortableRecord<T, TItem extends Component, K extends PropertyKey> {
     readonly cleanup: CleanupFunction;
-    readonly component: TItem & DraggableExtensions;
+    readonly component: SortableDraggableItem<TItem>;
     readonly key: K;
     readonly state: State<T>;
 }
 
 interface ActiveSortSession<T, TItem extends Component, K extends PropertyKey> {
-    readonly dragging: TItem & DraggableExtensions;
+    readonly dragging: SortableDraggableItem<TItem>;
     item: T;
     readonly key: K;
     placeholder: Component | null;
@@ -1403,7 +1421,7 @@ class SortableController<T, TItem extends Component = Component, K extends Prope
     readonly component: Component & SortableExtensions<T, TItem, K>;
     private readonly input;
     private readonly options;
-    readonly dragging: State<(TItem & DraggableExtensions) | null>;
+    readonly dragging: State<SortableDraggableItem<TItem> | null>;
     readonly items: State<readonly T[]>;
     readonly phase: State<"idle" | "sorting">;
     readonly preview: State<readonly T[]>;
