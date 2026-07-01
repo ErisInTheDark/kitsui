@@ -1969,6 +1969,137 @@ describe("Component", () => {
 		child.remove();
 	});
 
+	it("preserves externally placement-owned children when their implicit parent is removed", () => {
+		const placementOwner = mountedComponent("section");
+		const parent = mountedComponent("div");
+		const child = Component("span").text.set("child");
+		const current = State<Place | null>(placementOwner, null);
+
+		child.place(placementOwner, (Place) => {
+			const place = Place().appendTo(parent);
+			current.set(place);
+			return current;
+		});
+
+		expect(parent.element.contains(child.element), "the placed child should start under the implicit parent").toBe(true);
+
+		parent.remove();
+
+		expect(child.disposed, "the live placement owner should protect the child from implicit parent disposal").toBe(false);
+		expect(() => {
+			child.style.set({ color: "rebeccapurple" });
+		}, "placement-owned children should remain mutable after implicit parent disposal").not.toThrow();
+
+		placementOwner.remove();
+		child.remove();
+	});
+
+	it("preserves externally placement-owned children when their host is cleared", () => {
+		const placementOwner = mountedComponent("section");
+		const host = mountedComponent("div");
+		const child = Component("span").text.set("child");
+		const current = State<Place | null>(placementOwner, null);
+
+		child.place(placementOwner, (Place) => {
+			const place = Place().appendTo(host);
+			current.set(place);
+			return current;
+		});
+
+		host.clear();
+
+		expect(child.disposed, "clearing the host should not dispose externally placement-owned children").toBe(false);
+		expect(() => {
+			child.style.set({ color: "rebeccapurple" });
+		}, "placement-owned children should remain mutable after host clearing").not.toThrow();
+
+		placementOwner.remove();
+		child.remove();
+	});
+
+	it("preserves externally placement-owned children when text replaces their host contents", () => {
+		const placementOwner = mountedComponent("section");
+		const host = mountedComponent("div");
+		const child = Component("span").text.set("child");
+		const current = State<Place | null>(placementOwner, null);
+
+		child.place(placementOwner, (Place) => {
+			const place = Place().appendTo(host);
+			current.set(place);
+			return current;
+		});
+
+		host.text.set("done");
+
+		expect(host.element.textContent).toBe("done");
+		expect(child.disposed, "setting host text should not dispose externally placement-owned children").toBe(false);
+		expect(() => {
+			child.style.set({ color: "rebeccapurple" });
+		}, "placement-owned children should remain mutable after text replacement").not.toThrow();
+
+		placementOwner.remove();
+		child.remove();
+	});
+
+	it("disposes placed components after placement owner removal when they stay unmanaged", () => {
+		const placementOwner = mountedComponent("section");
+		const host = mountedComponent("div");
+		const child = Component("span").text.set("child");
+		const current = State<Place | null>(placementOwner, null);
+
+		child.place(placementOwner, (Place) => {
+			const place = Place().appendTo(host);
+			current.set(place);
+			return current;
+		});
+
+		const orphanCheckSpy = captureOrphanCheck();
+
+		try {
+			placementOwner.remove();
+
+			expect(child.disposed, "placement owner cleanup should not synchronously dispose the child").toBe(false);
+			expect(orphanCheckSpy.orphanCheck, "removing the placement owner should schedule deferred unmanaged cleanup").toBeTypeOf("function");
+			expect(() => orphanCheckSpy.orphanCheck?.(), "the deferred cleanup should not throw").not.toThrow();
+			expect(child.disposed, "still-unmanaged placed children should be disposed by deferred cleanup").toBe(true);
+			expect(orphanCheckSpy.queuedError, "deferred placement cleanup should not queue an orphan error").toBeNull();
+		} finally {
+			orphanCheckSpy.restore();
+			child.remove();
+		}
+	});
+
+	it("allows placed components to be re-appended before placement-owner orphan validation runs", () => {
+		const placementOwner = mountedComponent("section");
+		const host = mountedComponent("div");
+		const newHost = mountedComponent("article");
+		const child = Component("span").text.set("child");
+		const current = State<Place | null>(placementOwner, null);
+
+		child.place(placementOwner, (Place) => {
+			const place = Place().appendTo(host);
+			current.set(place);
+			return current;
+		});
+
+		const orphanCheckSpy = captureOrphanCheck();
+
+		try {
+			placementOwner.remove();
+			newHost.append(child);
+
+			expect(child.disposed, "same-tick reappend should keep the child alive").toBe(false);
+			expect(orphanCheckSpy.orphanCheck, "placement cleanup should still schedule deferred cleanup before the reappend clears it").toBeTypeOf("function");
+			expect(() => orphanCheckSpy.orphanCheck?.(), "reappend before deferred cleanup should keep the child alive").not.toThrow();
+			expect(child.disposed, "managed reappended children should not be disposed by deferred cleanup").toBe(false);
+			expect(orphanCheckSpy.queuedError, "managed reappended children should not queue an orphan error").toBeNull();
+		} finally {
+			orphanCheckSpy.restore();
+			child.remove();
+			newHost.remove();
+		}
+	});
+
 	it("removes the owning component when a conditional marker is removed", async () => {
 		const host = mountedComponent("div");
 		const anchor = Component("span").text.set("anchor");

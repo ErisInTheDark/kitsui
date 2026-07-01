@@ -322,18 +322,81 @@ export function registerComponentOwnerResolver (resolver: ComponentOwnerResolver
 	};
 }
 
-function disposeManagedNode (node: Node): void {
+type RetainedManagedComponentAction = "leave" | "detach";
+
+interface DisposeManagedNodeOptions {
+	ignoredOwner?: ComponentClass<HTMLElement>;
+	retainedComponentAction?: RetainedManagedComponentAction;
+}
+
+function ownerResolvesForComponent (owner: Owner | null): boolean {
+	if (!owner || owner.disposed) {
+		return false;
+	}
+
+	if (owner instanceof ComponentClass) {
+		return owner["isManaged"]();
+	}
+
+	return true;
+}
+
+function componentHasExternalManager (component: ComponentClass<HTMLElement>, ignoredOwner: Owner): boolean {
+	if (component.owner.getAll().some(owner => owner !== ignoredOwner && ownerResolvesForComponent(owner))) {
+		return true;
+	}
+
+	const hiddenManagedOwner = hiddenManagedOwners.get(component) ?? null;
+	if (hiddenManagedOwner !== ignoredOwner && ownerResolvesForComponent(hiddenManagedOwner)) {
+		return true;
+	}
+
+	let current: Node | null = component.element.parentNode;
+	while (current) {
+		const wrappedOwner = getWrappedNodeOwner(current);
+		if (wrappedOwner !== ignoredOwner && ownerResolvesForComponent(wrappedOwner)) {
+			return true;
+		}
+
+		current = current.parentNode;
+	}
+
+	for (const resolver of componentOwnerResolvers) {
+		const resolvedOwner = resolver(component);
+		if (resolvedOwner !== ignoredOwner && ownerResolvesForComponent(resolvedOwner)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function retainManagedComponent (component: ComponentClass<HTMLElement>, action: RetainedManagedComponentAction): void {
+	if (action !== "detach") {
+		return;
+	}
+
+	component.element.parentNode?.removeChild(component.element);
+	component["refreshOrphanCheck"]();
+}
+
+function disposeManagedNode (node: Node, options: DisposeManagedNodeOptions = {}): void {
 	if (node instanceof HTMLElement) {
 		const component = getLiveComponent(node);
 
 		if (component && !component.disposed) {
+			if (options.ignoredOwner && componentHasExternalManager(component, options.ignoredOwner)) {
+				retainManagedComponent(component, options.retainedComponentAction ?? "leave");
+				return;
+			}
+
 			component.remove();
 			return;
 		}
 	}
 
 	for (const childNode of Array.from(node.childNodes)) {
-		disposeManagedNode(childNode);
+		disposeManagedNode(childNode, options);
 	}
 }
 
@@ -825,7 +888,10 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		this.releaseStructuralCleanups();
 
 		for (const childNode of Array.from(this.element.childNodes)) {
-			disposeManagedNode(childNode);
+			disposeManagedNode(childNode, {
+				ignoredOwner: this,
+				retainedComponentAction: "detach",
+			});
 		}
 
 		this.element.replaceChildren();
@@ -925,22 +991,10 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		this.element.remove();
 
 		const disposeImplicitChildren = (node: Node): void => {
-			if (node instanceof HTMLElement) {
-				const component = getLiveComponent(node);
-
-				if (component && !component.disposed) {
-					if (component.owner.get()) {
-						return;
-					}
-
-					component.remove();
-					return;
-				}
-			}
-
-			for (const childNode of Array.from(node.childNodes)) {
-				disposeImplicitChildren(childNode);
-			}
+			disposeManagedNode(node, {
+				ignoredOwner: this,
+				retainedComponentAction: "leave",
+			});
 		};
 
 		for (const childNode of Array.from(this.element.childNodes)) {
@@ -989,6 +1043,29 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		});
 	}
 
+	private disposeIfUnmanagedAfterPlacementCleanup (): void {
+		if (this.disposed || this.isManaged()) {
+			this.clearOrphanCheck();
+			return;
+		}
+
+		this.clearOrphanCheck();
+		this.orphanCheckId = scheduleTimeoutPromise(() => {
+			this.orphanCheckId = null;
+
+			if (this.disposed) {
+				return;
+			}
+
+			if (this.isManaged()) {
+				this.dispatchMount();
+				return;
+			}
+
+			this.remove();
+		});
+	}
+
 	private isManaged (): boolean {
 		if (this.element.isConnected) {
 			return true;
@@ -1021,15 +1098,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	}
 
 	private ownerResolves (owner: Owner | null): boolean {
-		if (!owner || owner.disposed) {
-			return false;
-		}
-
-		if (owner instanceof ComponentClass) {
-			return owner.isManaged();
-		}
-
-		return true;
+		return ownerResolvesForComponent(owner);
 	}
 
 	private resolveNode (child: ComponentChild): Node {

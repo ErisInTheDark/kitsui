@@ -600,6 +600,7 @@ export default function placeExtension (): void {
 			}
 
 			storage.remove();
+			this["disposeIfUnmanagedAfterPlacementCleanup"]();
 		});
 
 		this["onBeforeMove"] = () => clearPlacement(this);
