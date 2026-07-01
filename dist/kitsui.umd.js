@@ -3057,16 +3057,60 @@ ${innerRules}
       componentOwnerResolvers.delete(resolver);
     };
   }
-  function disposeManagedNode(node) {
+  function ownerResolvesForComponent(owner) {
+    if (!owner || owner.disposed) {
+      return false;
+    }
+    if (owner instanceof ComponentClass) {
+      return owner["isManaged"]();
+    }
+    return true;
+  }
+  function componentHasExternalManager(component, ignoredOwner) {
+    if (component.owner.getAll().some((owner) => owner !== ignoredOwner && ownerResolvesForComponent(owner))) {
+      return true;
+    }
+    const hiddenManagedOwner = hiddenManagedOwners.get(component) ?? null;
+    if (hiddenManagedOwner !== ignoredOwner && ownerResolvesForComponent(hiddenManagedOwner)) {
+      return true;
+    }
+    let current = component.element.parentNode;
+    while (current) {
+      const wrappedOwner = getWrappedNodeOwner2(current);
+      if (wrappedOwner !== ignoredOwner && ownerResolvesForComponent(wrappedOwner)) {
+        return true;
+      }
+      current = current.parentNode;
+    }
+    for (const resolver of componentOwnerResolvers) {
+      const resolvedOwner = resolver(component);
+      if (resolvedOwner !== ignoredOwner && ownerResolvesForComponent(resolvedOwner)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function retainManagedComponent(component, action) {
+    if (action !== "detach") {
+      return;
+    }
+    component.element.parentNode?.removeChild(component.element);
+    component["refreshOrphanCheck"]();
+  }
+  function disposeManagedNode(node, options = {}) {
     if (node instanceof HTMLElement) {
       const component = getLiveComponent(node);
       if (component && !component.disposed) {
+        if (options.ignoredOwner && componentHasExternalManager(component, options.ignoredOwner)) {
+          retainManagedComponent(component, options.retainedComponentAction ?? "leave");
+          return;
+        }
         component.remove();
         return;
       }
     }
     for (const childNode of Array.from(node.childNodes)) {
-      disposeManagedNode(childNode);
+      disposeManagedNode(childNode, options);
     }
   }
   var ComponentClass = class _ComponentClass extends Owner {
@@ -3463,7 +3507,10 @@ ${innerRules}
       this.ensureActive();
       this.releaseStructuralCleanups();
       for (const childNode of Array.from(this.element.childNodes)) {
-        disposeManagedNode(childNode);
+        disposeManagedNode(childNode, {
+          ignoredOwner: this,
+          retainedComponentAction: "detach"
+        });
       }
       this.element.replaceChildren();
       return this;
@@ -3528,19 +3575,10 @@ ${innerRules}
     afterDispose() {
       this.element.remove();
       const disposeImplicitChildren = (node) => {
-        if (node instanceof HTMLElement) {
-          const component = getLiveComponent(node);
-          if (component && !component.disposed) {
-            if (component.owner.get()) {
-              return;
-            }
-            component.remove();
-            return;
-          }
-        }
-        for (const childNode of Array.from(node.childNodes)) {
-          disposeImplicitChildren(childNode);
-        }
+        disposeManagedNode(node, {
+          ignoredOwner: this,
+          retainedComponentAction: "leave"
+        });
       };
       for (const childNode of Array.from(this.element.childNodes)) {
         disposeImplicitChildren(childNode);
@@ -3578,6 +3616,24 @@ ${innerRules}
         throw new Error(orphanedComponentErrorMessage);
       });
     }
+    disposeIfUnmanagedAfterPlacementCleanup() {
+      if (this.disposed || this.isManaged()) {
+        this.clearOrphanCheck();
+        return;
+      }
+      this.clearOrphanCheck();
+      this.orphanCheckId = scheduleTimeoutPromise(() => {
+        this.orphanCheckId = null;
+        if (this.disposed) {
+          return;
+        }
+        if (this.isManaged()) {
+          this.dispatchMount();
+          return;
+        }
+        this.remove();
+      });
+    }
     isManaged() {
       if (this.element.isConnected) {
         return true;
@@ -3603,13 +3659,7 @@ ${innerRules}
       return false;
     }
     ownerResolves(owner) {
-      if (!owner || owner.disposed) {
-        return false;
-      }
-      if (owner instanceof _ComponentClass) {
-        return owner.isManaged();
-      }
-      return true;
+      return ownerResolvesForComponent(owner);
     }
     resolveNode(child) {
       if (!child && child !== "") {
@@ -4504,6 +4554,7 @@ ${innerRules}
           place2.remove();
         }
         storage.remove();
+        this["disposeIfUnmanagedAfterPlacementCleanup"]();
       });
       this["onBeforeMove"] = () => clearPlacement(this);
       const syncPlace = (place2) => {

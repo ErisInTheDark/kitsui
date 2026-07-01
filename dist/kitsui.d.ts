@@ -540,6 +540,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
     private ensureActive;
     private clearOrphanCheck;
     private refreshOrphanCheck;
+    private disposeIfUnmanagedAfterPlacementCleanup;
     private isManaged;
     private ownerResolves;
     private resolveNode;
