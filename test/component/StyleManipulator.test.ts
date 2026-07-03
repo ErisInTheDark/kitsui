@@ -115,36 +115,99 @@ describe("StyleManipulator", () => {
 		expect(component.element.style.getPropertyValue("--card-gap"), "custom properties removed from the definition should be cleared").toBe("");
 	});
 
-	it("replaces earlier property subscriptions when set is called again", async () => {
+	it("composes independent style concerns across set calls", async () => {
+		const component = mountedComponent("div");
+		const regionStyle = State<StyleAttributeDefinition | null>(component, {
+			$alignBlock: "center",
+			$alignInline: "end",
+		});
+		const scale = State<StyleValue | null>(component, "1");
+
+		component.style.set(regionStyle);
+		component.style.set({ $scale: scale });
+
+		expect(component.element.style.getPropertyValue("--align-block"), "the first style concern should keep its block alignment after another concern is added").toBe("center");
+		expect(component.element.style.getPropertyValue("--align-inline"), "the first style concern should keep its inline alignment after another concern is added").toBe("end");
+		expect(component.element.style.getPropertyValue("--scale"), "the second style concern should apply its independent property").toBe("1");
+
+		regionStyle.set({
+			$alignBlock: "stretch",
+			$alignInline: "center",
+		});
+		scale.set("1.25");
+		await flushEffects();
+
+		expect(component.element.style.getPropertyValue("--align-block"), "updates from the first style concern should remain active after another set call").toBe("stretch");
+		expect(component.element.style.getPropertyValue("--align-inline"), "custom properties from the first concern should continue to update").toBe("center");
+		expect(component.element.style.getPropertyValue("--scale"), "updates from the second style concern should remain active").toBe("1.25");
+	});
+
+	it("uses the latest set call for conflicting style properties", async () => {
 		const component = mountedComponent("div");
 		const firstColor = State<StyleValue | null>(component, "rebeccapurple");
-		const firstGap = State<StyleValue | null>(component, "12px");
 		const secondColor = State<StyleValue | null>(component, "slateblue");
 
 		component.style.set({
 			color: firstColor,
-			$cardGap: firstGap,
+			$cardGap: "12px",
 		});
-		expect(component.element.style.getPropertyValue("color"), "the first style set should apply its color value").toBe("rebeccapurple");
-		expect(component.element.style.getPropertyValue("--card-gap"), "the first style set should apply its custom property value").toBe("12px");
-
 		component.style.set({
 			color: secondColor,
 		});
-		expect(component.element.style.getPropertyValue("color"), "a later set call should replace the previous property subscriptions").toBe("slateblue");
-		expect(component.element.style.getPropertyValue("--card-gap"), "a later set call should remove properties that are no longer controlled").toBe("");
+
+		expect(component.element.style.getPropertyValue("color"), "the later style concern should win when both concerns control the same property").toBe("slateblue");
+		expect(component.element.style.getPropertyValue("--card-gap"), "unrelated properties from the earlier concern should remain applied").toBe("12px");
 
 		firstColor.set("tomato");
-		firstGap.set("16px");
 		await flushEffects();
 
-		expect(component.element.style.getPropertyValue("color"), "earlier subscriptions should no longer affect the inline style after replacement").toBe("slateblue");
-		expect(component.element.style.getPropertyValue("--card-gap"), "removed subscriptions should stay removed after their source updates").toBe("");
+		expect(component.element.style.getPropertyValue("color"), "updates from an earlier conflicting concern should not overwrite the later active concern").toBe("slateblue");
+		expect(component.element.style.getPropertyValue("--card-gap"), "unrelated earlier properties should still be retained after state updates").toBe("12px");
 
 		secondColor.set("royalblue");
 		await flushEffects();
 
-		expect(component.element.style.getPropertyValue("color"), "the replacement subscription should remain active").toBe("royalblue");
+		expect(component.element.style.getPropertyValue("color"), "the winning concern should continue to update the conflicting property").toBe("royalblue");
+	});
+
+	it("restores an earlier style concern when a later conflicting definition releases a property", async () => {
+		const component = mountedComponent("div");
+		const baseColor = State<StyleValue | null>(component, "rebeccapurple");
+		const overlayStyle = State<StyleAttributeDefinition | null>(component, {
+			borderColor: "black",
+			color: "slateblue",
+		});
+
+		component.style.set({
+			backgroundColor: "white",
+			color: baseColor,
+		});
+		component.style.set(overlayStyle);
+
+		expect(component.element.style.getPropertyValue("background-color"), "unrelated properties from the earlier concern should remain applied").toBe("white");
+		expect(component.element.style.getPropertyValue("border-color"), "the later concern should apply its own unrelated property").toBe("black");
+		expect(component.element.style.getPropertyValue("color"), "the later concern should initially win the conflicting property").toBe("slateblue");
+
+		baseColor.set("tomato");
+		await flushEffects();
+
+		expect(component.element.style.getPropertyValue("color"), "an earlier concern should stay hidden while a later concern controls the same property").toBe("slateblue");
+
+		overlayStyle.set({
+			borderColor: "purple",
+		});
+		await flushEffects();
+
+		expect(component.element.style.getPropertyValue("background-color"), "earlier unrelated properties should stay applied after the later definition changes").toBe("white");
+		expect(component.element.style.getPropertyValue("border-color"), "properties still controlled by the later definition should update").toBe("purple");
+		expect(component.element.style.getPropertyValue("color"), "the earlier concern should resume when the later definition stops controlling the property").toBe("tomato");
+
+		overlayStyle.set(null);
+		await flushEffects();
+
+		expect(component.element.style.getPropertyValue("background-color"), "earlier concern properties should remain after the later definition clears").toBe("white");
+		expect(component.element.style.getPropertyValue("border-color"), "properties with no remaining concern should be removed").toBe("");
+		expect(component.element.style.getPropertyValue("color"), "the restored earlier concern should remain active after the later definition clears").toBe("tomato");
 	});
 
 	it("expands variable shorthand in inline style values", () => {

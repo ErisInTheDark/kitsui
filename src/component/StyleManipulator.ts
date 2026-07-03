@@ -34,9 +34,16 @@ export type StyleAttributeDefinition = (
 /** Inline style definitions accepted directly or through a subscribable source. */
 export type StyleAttributeInput = StyleAttributeDefinition | State.Readonly<StyleAttributeDefinition | null>;
 
-interface DeterminerRecord {
+interface LayerPropertyRecord {
 	cleanup: CleanupFunction;
-	token: symbol;
+	value: StyleAttributeValue;
+}
+
+interface LayerRecord {
+	active: boolean;
+	properties: Map<string, LayerPropertyRecord>;
+	releaseDefinition: CleanupFunction;
+	releaseSource: CleanupFunction;
 }
 
 const noop: CleanupFunction = () => {
@@ -74,12 +81,13 @@ function serializeStyleValue (value: StyleAttributeValue): string | null {
 /**
  * Manages inline styles on an element from direct values and reactive sources.
  *
- * The manipulator owns the set of properties provided to the most recent `set` call.
- * Calling `set` again replaces earlier subscriptions and removes any properties that
- * were previously controlled by this manipulator.
+ * Each `set` call adds a style concern that composes with other concerns by property.
+ * If multiple concerns control the same property, the latest `set` call wins while it
+ * still defines that property. When a state-driven definition stops defining a
+ * property, the previous active concern for that property is restored if one exists.
  */
 export class StyleManipulator<OWNER extends Component> {
-	private determiner: DeterminerRecord | null = null;
+	private readonly layers: LayerRecord[] = [];
 
 	/**
 	 * @param owner The component owner managing this manipulator's lifecycle.
@@ -100,93 +108,114 @@ export class StyleManipulator<OWNER extends Component> {
 	set (value: StyleAttributeInput): OWNER {
 		this.ensureActive();
 		const definitionSource = toStyleAttributeSource(value);
+		const layer: LayerRecord = {
+			active: true,
+			properties: new Map(),
+			releaseDefinition: noop,
+			releaseSource: noop,
+		};
 
-		this.replaceDeterminer((applyIfCurrent) => {
-			let releaseDefinition = noop;
+		this.layers.push(layer);
 
-			const applyDefinition = (definition: StyleAttributeDefinition | null): void => {
-				releaseDefinition();
-				releaseDefinition = this.installDefinition(definition, applyIfCurrent);
-			};
+		const applyDefinition = (definition: StyleAttributeDefinition | null): void => {
+			if (!layer.active) {
+				return;
+			}
 
-			applyDefinition(definitionSource.value);
+			this.releaseLayerProperties(layer);
+			layer.releaseDefinition = this.installDefinition(layer, definition);
+		};
 
-			const releaseSource = definitionSource.subscribe(this.owner, (nextValue) => {
-				applyDefinition(nextValue);
-			});
+		applyDefinition(definitionSource.value);
 
-			return () => {
-				releaseSource();
-				releaseDefinition();
-			};
+		layer.releaseSource = definitionSource.subscribe(this.owner, (nextValue) => {
+			applyDefinition(nextValue);
+		});
+		this.owner.onCleanup(() => {
+			this.releaseLayer(layer);
 		});
 
 		return this.owner;
 	}
 
 	private installDefinition (
+		layer: LayerRecord,
 		definition: StyleAttributeDefinition | null | undefined,
-		applyIfCurrent: (propertyName: string, value: StyleAttributeValue) => void,
 	): CleanupFunction {
 		if (!definition) {
 			return noop;
 		}
 
 		const cleanups: CleanupFunction[] = [];
-		const activeProperties = new Set<string>();
 
 		for (const [propertyName, input] of Object.entries(definition)) {
-			activeProperties.add(propertyName);
 			const valueSource = toStyleValueSource(input);
-			applyIfCurrent(propertyName, valueSource.value);
+			const property: LayerPropertyRecord = {
+				cleanup: noop,
+				value: valueSource.value,
+			};
 
-			cleanups.push(valueSource.subscribe(this.owner, (nextValue) => {
-				applyIfCurrent(propertyName, nextValue);
-			}));
+			layer.properties.set(propertyName, property);
+			this.writeResolvedProperty(propertyName);
+
+			property.cleanup = valueSource.subscribe(this.owner, (nextValue) => {
+				if (!layer.active || layer.properties.get(propertyName) !== property) {
+					return;
+				}
+
+				property.value = nextValue;
+				this.writeResolvedProperty(propertyName);
+			});
+			cleanups.push(property.cleanup);
 		}
 
 		return () => {
 			for (const cleanup of cleanups) {
 				cleanup();
 			}
-
-			for (const propertyName of activeProperties) {
-				this.writeProperty(propertyName, null);
-			}
 		};
 	}
 
-	private replaceDeterminer (createCleanup: (applyIfCurrent: (propertyName: string, value: StyleAttributeValue) => void) => CleanupFunction): void {
-		this.determiner?.cleanup();
+	private releaseLayerProperties (layer: LayerRecord): void {
+		layer.releaseDefinition();
+		layer.releaseDefinition = noop;
 
-		const token = Symbol("style");
-		let active = true;
-		let cleanup = noop;
+		const propertyNames = new Set(layer.properties.keys());
+		layer.properties.clear();
 
-		const applyIfCurrent = (propertyName: string, value: StyleAttributeValue): void => {
-			if (this.determiner?.token !== token) {
-				return;
+		for (const propertyName of propertyNames) {
+			this.writeResolvedProperty(propertyName);
+		}
+	}
+
+	private releaseLayer (layer: LayerRecord): void {
+		if (!layer.active) {
+			return;
+		}
+
+		layer.active = false;
+		layer.releaseSource();
+		layer.releaseSource = noop;
+		this.releaseLayerProperties(layer);
+	}
+
+	private writeResolvedProperty (propertyName: string): void {
+		for (let index = this.layers.length - 1; index >= 0; index--) {
+			const layer = this.layers[index];
+			if (!layer.active) {
+				continue;
 			}
 
-			this.writeProperty(propertyName, value);
-		};
-
-		const trackedCleanup = () => {
-			if (!active) {
-				return;
+			const property = layer.properties.get(propertyName);
+			if (!property) {
+				continue;
 			}
 
-			active = false;
+			this.writeProperty(propertyName, property.value);
+			return;
+		}
 
-			if (this.determiner?.token === token) {
-				this.determiner = null;
-			}
-
-			cleanup();
-		};
-
-		this.determiner = { cleanup: trackedCleanup, token };
-		cleanup = createCleanup(applyIfCurrent);
+		this.writeProperty(propertyName, null);
 	}
 
 	private writeProperty (propertyName: string, value: StyleAttributeValue): void {
