@@ -34,11 +34,13 @@ export type StyleAttributeDefinition = (
 /** Inline style definitions accepted directly or through a subscribable source. */
 export type StyleAttributeInput = StyleAttributeDefinition | State.Readonly<StyleAttributeDefinition | null>;
 
+/** @hidden */
 interface LayerPropertyRecord {
 	cleanup: CleanupFunction;
 	value: StyleAttributeValue;
 }
 
+/** @hidden */
 interface LayerRecord {
 	active: boolean;
 	properties: Map<string, LayerPropertyRecord>;
