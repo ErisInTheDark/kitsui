@@ -2745,7 +2745,7 @@ ${innerRules}
     constructor(owner, element) {
       this.owner = owner;
       this.element = element;
-      __publicField(this, "determiner", null);
+      __publicField(this, "layers", []);
     }
     /**
      * Sets inline styles from a direct definition or a subscribable definition source.
@@ -2757,69 +2757,89 @@ ${innerRules}
     set(value) {
       this.ensureActive();
       const definitionSource = toStyleAttributeSource(value);
-      this.replaceDeterminer((applyIfCurrent) => {
-        let releaseDefinition = noop7;
-        const applyDefinition = (definition) => {
-          releaseDefinition();
-          releaseDefinition = this.installDefinition(definition, applyIfCurrent);
-        };
-        applyDefinition(definitionSource.value);
-        const releaseSource = definitionSource.subscribe(this.owner, (nextValue) => {
-          applyDefinition(nextValue);
-        });
-        return () => {
-          releaseSource();
-          releaseDefinition();
-        };
+      const layer = {
+        active: true,
+        properties: /* @__PURE__ */ new Map(),
+        releaseDefinition: noop7,
+        releaseSource: noop7
+      };
+      this.layers.push(layer);
+      const applyDefinition = (definition) => {
+        if (!layer.active) {
+          return;
+        }
+        this.releaseLayerProperties(layer);
+        layer.releaseDefinition = this.installDefinition(layer, definition);
+      };
+      applyDefinition(definitionSource.value);
+      layer.releaseSource = definitionSource.subscribe(this.owner, (nextValue) => {
+        applyDefinition(nextValue);
+      });
+      this.owner.onCleanup(() => {
+        this.releaseLayer(layer);
       });
       return this.owner;
     }
-    installDefinition(definition, applyIfCurrent) {
+    installDefinition(layer, definition) {
       if (!definition) {
         return noop7;
       }
       const cleanups = [];
-      const activeProperties = /* @__PURE__ */ new Set();
       for (const [propertyName, input] of Object.entries(definition)) {
-        activeProperties.add(propertyName);
         const valueSource = toStyleValueSource(input);
-        applyIfCurrent(propertyName, valueSource.value);
-        cleanups.push(valueSource.subscribe(this.owner, (nextValue) => {
-          applyIfCurrent(propertyName, nextValue);
-        }));
+        const property = {
+          cleanup: noop7,
+          value: valueSource.value
+        };
+        layer.properties.set(propertyName, property);
+        this.writeResolvedProperty(propertyName);
+        property.cleanup = valueSource.subscribe(this.owner, (nextValue) => {
+          if (!layer.active || layer.properties.get(propertyName) !== property) {
+            return;
+          }
+          property.value = nextValue;
+          this.writeResolvedProperty(propertyName);
+        });
+        cleanups.push(property.cleanup);
       }
       return () => {
         for (const cleanup of cleanups) {
           cleanup();
         }
-        for (const propertyName of activeProperties) {
-          this.writeProperty(propertyName, null);
-        }
       };
     }
-    replaceDeterminer(createCleanup) {
-      this.determiner?.cleanup();
-      const token = /* @__PURE__ */ Symbol("style");
-      let active = true;
-      let cleanup = noop7;
-      const applyIfCurrent = (propertyName, value) => {
-        if (this.determiner?.token !== token) {
-          return;
+    releaseLayerProperties(layer) {
+      layer.releaseDefinition();
+      layer.releaseDefinition = noop7;
+      const propertyNames = new Set(layer.properties.keys());
+      layer.properties.clear();
+      for (const propertyName of propertyNames) {
+        this.writeResolvedProperty(propertyName);
+      }
+    }
+    releaseLayer(layer) {
+      if (!layer.active) {
+        return;
+      }
+      layer.active = false;
+      layer.releaseSource();
+      layer.releaseSource = noop7;
+      this.releaseLayerProperties(layer);
+    }
+    writeResolvedProperty(propertyName) {
+      for (let index = this.layers.length - 1; index >= 0; index--) {
+        const layer = this.layers[index];
+        if (!layer.active) {
+          continue;
         }
-        this.writeProperty(propertyName, value);
-      };
-      const trackedCleanup = () => {
-        if (!active) {
-          return;
+        const property = layer.properties.get(propertyName);
+        if (!property) {
+          continue;
         }
-        active = false;
-        if (this.determiner?.token === token) {
-          this.determiner = null;
-        }
-        cleanup();
-      };
-      this.determiner = { cleanup: trackedCleanup, token };
-      cleanup = createCleanup(applyIfCurrent);
+        this.writeProperty(propertyName, property.value);
+        return;
+      }
+      this.writeProperty(propertyName, null);
     }
     writeProperty(propertyName, value) {
       const cssPropertyName = toCssPropertyName(propertyName);

@@ -1344,7 +1344,7 @@ export type StyleAttributeInput = StyleAttributeDefinition | State.Readonly<Styl
 export class StyleManipulator<OWNER extends Component> {
     private readonly owner;
     private readonly element;
-    private determiner;
+    private readonly layers;
     /**
      * @param owner The component owner managing this manipulator's lifecycle.
      * @param element The element whose inline styles are controlled.
@@ -1359,7 +1359,9 @@ export class StyleManipulator<OWNER extends Component> {
      */
     set(value: StyleAttributeInput): OWNER;
     private installDefinition;
-    private replaceDeterminer;
+    private releaseLayerProperties;
+    private releaseLayer;
+    private writeResolvedProperty;
     private writeProperty;
     private ensureActive;
 }
