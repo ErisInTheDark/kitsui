@@ -59,6 +59,7 @@ var __kitsui_factory__ = (() => {
     darkScheme: () => darkScheme,
     elements: () => elements,
     lightScheme: () => lightScheme,
+    mediaQuery: () => mediaQuery,
     pseudoAfter: () => pseudoAfter,
     pseudoBefore: () => pseudoBefore,
     whenActive: () => whenActive,
@@ -80,8 +81,7 @@ var __kitsui_factory__ = (() => {
     whenNotFirst: () => whenNotFirst,
     whenNotLast: () => whenNotLast,
     whenOdd: () => whenOdd,
-    whenOpen: () => whenOpen,
-    whenStuck: () => whenStuck
+    whenOpen: () => whenOpen
   });
 
   // src/utility/timeoutPromise.ts
@@ -2281,6 +2281,7 @@ ${innerRules}
       },
       { prototype: StyleClass.prototype }
     );
+    Style2.Container = createStyleContainerFactory({});
     function after(...classes) {
       return {
         Class(className, definition) {
@@ -2399,6 +2400,101 @@ ${innerRules}
     query2 = query2.startsWith("@") ? query2.slice(1) : query2;
     return { [`{@${query2}} {${selector}}`]: definition };
   }
+  function assertQueryExpression(expression) {
+    if (expression.length < 2 || !expression.startsWith("(") || !expression.endsWith(")")) {
+      throw new Error(`Query expression '${expression}' must start with '(' and end with ')'.`);
+    }
+  }
+  function spreadableContainerQuery(containerName, query2, definition) {
+    return spreadableQuery(`@container ${containerName} ${query2}`, definition);
+  }
+  function createStyleContainerFactory(capabilities) {
+    const factory = {};
+    const descriptors = {
+      inlineSize: {
+        get: () => createStyleContainerFactory({ ...capabilities, size: "inline-size" })
+      },
+      scrollState: {
+        get: () => createStyleContainerFactory({ ...capabilities, scrollState: true })
+      },
+      size: {
+        get: () => createStyleContainerFactory({ ...capabilities, size: "size" })
+      },
+      style: {
+        get: () => createStyleContainerFactory({ ...capabilities, style: true })
+      }
+    };
+    if (capabilities.size || capabilities.style === true || capabilities.scrollState === true) {
+      descriptors.name = {
+        value: (name) => createStyleContainer(name, capabilities)
+      };
+    }
+    Object.defineProperties(factory, descriptors);
+    return Object.freeze(factory);
+  }
+  function createStyleContainer(name, options) {
+    if (!name.trim() || name !== name.trim() || ["and", "none", "not", "or"].includes(name.toLowerCase())) {
+      throw new Error(`Container name '${name}' must be a non-empty CSS custom identifier and cannot be 'none', 'and', 'not', or 'or'.`);
+    }
+    if (options.size !== void 0 && options.size !== "inline-size" && options.size !== "size") {
+      throw new Error(`Container '${name}' has unsupported size query capability '${options.size}'.`);
+    }
+    if (!options.size && options.style !== true && options.scrollState !== true) {
+      throw new Error(`Container '${name}' must support at least one query capability.`);
+    }
+    const containerTypes = [options.size, options.scrollState === true ? "scroll-state" : void 0].filter((value) => value !== void 0);
+    const containerDefinition = { containerName: name };
+    if (containerTypes.length > 0) {
+      containerDefinition.containerType = containerTypes.join(" ");
+    }
+    const methodDefinitions = {};
+    if (options.size) {
+      methodDefinitions.query = {
+        value: (expression, definition) => {
+          assertQueryExpression(expression);
+          return spreadableContainerQuery(name, expression, definition);
+        }
+      };
+    }
+    if (options.style === true) {
+      methodDefinitions.style = {
+        value: (expression, definition) => {
+          assertQueryExpression(expression);
+          return spreadableContainerQuery(name, `style(${expression})`, definition);
+        }
+      };
+      methodDefinitions.styleProperty = {
+        value: (propertyName, value, definition) => {
+          return spreadableContainerQuery(name, `style(${toCssPropertyName(propertyName)}: ${expandVariableAccessShorthand(value)})`, definition);
+        }
+      };
+    }
+    if (options.scrollState === true) {
+      methodDefinitions.scrollState = {
+        value: (expression, definition) => {
+          assertQueryExpression(expression);
+          return spreadableContainerQuery(name, `scroll-state(${expression})`, definition);
+        }
+      };
+      for (const feature of ["scrolled", "scrollable", "snapped"]) {
+        methodDefinitions[feature] = {
+          value: (value, definition) => {
+            return spreadableContainerQuery(name, `scroll-state(${feature}: ${value})`, definition);
+          }
+        };
+      }
+      methodDefinitions.stuck = {
+        value: (sideOrDefinition, definition) => {
+          if (typeof sideOrDefinition === "string") {
+            return spreadableContainerQuery(name, `scroll-state(stuck: ${sideOrDefinition})`, definition);
+          }
+          return spreadableContainerQuery(name, "scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom))", sideOrDefinition);
+        }
+      };
+    }
+    Object.defineProperties(containerDefinition, methodDefinitions);
+    return Object.freeze(containerDefinition);
+  }
   function elements(tagName, definition) {
     return spreadableSelector(`& ${tagName}`, definition);
   }
@@ -2434,17 +2530,15 @@ ${innerRules}
   }
   var pseudoBefore = pseudo("before");
   var pseudoAfter = pseudo("after");
+  function mediaQuery(expression, definition) {
+    assertQueryExpression(expression);
+    return spreadableQuery(`@media ${expression}`, definition);
+  }
   function lightScheme(definition) {
-    return spreadableQuery(`@media (prefers-color-scheme: light)`, definition);
+    return mediaQuery("(prefers-color-scheme: light)", definition);
   }
   function darkScheme(definition) {
-    return spreadableQuery(`@media (prefers-color-scheme: dark)`, definition);
-  }
-  function whenStuck(container, definition) {
-    if (!container.definition.containerName) {
-      throw new Error(`Class '${container.className}' cannot be used in whenStuck because it does not have a container name defined.`);
-    }
-    return spreadableQuery(`@container ${container.definition.containerName} scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom))`, definition);
+    return mediaQuery("(prefers-color-scheme: dark)", definition);
   }
   function whenOpen(definition) {
     return spreadableSelector(":open", definition);

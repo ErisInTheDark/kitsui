@@ -1200,6 +1200,8 @@ export class OwnerManipulator<HOST extends Owner & {
 
 export type StyleValue = string | number;
 
+export type QueryExpression = `(${string})`;
+
 export interface AnimationMarker extends Marker {
     readonly name: string;
 }
@@ -1215,6 +1217,84 @@ export type StyleDefinition = ({
 } & {
     animationName?: readonly AnimationMarker[] | AnimationMarker | "none" | null | undefined;
 });
+
+type StyleContainerSize = "inline-size" | "size";
+
+interface StyleContainerCapabilities {
+    size?: StyleContainerSize;
+    style?: true;
+    scrollState?: true;
+}
+
+type StyleContainerOptions = ({
+    size: StyleContainerSize;
+    style?: true;
+    scrollState?: true;
+} | {
+    size?: never;
+    style: true;
+    scrollState?: true;
+} | {
+    size?: never;
+    style?: true;
+    scrollState: true;
+});
+
+type StyleContainerFactory<CAPABILITIES extends StyleContainerCapabilities = object> = ({
+    readonly inlineSize: StyleContainerFactory<Omit<CAPABILITIES, "size"> & {
+        size: "inline-size";
+    }>;
+    readonly scrollState: StyleContainerFactory<Omit<CAPABILITIES, "scrollState"> & {
+        scrollState: true;
+    }>;
+    readonly size: StyleContainerFactory<Omit<CAPABILITIES, "size"> & {
+        size: "size";
+    }>;
+    readonly style: StyleContainerFactory<Omit<CAPABILITIES, "style"> & {
+        style: true;
+    }>;
+} & (CAPABILITIES extends StyleContainerOptions ? {
+    name(name: string): StyleContainer<CAPABILITIES>;
+} : object));
+
+type StyleContainerStuckSide = "block-end" | "block-start" | "bottom" | "inline-end" | "inline-start" | "left" | "none" | "right" | "top";
+
+type StyleContainerSnappedAxis = "block" | "both" | "inline" | "none" | "x" | "y";
+
+type StyleContainerScrollDirection = Exclude<StyleContainerStuckSide, "none"> | "block" | "inline" | "none" | "x" | "y";
+
+type StyleContainerPropertyName = `$${string}` | `--${string}`;
+
+type StyleContainerDefinition = {
+    readonly containerName: string;
+    readonly containerType?: string;
+};
+
+interface StyleContainerSizeQueries {
+    query(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+}
+
+interface StyleContainerStyleQueries {
+    style(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+    styleProperty(propertyName: StyleContainerPropertyName, value: StyleValue, definition: StyleDefinition): StyleDefinition;
+}
+
+interface StyleContainerScrollStateQueries {
+    scrollState(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+    scrolled(direction: StyleContainerScrollDirection, definition: StyleDefinition): StyleDefinition;
+    scrollable(direction: StyleContainerScrollDirection, definition: StyleDefinition): StyleDefinition;
+    snapped(axis: StyleContainerSnappedAxis, definition: StyleDefinition): StyleDefinition;
+    stuck(definition: StyleDefinition): StyleDefinition;
+    stuck(side: StyleContainerStuckSide, definition: StyleDefinition): StyleDefinition;
+}
+
+type StyleContainer<OPTIONS extends StyleContainerOptions> = (StyleContainerDefinition & (OPTIONS extends {
+    size: StyleContainerSize;
+} ? StyleContainerSizeQueries : object) & (OPTIONS extends {
+    style: true;
+} ? StyleContainerStyleQueries : object) & (OPTIONS extends {
+    scrollState: true;
+} ? StyleContainerScrollStateQueries : object));
 
 type StyleClassConstructor = {
     (className: string, definition: StyleDefinition): Style.Class;
@@ -1240,6 +1320,8 @@ export function Style(definition: StyleDefinition): StyleDefinition;
 export namespace Style {
     /** @group Style.Class */
     type Class = StyleClass;
+    /** A spreadable named CSS query container with methods gated by its configured capabilities. */
+    type Container<CAPABILITIES extends StyleContainerOptions = StyleContainerOptions> = StyleContainer<CAPABILITIES>;
     /**
      * Creates or retrieves a CSS stylesheet entry with the given class name and style definition.
      * Can be called with or without the `new` keyword.
@@ -1261,6 +1343,26 @@ export namespace Style {
     const Class: StyleClassConstructor & {
         prototype: StyleClass;
     };
+    /**
+     * Immutable factory for named CSS query containers with capability-gated query helpers.
+     * Select one or more capabilities, then finish with `.name(...)`. The `.size` and
+     * `.inlineSize` getters replace one another, so the last selected size capability wins.
+     *
+     * The finalized object can be spread into a `StyleDefinition`; only `containerName` and
+     * the configured CSS `containerType` value are enumerable.
+     *
+     * @example
+     * const cardContainer = Style.Container
+     *   .inlineSize
+     *   .style
+     *   .scrollState
+     *   .name("card");
+     * const containerStyle = Style.Class("card-container", { ...cardContainer });
+     * const cardStyle = Style.Class("card", {
+     *   ...cardContainer.query("(inline-size > 30rem)", { display: "grid" }),
+     * });
+     */
+    const Container: StyleContainerFactory;
     /**
      * Creates styles that will be rendered after the given dependency styles.
      * Useful for ensuring CSS specificity or cascading order when styles depend on others.
@@ -1341,11 +1443,11 @@ export const pseudoBefore: (definition: StyleDefinition) => StyleDefinition;
 
 export const pseudoAfter: (definition: StyleDefinition) => StyleDefinition;
 
+export function mediaQuery(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+
 export function lightScheme(definition: StyleDefinition): StyleDefinition;
 
 export function darkScheme(definition: StyleDefinition): StyleDefinition;
-
-export function whenStuck(container: Style.Class, definition: StyleDefinition): StyleDefinition;
 
 export function whenOpen(definition: StyleDefinition): StyleDefinition;
 
