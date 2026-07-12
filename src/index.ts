@@ -97,7 +97,7 @@ export { Marker } from "./component/Marker";
 export type { ExtendableMarkerClass, MarkerEventMap, MarkerExtensions, MarkerStaticExtensions } from "./component/Marker";
 export { OwnerManipulator } from "./component/OwnerManipulator";
 export {
-    Style, StyleAnimation, StyleFontFace, StyleImport, StyleReset, StyleRoot, StyleSelector, darkScheme, elements, lightScheme,
+    Style, StyleAnimation, StyleFontFace, StyleImport, StyleReset, StyleRoot, StyleSelector, darkScheme, elements, lightScheme, mediaQuery,
     pseudoAfter, pseudoBefore,
     whenActive, whenActiveSelf,
     whenClosed,
@@ -108,10 +108,9 @@ export {
     whenLast, whenMiddle,
     whenNotFirst, whenNotLast,
     whenOdd,
-    whenOpen,
-    whenStuck
+    whenOpen
 } from "./component/Style";
-export type { AnimationMarker, FontFaceDefinition, KeyframesDefinition, StyleDefinition, StyleValue } from "./component/Style";
+export type { AnimationMarker, FontFaceDefinition, KeyframesDefinition, QueryExpression, StyleDefinition, StyleValue } from "./component/Style";
 export { StyleManipulator } from "./component/StyleManipulator";
 export type { StyleAttributeDefinition, StyleAttributeInput, StyleAttributeValue, StyleAttributeValueInput } from "./component/StyleManipulator";
 export { Sortable } from "./component/Sortable";

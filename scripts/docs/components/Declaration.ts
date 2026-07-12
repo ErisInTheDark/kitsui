@@ -1,5 +1,5 @@
 import { JSONOutput, ReflectionKind } from "typedoc";
-import { Component, pseudoBefore, Style, whenClosed, whenFirst, whenHover, whenNotFirst, whenStuck } from "../../../src";
+import { Component, pseudoBefore, Style, whenClosed, whenFirst, whenHover, whenNotFirst } from "../../../src";
 import { monoFont } from "../styles";
 import Comment from "./Comment";
 import Flags from "./Flags";
@@ -152,7 +152,10 @@ const declarationRelationshipSeparatorStyle = Style.Class("docs-declaration-rela
 	color: "$syntaxPunctuation",
 });
 
+const declarationHeaderContainer = Style.Container.scrollState.name("declaration-header");
+
 const declarationHeaderStyle = Style.Class("docs-declaration-header", {
+	...declarationHeaderContainer,
 	alignItems: "center",
 	display: "flex",
 	gap: "8px",
@@ -163,8 +166,6 @@ const declarationHeaderStyle = Style.Class("docs-declaration-header", {
 	position: "sticky",
 	top: "${docsDeclarationStickyTop: 0px}",
 	zIndex: "${docsDeclarationStickyZ: 1}",
-	containerName: "declaration-header",
-	containerType: "scroll-state",
 	background: "linear-gradient(to bottom, $bgPage 60%, transparent)",
 	fontStyle: "${declarationTitleFontStyle: none}"
 });
@@ -175,7 +176,7 @@ const declarationHeaderOverlayStyle = Style.Class("docs-declaration-header-overl
 	zIndex: -1,
 	opacity: 0,
 	transition: "opacity 0.1s",
-	...whenStuck(declarationHeaderStyle, {
+	...declarationHeaderContainer.stuck({
 		background: "$bgPage",
 		borderBottom: "1px solid $borderSubtle",
 		opacity: 1,

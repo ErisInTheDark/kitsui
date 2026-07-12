@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Marker } from "../../src/component/Marker";
-import { Style, StyleFontFace, StyleImport, StyleReset, darkScheme, elements, lightScheme, pseudoAfter, pseudoBefore, whenAfterSelf, whenDisabled, whenFirst, whenHover, whenStuck } from "../../src/component/Style";
+import { Style, StyleFontFace, StyleImport, StyleReset, darkScheme, elements, lightScheme, mediaQuery, pseudoAfter, pseudoBefore, whenAfterSelf, whenDisabled, whenFirst, whenHover, type QueryExpression } from "../../src/component/Style";
 import placeExtension from "../../src/component/extensions/placeExtension";
 
 placeExtension();
@@ -364,6 +364,146 @@ describe("Style", () => {
 		expect(styleText).toContain(".style-dark-scheme { background: #1a1a1a }");
 	});
 
+	it("renders arbitrary compound media feature expressions", () => {
+		Style.Class("style-media-query", {
+			padding: "24px",
+			...mediaQuery("(width <= 60rem) and (hover: hover)", { padding: "12px" }),
+		});
+
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(styleText).toContain(".style-media-query { padding: 24px }");
+		expect(styleText).toContain("@media (width <= 60rem) and (hover: hover) {");
+		expect(styleText).toMatch(/@media \(width <= 60rem\) and \(hover: hover\) \{\n\.style-media-query \{ padding: 12px \}\n\}/);
+	});
+
+	it("rejects media expressions without enclosing parentheses", () => {
+		expect(() => mediaQuery("width <= 60rem" as QueryExpression, { color: "red" })).toThrow(/must start with '\(' and end with '\)'/i);
+	});
+
+	it("creates spreadable containers without exposing their methods as CSS properties", () => {
+		const container = Style.Container.inlineSize.style.scrollState.name("cardHost");
+
+		expect(Object.keys(container)).toEqual(["containerName", "containerType"]);
+		expect(Object.isFrozen(container)).toBe(true);
+		expect(typeof container.query).toBe("function");
+		expect(typeof container.style).toBe("function");
+		expect(typeof container.scrollState).toBe("function");
+
+		Style.Class("style-container-owner", { ...container });
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(styleText).toContain(".style-container-owner { container-name: cardHost; container-type: inline-size scroll-state }");
+		expect(styleText).not.toContain("style-property:");
+		expect(styleText).not.toContain("scroll-state:");
+	});
+
+	it("serializes every container capability combination", () => {
+		expect({ ...Style.Container.size.name("sizeOnlyHost") }).toEqual({
+			containerName: "sizeOnlyHost",
+			containerType: "size",
+		});
+		expect({ ...Style.Container.style.name("styleOnlyHost") }).toEqual({
+			containerName: "styleOnlyHost",
+		});
+		expect({ ...Style.Container.scrollState.name("scrollOnlyHost") }).toEqual({
+			containerName: "scrollOnlyHost",
+			containerType: "scroll-state",
+		});
+		expect({ ...Style.Container.scrollState.style.inlineSize.name("combinedHost") }).toEqual({
+			containerName: "combinedHost",
+			containerType: "inline-size scroll-state",
+		});
+	});
+
+	it("keeps container factory branches immutable and lets the last size getter win", () => {
+		const sizedFactory = Style.Container.size;
+		const sizeContainer = sizedFactory.name("factorySizeHost");
+		const inlineSizeContainer = sizedFactory.inlineSize.name("factoryInlineSizeHost");
+
+		expect(Object.isFrozen(Style.Container)).toBe(true);
+		expect(Object.isFrozen(sizedFactory)).toBe(true);
+		expect({ ...sizeContainer }).toEqual({
+			containerName: "factorySizeHost",
+			containerType: "size",
+		});
+		expect({ ...inlineSizeContainer }).toEqual({
+			containerName: "factoryInlineSizeHost",
+			containerType: "inline-size",
+		});
+		expect({ ...Style.Container.inlineSize.size.name("factoryLastSizeHost") }).toEqual({
+			containerName: "factoryLastSizeHost",
+			containerType: "size",
+		});
+		expect((Style.Container as unknown as { name?: unknown }).name).toBeUndefined();
+		expect((inlineSizeContainer as unknown as { inlineSize?: unknown; name?: unknown; size?: unknown }).name).toBeUndefined();
+		expect((inlineSizeContainer as unknown as { inlineSize?: unknown; name?: unknown; size?: unknown }).size).toBeUndefined();
+		expect((inlineSizeContainer as unknown as { inlineSize?: unknown; name?: unknown; size?: unknown }).inlineSize).toBeUndefined();
+	});
+
+	it("serializes raw size, style, and scroll-state container expressions", () => {
+		const container = Style.Container.size.style.scrollState.name("rawHost");
+
+		Style.Class("style-container-raw", {
+			...container.query("(30rem < width < 60rem)", { width: "50%" }),
+			...container.style("(--density: compact) and (--tone: dark)", { gap: "4px" }),
+			...container.scrollState("(stuck: top) and (scrollable: bottom)", { opacity: 0.8 }),
+		});
+
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(styleText).toContain("@container rawHost (30rem < width < 60rem) {");
+		expect(styleText).toContain("@container rawHost style((--density: compact) and (--tone: dark)) {");
+		expect(styleText).toContain("@container rawHost scroll-state((stuck: top) and (scrollable: bottom)) {");
+	});
+
+	it("serializes style-property and scroll-state container shortcuts", () => {
+		const container = Style.Container.style.scrollState.name("shortcutHost");
+
+		Style.Class("style-container-shortcuts", {
+			...container.styleProperty("$density", "$compactDensity", { gap: "4px" }),
+			...container.stuck({ boxShadow: "0 1px black" }),
+			...container.stuck("block-start", { top: 0 }),
+			...container.snapped("inline", { outlineWidth: "1px" }),
+			...container.scrollable("block-end", { overflowY: "auto" }),
+			...container.scrolled("top", { opacity: 0.8 }),
+		});
+
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(styleText).toContain("@container shortcutHost style(--density: var(--compact-density)) {");
+		expect(styleText).toContain("@container shortcutHost scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom)) {");
+		expect(styleText).toContain("@container shortcutHost scroll-state(stuck: block-start) {");
+		expect(styleText).toContain("@container shortcutHost scroll-state(snapped: inline) {");
+		expect(styleText).toContain("@container shortcutHost scroll-state(scrollable: block-end) {");
+		expect(styleText).toContain("@container shortcutHost scroll-state(scrolled: top) {");
+	});
+
+	it("composes mixed container conditions by nesting direct query spreads", () => {
+		const container = Style.Container.inlineSize.style.scrollState.name("nestedHost");
+
+		Style.Class("style-container-nested", {
+			...container.query("(inline-size > 30rem)", {
+				...container.style("(--density: compact)", {
+					...container.stuck("top", { display: "grid" }),
+				}),
+			}),
+		});
+
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(styleText).toMatch(/@container nestedHost \(inline-size > 30rem\) \{\n@container nestedHost style\(\(--density: compact\)\) \{\n@container nestedHost scroll-state\(stuck: top\) \{\n\.style-container-nested \{ display: grid \}\n\}\n\}\n\}/);
+	});
+
+	it("rejects invalid container names, capabilities, and raw expressions", () => {
+		expect(() => Style.Container.style.name("none")).toThrow(/custom identifier/i);
+
+		const container = Style.Container.inlineSize.style.scrollState.name("expressionHost");
+		expect(() => container.query("inline-size > 30rem" as QueryExpression, {})).toThrow(/must start with '\(' and end with '\)'/i);
+		expect(() => container.style("--density: compact" as QueryExpression, {})).toThrow(/must start with '\(' and end with '\)'/i);
+		expect(() => container.scrollState("stuck: top" as QueryExpression, {})).toThrow(/must start with '\(' and end with '\)'/i);
+	});
+
 	/** Verifies at-rules support nested element and state selectors. */
 	it("renders at-rules with nested element and state selectors", () => {
 		Style.Class("style-media-nested", {
@@ -411,63 +551,6 @@ describe("Style", () => {
 		expect(styleText).toContain(".style-multi-at-rule { color: gray }");
 		expect(styleText).toContain("@media (prefers-color-scheme: light) {");
 		expect(styleText).toContain("@media (prefers-color-scheme: dark) {");
-	});
-
-	/** Verifies whenStuck emits the full scroll-state container query wrapper. */
-	it("renders whenStuck as a scroll-state @container wrapper", () => {
-		const container = Style.Class("style-when-stuck-container", {
-			containerName: "stuckHost",
-			containerType: "scroll-state",
-		});
-
-		Style.Class("style-when-stuck", {
-			borderBottom: "1px solid transparent",
-			...whenStuck(container, { borderBottomColor: "#444" }),
-		});
-
-		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
-
-		expect(styleText).toContain(".style-when-stuck { border-bottom: 1px solid transparent }");
-		expect(styleText).toContain("@container stuckHost scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom)) {");
-		expect(styleText).toContain(".style-when-stuck { border-bottom-color: #444 }");
-		expect(styleText).toMatch(/@container stuckHost scroll-state\(\(stuck: left\) or \(stuck: right\) or \(stuck: top\) or \(stuck: bottom\)\) \{\n\.style-when-stuck \{ border-bottom-color: #444 \}\n\}/);
-	});
-
-	/** Verifies whenStuck supports nested selectors within the container query. */
-	it("renders whenStuck with nested element and state selectors", () => {
-		const container = Style.Class("style-when-stuck-nested-container", {
-			containerName: "stuckNestedHost",
-			containerType: "scroll-state",
-		});
-
-		Style.Class("style-when-stuck-nested", {
-			...whenStuck(container, {
-				color: "#ddd",
-				...elements("h1", { color: "#fff" }),
-				...whenHover({ color: "#fff" }),
-			}),
-		});
-
-		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
-
-		expect(styleText).toContain("@container stuckNestedHost scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom)) {");
-		expect(styleText).toContain(".style-when-stuck-nested { color: #ddd }");
-		expect(styleText).toContain(".style-when-stuck-nested h1 { color: #fff }");
-		expect(styleText).toContain(".style-when-stuck-nested:hover { color: #fff }");
-		expect(styleText).toMatch(/@container stuckNestedHost scroll-state\(\(stuck: left\) or \(stuck: right\) or \(stuck: top\) or \(stuck: bottom\)\) \{\n\.style-when-stuck-nested \{ color: #ddd \}\n\.style-when-stuck-nested h1 \{ color: #fff \}\n\.style-when-stuck-nested:hover \{ color: #fff \}\n\}/);
-	});
-
-	/** Verifies whenStuck throws when the container class has no containerName. */
-	it("throws when whenStuck container class is missing containerName", () => {
-		const container = Style.Class("style-when-stuck-missing-container-name", {
-			display: "block",
-		});
-
-		expect(() => {
-			Style.Class("style-when-stuck-missing-container-name-consumer", {
-				...whenStuck(container, { borderBottomColor: "#444" }),
-			});
-		}).toThrow(/does not have a container name defined/i);
 	});
 
 	/** Verifies whenAfterSelf creates the correct sibling selector. */

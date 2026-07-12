@@ -9,6 +9,9 @@ import { expandVariableAccessShorthand, toCssPropertyName } from "./styleValue";
  */
 export type StyleValue = string | number;
 
+/** A CSS query expression enclosed in parentheses. */
+export type QueryExpression = `(${string})`;
+
 /** A mounted animation marker whose generated `name` can be referenced in style definitions. */
 export interface AnimationMarker extends Marker {
 	readonly name: string;
@@ -30,6 +33,67 @@ export type StyleDefinition = (
 	& { [KEY in `$${string}`]?: StyleValue | null | undefined }
 	& { [KEY in `{${string}}`]?: StyleDefinition | null | undefined }
 	& { animationName?: readonly AnimationMarker[] | AnimationMarker | "none" | null | undefined }
+);
+
+type StyleContainerSize = "inline-size" | "size";
+
+interface StyleContainerCapabilities {
+	size?: StyleContainerSize;
+	style?: true;
+	scrollState?: true;
+}
+
+type StyleContainerOptions = (
+	| { size: StyleContainerSize; style?: true; scrollState?: true }
+	| { size?: never; style: true; scrollState?: true }
+	| { size?: never; style?: true; scrollState: true }
+);
+
+type StyleContainerFactory<CAPABILITIES extends StyleContainerCapabilities = object> = (
+	& {
+		readonly inlineSize: StyleContainerFactory<Omit<CAPABILITIES, "size"> & { size: "inline-size" }>;
+		readonly scrollState: StyleContainerFactory<Omit<CAPABILITIES, "scrollState"> & { scrollState: true }>;
+		readonly size: StyleContainerFactory<Omit<CAPABILITIES, "size"> & { size: "size" }>;
+		readonly style: StyleContainerFactory<Omit<CAPABILITIES, "style"> & { style: true }>;
+	}
+	& (CAPABILITIES extends StyleContainerOptions ? {
+		name (name: string): StyleContainer<CAPABILITIES>;
+	} : object)
+);
+
+type StyleContainerStuckSide = "block-end" | "block-start" | "bottom" | "inline-end" | "inline-start" | "left" | "none" | "right" | "top";
+type StyleContainerSnappedAxis = "block" | "both" | "inline" | "none" | "x" | "y";
+type StyleContainerScrollDirection = Exclude<StyleContainerStuckSide, "none"> | "block" | "inline" | "none" | "x" | "y";
+type StyleContainerPropertyName = `$${string}` | `--${string}`;
+
+type StyleContainerDefinition = {
+	readonly containerName: string;
+	readonly containerType?: string;
+};
+
+interface StyleContainerSizeQueries {
+	query (expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+}
+
+interface StyleContainerStyleQueries {
+	style (expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+	styleProperty (propertyName: StyleContainerPropertyName, value: StyleValue, definition: StyleDefinition): StyleDefinition;
+}
+
+interface StyleContainerScrollStateQueries {
+	scrollState (expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+	scrolled (direction: StyleContainerScrollDirection, definition: StyleDefinition): StyleDefinition;
+	scrollable (direction: StyleContainerScrollDirection, definition: StyleDefinition): StyleDefinition;
+	snapped (axis: StyleContainerSnappedAxis, definition: StyleDefinition): StyleDefinition;
+	stuck (definition: StyleDefinition): StyleDefinition;
+	stuck (side: StyleContainerStuckSide, definition: StyleDefinition): StyleDefinition;
+}
+
+type StyleContainer<OPTIONS extends StyleContainerOptions> = (
+	& StyleContainerDefinition
+	& (OPTIONS extends { size: StyleContainerSize } ? StyleContainerSizeQueries : object)
+	& (OPTIONS extends { style: true } ? StyleContainerStyleQueries : object)
+	& (OPTIONS extends { scrollState: true } ? StyleContainerScrollStateQueries : object)
 );
 
 type StyleClassConstructor = {
@@ -337,6 +401,9 @@ export function Style (definition: StyleDefinition): StyleDefinition {
 export namespace Style {
 	/** @group Style.Class */
 	export type Class = StyleClass;
+
+	/** A spreadable named CSS query container with methods gated by its configured capabilities. */
+	export type Container<CAPABILITIES extends StyleContainerOptions = StyleContainerOptions> = StyleContainer<CAPABILITIES>;
 	/**
 	 * Creates or retrieves a CSS stylesheet entry with the given class name and style definition.
 	 * Can be called with or without the `new` keyword.
@@ -361,6 +428,27 @@ export namespace Style {
 		} as StyleClassConstructor,
 		{ prototype: StyleClass.prototype },
 	)
+
+	/**
+	 * Immutable factory for named CSS query containers with capability-gated query helpers.
+	 * Select one or more capabilities, then finish with `.name(...)`. The `.size` and
+	 * `.inlineSize` getters replace one another, so the last selected size capability wins.
+	 *
+	 * The finalized object can be spread into a `StyleDefinition`; only `containerName` and
+	 * the configured CSS `containerType` value are enumerable.
+	 *
+	 * @example
+	 * const cardContainer = Style.Container
+	 *   .inlineSize
+	 *   .style
+	 *   .scrollState
+	 *   .name("card");
+	 * const containerStyle = Style.Class("card-container", { ...cardContainer });
+	 * const cardStyle = Style.Class("card", {
+	 *   ...cardContainer.query("(inline-size > 30rem)", { display: "grid" }),
+	 * });
+	 */
+	export const Container: StyleContainerFactory = createStyleContainerFactory({});
 
 	/**
 	 * Creates styles that will be rendered after the given dependency styles.
@@ -608,6 +696,116 @@ function spreadableQuery (query: string, selectorOrDefinition: string | StyleDef
 	const selector = typeof selectorOrDefinition === "string" ? selectorOrDefinition : "&";
 	query = query.startsWith("@") ? query.slice(1) : query;
 	return { [`{@${query}} {${selector}}`]: definition } as unknown as StyleDefinition;
+}
+
+function assertQueryExpression (expression: string): asserts expression is QueryExpression {
+	if (expression.length < 2 || !expression.startsWith("(") || !expression.endsWith(")")) {
+		throw new Error(`Query expression '${expression}' must start with '(' and end with ')'.`);
+	}
+}
+
+function spreadableContainerQuery (containerName: string, query: string, definition: StyleDefinition): StyleDefinition {
+	return spreadableQuery(`@container ${containerName} ${query}`, definition);
+}
+
+function createStyleContainerFactory<CAPABILITIES extends StyleContainerCapabilities> (capabilities: CAPABILITIES): StyleContainerFactory<CAPABILITIES> {
+	const factory = {};
+	const descriptors: PropertyDescriptorMap = {
+		inlineSize: {
+			get: () => createStyleContainerFactory({ ...capabilities, size: "inline-size" }),
+		},
+		scrollState: {
+			get: () => createStyleContainerFactory({ ...capabilities, scrollState: true }),
+		},
+		size: {
+			get: () => createStyleContainerFactory({ ...capabilities, size: "size" }),
+		},
+		style: {
+			get: () => createStyleContainerFactory({ ...capabilities, style: true }),
+		},
+	};
+
+	if (capabilities.size || capabilities.style === true || capabilities.scrollState === true) {
+		descriptors.name = {
+			value: (name: string) => createStyleContainer(name, capabilities as StyleContainerOptions),
+		};
+	}
+
+	Object.defineProperties(factory, descriptors);
+	return Object.freeze(factory) as StyleContainerFactory<CAPABILITIES>;
+}
+
+function createStyleContainer<const OPTIONS extends StyleContainerOptions> (name: string, options: OPTIONS): StyleContainer<OPTIONS> {
+	if (!name.trim() || name !== name.trim() || ["and", "none", "not", "or"].includes(name.toLowerCase())) {
+		throw new Error(`Container name '${name}' must be a non-empty CSS custom identifier and cannot be 'none', 'and', 'not', or 'or'.`);
+	}
+
+	if (options.size !== undefined && options.size !== "inline-size" && options.size !== "size") {
+		throw new Error(`Container '${name}' has unsupported size query capability '${options.size}'.`);
+	}
+
+	if (!options.size && options.style !== true && options.scrollState !== true) {
+		throw new Error(`Container '${name}' must support at least one query capability.`);
+	}
+
+	const containerTypes = [options.size, options.scrollState === true ? "scroll-state" : undefined]
+		.filter((value): value is string => value !== undefined);
+	const containerDefinition: Record<string, unknown> = { containerName: name };
+	if (containerTypes.length > 0) {
+		containerDefinition.containerType = containerTypes.join(" ");
+	}
+
+	const methodDefinitions: PropertyDescriptorMap = {};
+	if (options.size) {
+		methodDefinitions.query = {
+			value: (expression: QueryExpression, definition: StyleDefinition): StyleDefinition => {
+				assertQueryExpression(expression);
+				return spreadableContainerQuery(name, expression, definition);
+			},
+		};
+	}
+
+	if (options.style === true) {
+		methodDefinitions.style = {
+			value: (expression: QueryExpression, definition: StyleDefinition): StyleDefinition => {
+				assertQueryExpression(expression);
+				return spreadableContainerQuery(name, `style(${expression})`, definition);
+			},
+		};
+		methodDefinitions.styleProperty = {
+			value: (propertyName: StyleContainerPropertyName, value: StyleValue, definition: StyleDefinition): StyleDefinition => {
+				return spreadableContainerQuery(name, `style(${toCssPropertyName(propertyName)}: ${expandVariableAccessShorthand(value)})`, definition);
+			},
+		};
+	}
+
+	if (options.scrollState === true) {
+		methodDefinitions.scrollState = {
+			value: (expression: QueryExpression, definition: StyleDefinition): StyleDefinition => {
+				assertQueryExpression(expression);
+				return spreadableContainerQuery(name, `scroll-state(${expression})`, definition);
+			},
+		};
+		for (const feature of ["scrolled", "scrollable", "snapped"] as const) {
+			methodDefinitions[feature] = {
+				value: (value: string, definition: StyleDefinition): StyleDefinition => {
+					return spreadableContainerQuery(name, `scroll-state(${feature}: ${value})`, definition);
+				},
+			};
+		}
+		methodDefinitions.stuck = {
+			value: (sideOrDefinition: StyleContainerStuckSide | StyleDefinition, definition?: StyleDefinition): StyleDefinition => {
+				if (typeof sideOrDefinition === "string") {
+					return spreadableContainerQuery(name, `scroll-state(stuck: ${sideOrDefinition})`, definition!);
+				}
+
+				return spreadableContainerQuery(name, "scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom))", sideOrDefinition);
+			},
+		};
+	}
+
+	Object.defineProperties(containerDefinition, methodDefinitions);
+	return Object.freeze(containerDefinition) as StyleContainer<OPTIONS>;
 }
 
 /**
@@ -953,6 +1151,29 @@ export const pseudoBefore = pseudo("before");
 export const pseudoAfter = pseudo("after");
 
 /**
+ * Creates a spreadable `@media` wrapper for a parenthesized media-feature expression.
+ * The expression may contain compound `and`/`or` conditions as long as its first and
+ * last characters are parentheses.
+ *
+ * @param expression - A parenthesized media-feature expression.
+ * @param definition - CSS properties and nested selectors to apply when it matches.
+ * @returns A spreadable `StyleDefinition` entry.
+ *
+ * @example
+ * Style.Class("page", {
+ *   padding: "24px",
+ *   ...mediaQuery("(width <= 60rem)", { padding: "12px" }),
+ * });
+ * // @media (width <= 60rem) {
+ * // .page { padding: 12px }
+ * // }
+ */
+export function mediaQuery (expression: QueryExpression, definition: StyleDefinition): StyleDefinition {
+	assertQueryExpression(expression);
+	return spreadableQuery(`@media ${expression}`, definition);
+}
+
+/**
  * Creates a spreadable `@media (prefers-color-scheme: light)` wrapper
  * for use inside a `StyleDefinition`. The enclosed properties only apply
  * when the user's operating system or browser is set to a light color scheme.
@@ -972,7 +1193,7 @@ export const pseudoAfter = pseudo("after");
  * // }
  */
 export function lightScheme (definition: StyleDefinition): StyleDefinition {
-	return spreadableQuery(`@media (prefers-color-scheme: light)`, definition);
+	return mediaQuery("(prefers-color-scheme: light)", definition);
 }
 
 /**
@@ -995,33 +1216,7 @@ export function lightScheme (definition: StyleDefinition): StyleDefinition {
  * // }
  */
 export function darkScheme (definition: StyleDefinition): StyleDefinition {
-	return spreadableQuery(`@media (prefers-color-scheme: dark)`, definition);
-}
-
-/**
- * Creates a spreadable `@container scroll-state(...)` wrapper that applies styles
- * when a scroll container is stuck on any edge (`left`, `right`, `top`, or `bottom`).
- *
- * This uses the CSS Scroll-Driven Animations `scroll-state` query syntax:
- * `@container scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom))`.
- *
- * @param definition - CSS properties to apply when the container is stuck.
- * @returns A spreadable `StyleDefinition` entry.
- *
- * @example
- * Style.Class("sticky-shadow", {
- *   ...whenStuck(containerClass, { boxShadow: "0 1px 0 rgba(255,255,255,0.08)" }),
- * });
- * // @container scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom)) {
- * // .sticky-shadow { box-shadow: 0 1px 0 rgba(255,255,255,0.08) }
- * // }
- */
-export function whenStuck (container: Style.Class, definition: StyleDefinition): StyleDefinition {
-	if (!container.definition.containerName) {
-		throw new Error(`Class '${container.className}' cannot be used in whenStuck because it does not have a container name defined.`);
-	}
-	
-	return spreadableQuery(`@container ${container.definition.containerName} scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom))`, definition);
+	return mediaQuery("(prefers-color-scheme: dark)", definition);
 }
 
 /**

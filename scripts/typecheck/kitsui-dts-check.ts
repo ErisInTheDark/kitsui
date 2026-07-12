@@ -5,9 +5,10 @@ import type {
 	SortableExtensions,
 	SortableOptions,
 	SortableTransfer,
+	QueryExpression,
 	StyleValue,
 } from "kitsui";
-import { Component, Draggable, DropTarget, Sortable, State, Style } from "kitsui";
+import { Component, Draggable, DropTarget, Sortable, State, Style, mediaQuery } from "kitsui";
 
 const host = Component("div");
 const state = State(host, 0);
@@ -58,6 +59,53 @@ if (readonlySource instanceof State) {
 }
 void Style;
 void publicTypes;
+
+const mediaExpression: QueryExpression = "(width <= 60rem)";
+mediaQuery(mediaExpression, { display: "block" });
+// @ts-expect-error media query expressions must be enclosed in parentheses.
+mediaQuery("width <= 60rem", { display: "none" });
+
+// @ts-expect-error a container must select at least one capability before it can be named.
+Style.Container.name("missing-capability");
+
+const sizeContainer = Style.Container.inlineSize.name("size-container");
+Style.Class("size-container-class", { ...sizeContainer });
+sizeContainer.query("(inline-size > 30rem)", { display: "grid" });
+// @ts-expect-error style queries require the style capability.
+sizeContainer.style("(--density: compact)", { gap: "4px" });
+// @ts-expect-error scroll-state queries require the scrollState capability.
+sizeContainer.stuck("top", { top: 0 });
+
+const styleContainer = Style.Container.style.name("style-container");
+styleContainer.style("(--density: compact)", { gap: "4px" });
+styleContainer.styleProperty("$density", "compact", { gap: "4px" });
+// @ts-expect-error size queries require the size capability.
+styleContainer.query("(inline-size > 30rem)", { display: "grid" });
+
+const scrollContainer = Style.Container.scrollState.name("scroll-container");
+scrollContainer.scrollState("(stuck: top)", { top: 0 });
+scrollContainer.stuck({ top: 0 });
+scrollContainer.stuck("top", { top: 0 });
+scrollContainer.snapped("inline", { outlineWidth: "1px" });
+scrollContainer.scrollable("block-end", { overflowY: "auto" });
+scrollContainer.scrolled("block-start", { opacity: 0.8 });
+// @ts-expect-error style-property shortcuts require the style capability.
+scrollContainer.styleProperty("$density", "compact", { gap: "4px" });
+
+const fullContainer = Style.Container.size.inlineSize.style.scrollState.name("full-container");
+fullContainer.query("(width > 30rem)", {
+	...fullContainer.style("(--density: compact)", {
+		...fullContainer.stuck("top", { display: "grid" }),
+	}),
+});
+// @ts-expect-error finalized containers do not expose the factory finalizer.
+fullContainer.name("renamed-container");
+// @ts-expect-error finalized containers do not expose size factory getters.
+void fullContainer.size;
+// @ts-expect-error finalized containers do not expose inline-size factory getters.
+void fullContainer.inlineSize;
+// @ts-expect-error size capabilities are selected through closed getters, not arbitrary string arguments.
+Style.Container.size("block-size");
 
 const hostAfterParameterizedSetup = host.use((component, label, count) => {
 	component.text.set(`${label}:${count.toFixed(0)}`);
