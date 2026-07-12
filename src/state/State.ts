@@ -205,6 +205,7 @@ function scheduleGraphFlush (graph: StateGraph): void {
  */
 export abstract class Owner {
 	private readonly cleanupFunctions = new Set<CleanupFunction>();
+	private disposingValue = false;
 	private disposedValue = false;
 
 	/** @hidden */
@@ -219,6 +220,15 @@ export abstract class Owner {
 	}
 
 	/**
+	 * Whether this owner is currently executing its synchronous disposal lifecycle.
+	 * This remains true through pre-disposal hooks, cleanup functions, and post-disposal hooks.
+	 * @readonly
+	 */
+	get disposing (): boolean {
+		return this.disposingValue;
+	}
+
+	/**
 	 * Disposes this owner and invokes all registered cleanup functions.
 	 * Once disposed, an owner cannot be used again.
 	 * Subsequent calls to `dispose()` are no-ops.
@@ -229,16 +239,23 @@ export abstract class Owner {
 		}
 
 		this.disposedValue = true;
-		this.beforeDispose();
+		this.disposingValue = true;
 
-		const cleanupFunctions = [...this.cleanupFunctions];
-		this.cleanupFunctions.clear();
+		try {
+			this.beforeDispose();
 
-		for (const cleanupFunction of cleanupFunctions) {
-			cleanupFunction();
+			const cleanupFunctions = [...this.cleanupFunctions];
+			this.cleanupFunctions.clear();
+
+			for (const cleanupFunction of cleanupFunctions) {
+				cleanupFunction();
+			}
+
+			this.afterDispose();
 		}
-
-		this.afterDispose();
+		finally {
+			this.disposingValue = false;
+		}
 	}
 
 	/**

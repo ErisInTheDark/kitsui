@@ -23,6 +23,30 @@ type OwnedEventOnProxyFor<THost extends Owner, THostKey extends string, TEventMa
 	[KEventName in keyof TEventMap & string]: (listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
 };
 
+type CustomEventMapValue<TEventMap, TEventName extends keyof TEventMap & string> = Extract<EventMapValue<TEventMap, TEventName>, CustomEvent>;
+
+type CustomEventDetail<TEvent extends CustomEvent> = TEvent extends CustomEvent<infer TDetail> ? TDetail : never;
+
+type EventDispatchOptions<TEvent extends CustomEvent> = Omit<CustomEventInit<CustomEventDetail<TEvent>>, "detail"> & {
+	readonly tweak?: (event: TEvent) => unknown;
+};
+
+type EventDispatchArguments<TEvent extends CustomEvent> = undefined extends CustomEventDetail<TEvent>
+	? [detail?: CustomEventDetail<TEvent>, options?: EventDispatchOptions<TEvent>]
+	: [detail: CustomEventDetail<TEvent>, options?: EventDispatchOptions<TEvent>];
+
+type EventDispatchMethod<TEvent extends CustomEvent> = {
+	dispatch (...args: EventDispatchArguments<TEvent>): boolean;
+}["dispatch"];
+
+type EventDispatchProxyMap<TEventMap> = {
+	[KEventName in keyof TEventMap & string]: EventMapValue<TEventMap, KEventName> extends CustomEvent
+		? EventDispatchMethod<CustomEventMapValue<TEventMap, KEventName>>
+		: never;
+};
+
+type EventDispatchProxyFor<TEventMap> = EventDispatchProxyMap<ComponentHTMLElementEventMap> & EventDispatchProxyMap<TEventMap>;
+
 /** A DOM event augmented with the owning Component on `.component`. */
 export type ComponentEvent<TEvent extends Event, THost extends Component = Component> = HostedEvent<TEvent, THost, "component">;
 
@@ -111,9 +135,12 @@ function defineHostedEvent<THost extends Owner, THostKey extends string, TEvent 
 /**
  * Manages event listeners for a host owner with automatic cleanup and reactive listener support.
  * 
- * For Components, this powers the fluent `component.event.on.*`, `.off.*`, and `.owned.on.*` APIs.
+ * For Components, this powers the fluent `component.event.on.*`, `.off.*`, and `.owned.on.*` APIs,
+ * along with typed custom-event authoring through `.emit.*` and `.dispatch.*`.
  */
 export class EventManipulator<THost extends Owner = Component, THostKey extends string = "component", TEventMap = ComponentHTMLElementEventMap> {
+	readonly dispatch: EventDispatchProxyFor<TEventMap>;
+	readonly emit: EventDispatchProxyFor<TEventMap>;
 	readonly on: EventOnProxyFor<THost, THostKey, TEventMap>;
 	readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
 	readonly owned: {
@@ -128,6 +155,8 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 		private readonly target: EventTarget,
 		private readonly hostPropertyName: THostKey = "component" as THostKey,
 	) {
+		this.emit = this.createDispatchProxy();
+		this.dispatch = this.emit;
 		this.on = this.createOnProxy(false);
 		this.off = this.createOffProxy();
 		this.owned = {
@@ -137,6 +166,29 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 		this.owner.onCleanup(() => {
 			this.releaseAllListeners();
 		});
+	}
+
+	private createDispatchProxy (): EventDispatchProxyFor<TEventMap> {
+		return new Proxy({}, {
+			get: (_, eventName) => {
+				if (typeof eventName !== "string") {
+					return undefined;
+				}
+
+				return (detail?: unknown, options?: EventDispatchOptions<CustomEvent>) => {
+					this.ensureEmittable();
+
+					const { tweak, ...init } = options ?? {};
+					const event = new CustomEvent(eventName, {
+						...init,
+						detail,
+					});
+
+					tweak?.(event);
+					return this.target.dispatchEvent(event);
+				};
+			},
+		}) as EventDispatchProxyFor<TEventMap>;
 	}
 
 	private releaseAllListeners (): void {
@@ -294,6 +346,12 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 
 	private ensureActive (): void {
 		if (this.owner.disposed) {
+			throw new Error("Disposed owners cannot be modified.");
+		}
+	}
+
+	private ensureEmittable (): void {
+		if (this.owner.disposed && !this.owner.disposing) {
 			throw new Error("Disposed owners cannot be modified.");
 		}
 	}

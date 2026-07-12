@@ -117,7 +117,9 @@ import { Component } from "kitsui"
 interface WidgetEvents {
 	WidgetCommit: CustomEvent<{
 		readonly value: string
-	}>
+	}> & {
+		readonly source: "user" | "api"
+	}
 }
 
 interface WidgetExtensions {
@@ -126,19 +128,25 @@ interface WidgetExtensions {
 
 interface Widget extends Component.WithEvents<WidgetEvents>, WidgetExtensions { }
 
-function emitWidgetCommit (widget: Widget, value: string): void {
-	widget.element.dispatchEvent(new CustomEvent("WidgetCommit", {
-		bubbles: true,
-		detail: { value },
-	}))
+function emitWidgetCommit (widget: Widget, value: string): boolean {
+	return widget.event.emit.WidgetCommit({ value }, {
+		tweak: event => Object.defineProperty(event, "source", {
+			value: "api",
+		}),
+	})
 }
 
 declare const widget: Widget
 
 widget.event.owned.on.WidgetCommit(event => {
 	event.detail.value.toUpperCase()
+	event.source
 })
 ```
+
+`event.emit.*` and `event.dispatch.*` are aliases that construct the mapped `CustomEvent`, run the optional `tweak` callback, and return the target's native `dispatchEvent` result. Native `CustomEvent` defaults are preserved, so kitsui custom events do not bubble unless `bubbles: true` is explicitly supplied. Bubbling does not add the feature event to ancestor component types; an ancestor must still opt into the event map before its typed `event` API exposes that name.
+
+Synchronous `Dispose` handlers may emit final custom notifications while the owner reports both `disposed` and `disposing`. This is a narrow lifecycle window: listener registration and other component mutations remain forbidden, and custom-event emission is rejected again after disposal finishes.
 
 ## State And Derived Values
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import placeExtension from "../../src/component/extensions/placeExtension";
-import { State } from "../../src/state/State";
+import { Owner, State } from "../../src/state/State";
 import groupExtension from "../../src/state/extensions/groupExtension";
 import mappingExtension from "../../src/state/extensions/mappingExtension";
 
@@ -86,6 +86,50 @@ function captureOrphanCheck (): {
 		},
 	};
 }
+
+describe("Owner", () => {
+	it("exposes the synchronous disposal phase across hooks and cleanup", () => {
+		const phases: Array<readonly [string, boolean, boolean]> = [];
+		const owner = new class extends Owner {
+			protected beforeDispose (): void {
+				phases.push(["before", this.disposed, this.disposing]);
+				this.dispose();
+			}
+
+			protected afterDispose (): void {
+				phases.push(["after", this.disposed, this.disposing]);
+			}
+		}();
+
+		owner.onCleanup(() => {
+			phases.push(["cleanup", owner.disposed, owner.disposing]);
+		});
+
+		expect(owner.disposed).toBe(false);
+		expect(owner.disposing).toBe(false);
+		owner.dispose();
+
+		expect(phases).toEqual([
+			["before", true, true],
+			["cleanup", true, true],
+			["after", true, true],
+		]);
+		expect(owner.disposed).toBe(true);
+		expect(owner.disposing).toBe(false);
+	});
+
+	it("clears the disposal phase when a lifecycle hook throws", () => {
+		const owner = new class extends Owner {
+			protected beforeDispose (): void {
+				throw new Error("lifecycle failed");
+			}
+		}();
+
+		expect(() => owner.dispose()).toThrow("lifecycle failed");
+		expect(owner.disposed).toBe(true);
+		expect(owner.disposing).toBe(false);
+	});
+});
 
 describe("State", () => {
 	it("can be constructed with or without new and still supports instanceof", () => {

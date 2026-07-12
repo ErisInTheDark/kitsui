@@ -123,6 +123,11 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
+const dragEventOptions = {
+	bubbles: true,
+	cancelable: false,
+} as const;
+
 const createOwnedState = State as unknown as <T>(owner: Component, initialValue: T) => State<T>;
 const activeDragsByDocument = new WeakMap<Document, DraggableController>();
 
@@ -241,14 +246,6 @@ function validatePreviewComponent (component: unknown): Component {
 	}
 
 	return component;
-}
-
-function dispatchDragEvent<TDetail> (component: Component, eventName: string, detail: TDetail): void {
-	component.element.dispatchEvent(new CustomEvent(eventName, {
-		bubbles: true,
-		cancelable: false,
-		detail,
-	}));
 }
 
 function defaultPointerInput (component: DraggableComponent, receiver: DragInputReceiver): CleanupFunction {
@@ -498,7 +495,7 @@ class DraggableController implements Draggable {
 		};
 		this.startContext = context;
 
-		dispatchDragEvent(this.component, "DragStartRequested", context);
+		this.component.event.emit.DragStartRequested(context, dragEventOptions);
 
 		if (!this.canUseState() || this.options.canStart?.(context) === false || !this.canUseState()) {
 			this.startContext = null;
@@ -550,12 +547,12 @@ class DraggableController implements Draggable {
 		}
 
 		this.positionPreview(next);
-		dispatchDragEvent(this.component, "DragMove", {
+		this.component.event.emit.DragMove({
 			component: this.component,
 			event: input.event,
 			position: next,
 			target: input.target,
-		} satisfies DragEventDetail);
+		} satisfies DragEventDetail, dragEventOptions);
 	}
 
 	private endWith (input: DragInputEnd): void {
@@ -572,20 +569,20 @@ class DraggableController implements Draggable {
 
 		if (wasDragging && position) {
 			this.positionPreview(position);
-			dispatchDragEvent(this.component, "DragEnd", {
+			this.component.event.emit.DragEnd({
 				component: this.component,
 				event: input.event,
 				position,
 				target: input.target,
-			} satisfies DragEventDetail);
+			} satisfies DragEventDetail, dragEventOptions);
 		}
 		else if (position) {
-			dispatchDragEvent(this.component, "DragCancel", {
+			this.component.event.emit.DragCancel({
 				component: this.component,
 				event: input.event,
 				position,
 				target: input.target,
-			} satisfies DragEventDetail);
+			} satisfies DragEventDetail, dragEventOptions);
 		}
 
 		this.reset();
@@ -603,12 +600,12 @@ class DraggableController implements Draggable {
 		const position = this.position.value;
 		if (position) {
 			this.positionPreview(position);
-			dispatchDragEvent(this.component, "DragCancel", {
+			this.component.event.emit.DragCancel({
 				component: this.component,
 				event: input.event,
 				position,
 				target: input.target,
-			} satisfies DragEventDetail);
+			} satisfies DragEventDetail, dragEventOptions);
 		}
 
 		this.reset();
@@ -631,12 +628,12 @@ class DraggableController implements Draggable {
 		}
 
 		this.phase.set("dragging");
-		dispatchDragEvent(this.component, "DragStart", {
+		this.component.event.emit.DragStart({
 			component: this.component,
 			event: input.event,
 			position,
 			target: input.target,
-		} satisfies DragEventDetail);
+		} satisfies DragEventDetail, dragEventOptions);
 	}
 
 	private nextPosition (point: DragPoint, source: DragInputSource): DragPosition {
