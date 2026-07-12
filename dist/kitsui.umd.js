@@ -168,6 +168,7 @@ var __kitsui_factory__ = (() => {
     /** @hidden */
     constructor() {
       __publicField(this, "cleanupFunctions", /* @__PURE__ */ new Set());
+      __publicField(this, "disposingValue", false);
       __publicField(this, "disposedValue", false);
     }
     /**
@@ -176,6 +177,14 @@ var __kitsui_factory__ = (() => {
      */
     get disposed() {
       return this.disposedValue;
+    }
+    /**
+     * Whether this owner is currently executing its synchronous disposal lifecycle.
+     * This remains true through pre-disposal hooks, cleanup functions, and post-disposal hooks.
+     * @readonly
+     */
+    get disposing() {
+      return this.disposingValue;
     }
     /**
      * Disposes this owner and invokes all registered cleanup functions.
@@ -187,13 +196,18 @@ var __kitsui_factory__ = (() => {
         return;
       }
       this.disposedValue = true;
-      this.beforeDispose();
-      const cleanupFunctions = [...this.cleanupFunctions];
-      this.cleanupFunctions.clear();
-      for (const cleanupFunction of cleanupFunctions) {
-        cleanupFunction();
+      this.disposingValue = true;
+      try {
+        this.beforeDispose();
+        const cleanupFunctions = [...this.cleanupFunctions];
+        this.cleanupFunctions.clear();
+        for (const cleanupFunction of cleanupFunctions) {
+          cleanupFunction();
+        }
+        this.afterDispose();
+      } finally {
+        this.disposingValue = false;
       }
-      this.afterDispose();
     }
     /**
      * Registers a cleanup function to be invoked when this owner is disposed.
@@ -1174,10 +1188,14 @@ var __kitsui_factory__ = (() => {
       this.owner = owner;
       this.target = target;
       this.hostPropertyName = hostPropertyName;
+      __publicField(this, "dispatch");
+      __publicField(this, "emit");
       __publicField(this, "on");
       __publicField(this, "off");
       __publicField(this, "owned");
       __publicField(this, "listenerRecords", /* @__PURE__ */ new Map());
+      this.emit = this.createDispatchProxy();
+      this.dispatch = this.emit;
       this.on = this.createOnProxy(false);
       this.off = this.createOffProxy();
       this.owned = {
@@ -1186,6 +1204,25 @@ var __kitsui_factory__ = (() => {
       };
       this.owner.onCleanup(() => {
         this.releaseAllListeners();
+      });
+    }
+    createDispatchProxy() {
+      return new Proxy({}, {
+        get: (_, eventName) => {
+          if (typeof eventName !== "string") {
+            return void 0;
+          }
+          return (detail, options) => {
+            this.ensureEmittable();
+            const { tweak, ...init } = options ?? {};
+            const event = new CustomEvent(eventName, {
+              ...init,
+              detail
+            });
+            tweak?.(event);
+            return this.target.dispatchEvent(event);
+          };
+        }
       });
     }
     releaseAllListeners() {
@@ -1306,6 +1343,11 @@ var __kitsui_factory__ = (() => {
     }
     ensureActive() {
       if (this.owner.disposed) {
+        throw new Error("Disposed owners cannot be modified.");
+      }
+    }
+    ensureEmittable() {
+      if (this.owner.disposed && !this.owner.disposing) {
         throw new Error("Disposed owners cannot be modified.");
       }
     }
@@ -4798,6 +4840,10 @@ ${innerRules}
   // src/component/Draggable.ts
   var noop12 = () => {
   };
+  var dragEventOptions = {
+    bubbles: true,
+    cancelable: false
+  };
   var createOwnedState3 = State;
   var activeDragsByDocument = /* @__PURE__ */ new WeakMap();
   function pointFromPointerEvent(event) {
@@ -4882,13 +4928,6 @@ ${innerRules}
       throw new Error("Draggable preview must return an ownerless, unplaced Component.");
     }
     return component;
-  }
-  function dispatchDragEvent(component, eventName, detail) {
-    component.element.dispatchEvent(new CustomEvent(eventName, {
-      bubbles: true,
-      cancelable: false,
-      detail
-    }));
   }
   function defaultPointerInput(component, receiver) {
     let releaseTracking = noop12;
@@ -5099,7 +5138,7 @@ ${innerRules}
         source: input.source
       };
       this.startContext = context;
-      dispatchDragEvent(this.component, "DragStartRequested", context);
+      this.component.event.emit.DragStartRequested(context, dragEventOptions);
       if (!this.canUseState() || this.options.canStart?.(context) === false || !this.canUseState()) {
         this.startContext = null;
         return false;
@@ -5139,12 +5178,12 @@ ${innerRules}
         return;
       }
       this.positionPreview(next);
-      dispatchDragEvent(this.component, "DragMove", {
+      this.component.event.emit.DragMove({
         component: this.component,
         event: input.event,
         position: next,
         target: input.target
-      });
+      }, dragEventOptions);
     }
     endWith(input) {
       if (this.phase.value === "idle") {
@@ -5157,19 +5196,19 @@ ${innerRules}
       const wasDragging = this.phase.value === "dragging";
       if (wasDragging && position) {
         this.positionPreview(position);
-        dispatchDragEvent(this.component, "DragEnd", {
+        this.component.event.emit.DragEnd({
           component: this.component,
           event: input.event,
           position,
           target: input.target
-        });
+        }, dragEventOptions);
       } else if (position) {
-        dispatchDragEvent(this.component, "DragCancel", {
+        this.component.event.emit.DragCancel({
           component: this.component,
           event: input.event,
           position,
           target: input.target
-        });
+        }, dragEventOptions);
       }
       this.reset();
     }
@@ -5183,12 +5222,12 @@ ${innerRules}
       const position = this.position.value;
       if (position) {
         this.positionPreview(position);
-        dispatchDragEvent(this.component, "DragCancel", {
+        this.component.event.emit.DragCancel({
           component: this.component,
           event: input.event,
           position,
           target: input.target
-        });
+        }, dragEventOptions);
       }
       this.reset();
     }
@@ -5205,12 +5244,12 @@ ${innerRules}
         throw error;
       }
       this.phase.set("dragging");
-      dispatchDragEvent(this.component, "DragStart", {
+      this.component.event.emit.DragStart({
         component: this.component,
         event: input.event,
         position,
         target: input.target
-      });
+      }, dragEventOptions);
     }
     nextPosition(point, source) {
       const current = this.position.value;

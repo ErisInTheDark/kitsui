@@ -776,6 +776,26 @@ type OwnedEventOnProxyFor<THost extends Owner, THostKey extends string, TEventMa
     [KEventName in keyof TEventMap & string]: (listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
 };
 
+type CustomEventMapValue<TEventMap, TEventName extends keyof TEventMap & string> = Extract<EventMapValue<TEventMap, TEventName>, CustomEvent>;
+
+type CustomEventDetail<TEvent extends CustomEvent> = TEvent extends CustomEvent<infer TDetail> ? TDetail : never;
+
+type EventDispatchOptions<TEvent extends CustomEvent> = Omit<CustomEventInit<CustomEventDetail<TEvent>>, "detail"> & {
+    readonly tweak?: (event: TEvent) => unknown;
+};
+
+type EventDispatchArguments<TEvent extends CustomEvent> = undefined extends CustomEventDetail<TEvent> ? [detail?: CustomEventDetail<TEvent>, options?: EventDispatchOptions<TEvent>] : [detail: CustomEventDetail<TEvent>, options?: EventDispatchOptions<TEvent>];
+
+type EventDispatchMethod<TEvent extends CustomEvent> = {
+    dispatch(...args: EventDispatchArguments<TEvent>): boolean;
+}["dispatch"];
+
+type EventDispatchProxyMap<TEventMap> = {
+    [KEventName in keyof TEventMap & string]: EventMapValue<TEventMap, KEventName> extends CustomEvent ? EventDispatchMethod<CustomEventMapValue<TEventMap, KEventName>> : never;
+};
+
+type EventDispatchProxyFor<TEventMap> = EventDispatchProxyMap<ComponentHTMLElementEventMap> & EventDispatchProxyMap<TEventMap>;
+
 export type ComponentEvent<TEvent extends Event, THost extends Component = Component> = HostedEvent<TEvent, THost, "component">;
 
 export type ComponentEventListener<THost extends Component, TEvent extends Event> = EventListenerFor<THost, "component", TEvent>;
@@ -802,6 +822,8 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
     private readonly owner;
     private readonly target;
     private readonly hostPropertyName;
+    readonly dispatch: EventDispatchProxyFor<TEventMap>;
+    readonly emit: EventDispatchProxyFor<TEventMap>;
     readonly on: EventOnProxyFor<THost, THostKey, TEventMap>;
     readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
     readonly owned: {
@@ -810,6 +832,7 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
     };
     private readonly listenerRecords;
     constructor(owner: THost, target: EventTarget, hostPropertyName?: THostKey);
+    private createDispatchProxy;
     private releaseAllListeners;
     private createOnProxy;
     private createOwnedOnProxy;
@@ -818,6 +841,7 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
     private replaceListener;
     private removeListener;
     private ensureActive;
+    private ensureEmittable;
 }
 
 export type PlacementTarget = Node | Component | Marker | Place | Falsy;
@@ -1648,6 +1672,7 @@ type StateInternalOptions<T> = StateOptions<T> & {
 
 export abstract class Owner {
     private readonly cleanupFunctions;
+    private disposingValue;
     private disposedValue;
     /** @hidden */
     constructor();
@@ -1656,6 +1681,12 @@ export abstract class Owner {
      * @readonly
      */
     get disposed(): boolean;
+    /**
+     * Whether this owner is currently executing its synchronous disposal lifecycle.
+     * This remains true through pre-disposal hooks, cleanup functions, and post-disposal hooks.
+     * @readonly
+     */
+    get disposing(): boolean;
     /**
      * Disposes this owner and invokes all registered cleanup functions.
      * Once disposed, an owner cannot be used again.
