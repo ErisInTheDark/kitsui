@@ -8,7 +8,26 @@ import type {
 	QueryExpression,
 	StyleValue,
 } from "kitsui";
-import { Component, Draggable, DropTarget, Sortable, State, Style, mediaQuery } from "kitsui";
+import { Component, Draggable, DropTarget, Owner, Sortable, State, Style, mediaQuery } from "kitsui";
+
+const standaloneOwner: Owner = Owner();
+const standaloneState = State(standaloneOwner, "active");
+standaloneOwner.onCleanup(() => undefined);
+
+class RequestOwner extends Owner {
+	protected override beforeDispose (): void {
+		// Custom owner lifecycles retain access to the protected hooks.
+	}
+}
+
+const requestOwner: Owner = new RequestOwner();
+
+void standaloneState;
+void requestOwner;
+// @ts-expect-error standalone Owner instances are created by calling Owner().
+new Owner();
+// @ts-expect-error Owner.create() was replaced by Owner().
+Owner.create();
 
 const host = Component("div");
 const state = State(host, 0);

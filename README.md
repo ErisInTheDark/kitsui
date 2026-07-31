@@ -45,6 +45,7 @@ This style keeps ownership simple: `root` owns the state, event cleanup, and chi
 
 - Return `Component` instances from small factory functions.
 - Create `State` on the component or owner that should dispose it.
+- Use `Owner()` for a living scope that has no owning `Component`, then pass it to every owner-aware API in that scope.
 - Use derived state, manipulators, and conditional placement before manual `subscribe` plus DOM mutation.
 - Build most static structure in one fluent chain.
 - Use `component.class`, `component.style`, `component.attribute`, `component.aria`, `component.text`, and `component.event` for DOM effects.
@@ -178,6 +179,24 @@ Component("p")
 ```
 
 Use `State.Group(owner, states)` when one derived value needs a coherent snapshot of multiple states. Use `truthy`, `falsy`, and `or(...)` instead of writing repetitive boolean or nullish mapping by hand.
+
+## Standalone Owner Scopes
+
+Use `Owner()` when a living scope does not have an owning `Component`. Pass the owner to `State` and other owner-aware APIs so the whole scope shares one lifetime. Dispose the owner when the scope ends.
+
+```ts
+const session = Owner()
+const status = State(session, "connecting")
+const label = status.map(session, value => `Status: ${value}`)
+
+label.subscribe(session, value => {
+	console.log(value)
+})
+
+session.dispose()
+```
+
+When a scope belongs to a UI subtree, use the `Component` as its owner. Integration helpers for routers, sockets, observers, and other systems can accept an `Owner` and use `owner.onCleanup(...)` internally; ordinary application code usually only passes the owner to the helper.
 
 ## Manipulator Binding
 

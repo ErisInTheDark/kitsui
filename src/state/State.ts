@@ -199,11 +199,10 @@ function scheduleGraphFlush (graph: StateGraph): void {
 }
 
 /**
- * Abstract base class for managing cleanup functions and resource disposal.
- * Owners can register cleanup functions that are invoked when the owner is disposed,
- * enabling a predictable lifecycle for dependent resources.
+ * Implements the shared disposal lifecycle for owner-aware resources.
+ * @group Owner
  */
-export abstract class Owner {
+abstract class OwnerClass {
 	private readonly cleanupFunctions = new Set<CleanupFunction>();
 	private disposingValue = false;
 	private disposedValue = false;
@@ -311,6 +310,51 @@ export abstract class Owner {
 		// Subclasses may override.
 	}
 }
+
+/**
+ * A disposable lifetime for a living scope and its owner-aware resources.
+ * @group Owner
+ */
+export type Owner = OwnerClass;
+
+/** @group Owner */
+type OwnerConstructor = (abstract new () => Owner) & {
+	(): Owner;
+	prototype: Owner;
+};
+
+/**
+ * Creates an owner for a living scope that does not have an owning {@link Component}.
+ *
+ * Pass the owner to {@link State} and other owner-aware APIs so the resources in the
+ * scope share one lifetime. Dispose the owner when the scope ends.
+ *
+ * Integration libraries can accept an owner and use {@link Owner.onCleanup} to bind
+ * external teardown to the same scope. Application code usually only passes the
+ * owner to the integration.
+ *
+ * @returns A new owner for the scope.
+ *
+ * @example
+ * ```
+ * const session = Owner();
+ * const status = State(session, "connecting");
+ * const label = status.map(session, value => `Status: ${value}`);
+ *
+ * label.subscribe(session, value => {
+ *   console.log(value);
+ * });
+ *
+ * session.dispose();
+ * ```
+ *
+ * @group Owner
+ */
+export const Owner = function Owner (): Owner {
+	return Reflect.construct(OwnerClass, [], new.target ?? OwnerClass) as Owner;
+} as OwnerConstructor;
+
+Owner.prototype = OwnerClass.prototype;
 
 const orphanedStateErrorMessage = "States must have an owner before the next tick.";
 

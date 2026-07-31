@@ -69,7 +69,14 @@ function stripSignatureBlockTags (comment: JSONOutput.Comment): JSONOutput.Comme
 	return { ...comment, blockTags: filtered.length > 0 ? filtered : undefined };
 }
 
-function processGroups (module: JSONOutput.DeclarationReflection): ProcessGroupsResult {
+function isFactoryDeclaration (declaration: JSONOutput.DeclarationReflection): boolean {
+	return declaration.kind === ReflectionKind.Variable || declaration.kind === ReflectionKind.Function;
+}
+
+function processGroups (
+	module: JSONOutput.DeclarationReflection,
+	projectDeclarationsById: ReadonlyMap<number, JSONOutput.DeclarationReflection>,
+): ProcessGroupsResult {
 	const children = module.children ?? [];
 	const groups = module.groups ?? [];
 	const nameAliases = new Map<string, string>();
@@ -134,6 +141,25 @@ function processGroups (module: JSONOutput.DeclarationReflection): ProcessGroups
 				}
 
 				members.push(child);
+			}
+		}
+
+		if (!members.some(member => member.kind === ReflectionKind.Class)) {
+			const groupedName = namespaceMemberName ?? group.title;
+			const groupedTypeAlias = members.find(member =>
+				member.kind === ReflectionKind.TypeAlias
+				&& (member.name === group.title || member.name === groupedName),
+			);
+			const groupedFactory = members.find(member =>
+				isFactoryDeclaration(member)
+				&& (member.name === group.title || member.name === groupedName),
+			);
+
+			if (groupedFactory && groupedTypeAlias?.type?.type === "reference" && typeof groupedTypeAlias.type.target === "number") {
+				const implementationClass = projectDeclarationsById.get(groupedTypeAlias.type.target);
+				if (implementationClass?.kind === ReflectionKind.Class) {
+					members.push(implementationClass);
+				}
 			}
 		}
 
@@ -211,9 +237,8 @@ function mergeCallableClassGroup (
 	if (!classDecl)
 		return undefined;
 
-	const isFactory = (member: JSONOutput.DeclarationReflection) => member.kind === ReflectionKind.Variable || member.kind === ReflectionKind.Function;
-	const factory = members.find(member => isFactory(member) && (member.name === groupName || member.name === shortGroupName))
-		?? members.find(isFactory);
+	const factory = members.find(member => isFactoryDeclaration(member) && (member.name === groupName || member.name === shortGroupName))
+		?? members.find(isFactoryDeclaration);
 
 	const constructorType = members.find(member =>
 		member.kind === ReflectionKind.TypeAlias && (member.name === `${groupName}Constructor` || member.name === `${shortGroupName}Constructor`),
@@ -253,6 +278,26 @@ function mergeCallableClassGroup (
 	};
 }
 
+function extractReflectionDeclarations (type: JSONOutput.SomeType): JSONOutput.DeclarationReflection[] {
+	if (type.type === "reflection") {
+		return type.declaration ? [type.declaration] : [];
+	}
+
+	if (type.type === "intersection") {
+		return type.types.flatMap(extractReflectionDeclarations);
+	}
+
+	return [];
+}
+
+function filterInvocableConstructorSignatures (
+	signatures: JSONOutput.SignatureReflection[] | undefined,
+): JSONOutput.SignatureReflection[] | undefined {
+	const constructors = filterSignaturesByKind(signatures, ReflectionKind.ConstructorSignature)
+		?.filter(signature => !signature.flags.isAbstract);
+	return constructors && constructors.length > 0 ? constructors : undefined;
+}
+
 function extractConstructorSignatures (
 	constructorType: JSONOutput.DeclarationReflection | undefined,
 ): JSONOutput.SignatureReflection[] | undefined {
@@ -260,17 +305,14 @@ function extractConstructorSignatures (
 		return undefined;
 
 	if (constructorType.signatures && constructorType.signatures.length > 0)
-		return filterSignaturesByKind(constructorType.signatures, ReflectionKind.ConstructorSignature);
+		return filterInvocableConstructorSignatures(constructorType.signatures);
 
 	if (!constructorType.type)
 		return undefined;
 
-	const type = constructorType.type;
-	if (typeof type !== "object" || !("type" in type) || type.type !== "reflection")
-		return undefined;
-
-	const declaration = (type as JSONOutput.ReflectionType).declaration;
-	return filterSignaturesByKind(declaration?.signatures, ReflectionKind.ConstructorSignature);
+	const signatures = extractReflectionDeclarations(constructorType.type)
+		.flatMap(declaration => declaration.signatures ?? []);
+	return filterInvocableConstructorSignatures(signatures);
 }
 
 function extractCallableSignatures (
@@ -285,15 +327,9 @@ function extractCallableSignatures (
 	if (!declaration.type)
 		return undefined;
 
-	const type = declaration.type;
-	if (typeof type !== "object" || !("type" in type))
-		return undefined;
-
-	if (type.type !== "reflection")
-		return undefined;
-
-	const reflectionDeclaration = (type as JSONOutput.ReflectionType).declaration;
-	return filterSignaturesByKind(reflectionDeclaration?.signatures, ReflectionKind.CallSignature);
+	const signatures = extractReflectionDeclarations(declaration.type)
+		.flatMap(reflectionDeclaration => reflectionDeclaration.signatures ?? []);
+	return filterSignaturesByKind(signatures, ReflectionKind.CallSignature);
 }
 
 function extractCallConstructSignatures (
@@ -339,7 +375,7 @@ function applySignatureLikeCommentToSignatures (
 			return false;
 		}
 
-		return tag.tag === "@returns" || tag.tag === "@throws";
+		return tag.tag === "@returns" || tag.tag === "@throws" || tag.tag === "@example";
 	});
 
 	const signatureComment = signatureTags.length > 0
@@ -395,12 +431,8 @@ function extractConstructorChildren (
 		if (!constructorType.type)
 			return undefined;
 
-		const type = constructorType.type;
-		if (typeof type !== "object" || !("type" in type) || type.type !== "reflection")
-			return undefined;
-
-		const declaration = (type as JSONOutput.ReflectionType).declaration;
-		children = declaration?.children;
+		children = extractReflectionDeclarations(constructorType.type)
+			.flatMap(declaration => declaration.children ?? []);
 	}
 
 	if (!children || children.length === 0)
@@ -543,20 +575,20 @@ function findRootClassMemberTargetId (
 }
 
 function collectDeclarationsById (
-	children: PreparedDeclarationReflection[],
-	declarationsById: Map<number, PreparedDeclarationReflection>,
+	children: JSONOutput.DeclarationReflection[],
+	declarationsById: Map<number, JSONOutput.DeclarationReflection>,
 ): void {
 	for (const child of children) {
 		declarationsById.set(child.id, child);
 
 		if (child.children && child.children.length > 0)
-			collectDeclarationsById(child.children as PreparedDeclarationReflection[], declarationsById);
+			collectDeclarationsById(child.children, declarationsById);
 	}
 }
 
 function collectExtendedTypesByChildId (
 	children: PreparedDeclarationReflection[],
-	declarationsById: Map<number, PreparedDeclarationReflection>,
+	declarationsById: ReadonlyMap<number, JSONOutput.DeclarationReflection>,
 	extendedTypesByChildId: Map<number, JSONOutput.ReferenceType[]>,
 ): void {
 	for (const child of children) {
@@ -793,6 +825,9 @@ export function prepareModuleSections (
 	project: JSONOutput.ProjectReflection,
 	options: PrepareModuleSectionsOptions,
 ): PreparedModuleSectionsResult {
+	const projectDeclarationsById = new Map<number, JSONOutput.DeclarationReflection>();
+	collectDeclarationsById(project.children ?? [], projectDeclarationsById);
+
 	const modules = (project.children ?? [])
 		.filter((child): child is JSONOutput.DeclarationReflection =>
 			child.kind === ReflectionKind.Module
@@ -819,7 +854,7 @@ export function prepareModuleSections (
 
 	const allNameAliases = new Map<string, string>();
 	const processedModules = modules.map(module => {
-		const result = processGroups(module);
+		const result = processGroups(module, projectDeclarationsById);
 		for (const [from, to] of result.nameAliases)
 			allNameAliases.set(from, to);
 		return { module, children: result.children };
@@ -1020,7 +1055,7 @@ export function prepareModuleSections (
 		};
 	});
 
-	const declarationsById = new Map<number, PreparedDeclarationReflection>();
+	const declarationsById = new Map<number, JSONOutput.DeclarationReflection>();
 	for (const section of sections)
 		collectDeclarationsById(section.children, declarationsById);
 

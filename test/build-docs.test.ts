@@ -242,6 +242,15 @@ describe("build:docs pipeline", () => {
 		const stateSectionHeadingCount = (stateHtml.match(/<h2 class="docs-component-section-title" id="section-/gu) ?? []).length;
 		expect(stateSidebarSectionLinkCount, "State page sidebar section-link count should match section heading count").toBe(stateSectionHeadingCount);
 		expect(stateHtml.includes('<span class="docs-declaration-name">StateExtensions</span>'), "Missing StateExtensions declaration").toBe(true);
+		const ownerDeclarationCount = (stateHtml.match(/<span class="docs-declaration-name">Owner<\/span>/gu) ?? []).length;
+		expect(ownerDeclarationCount, "Owner should render as one merged declaration").toBe(1);
+		const ownerDeclaration = declarationSlice(stateHtml, "Owner");
+		expect(ownerDeclaration.includes('<span class="docs-signature-name">Owner</span>'), "Owner should render its callable signature").toBe(true);
+		expect(ownerDeclaration.includes('<span class="docs-signature-punctuation">new </span><span class="docs-signature-name">Owner</span>'), "Owner should not render its abstract construct signature as an invocable constructor").toBe(false);
+		expect(ownerDeclaration.includes("Creates an owner for a living scope that does not have an owning"), "Owner should render its living-scope documentation").toBe(true);
+		expect(ownerDeclaration.includes("const session = Owner();"), "Owner should render its pass-the-owner example").toBe(true);
+		expect(stateHtml.includes('<span class="docs-declaration-name">OwnerClass</span>'), "OwnerClass should not leak as a standalone declaration").toBe(false);
+		expect(stateHtml.includes('<span class="docs-declaration-name">OwnerConstructor</span>'), "OwnerConstructor should not leak as a standalone declaration").toBe(false);
 		expect(stateHtml.includes('<span class="docs-declaration-name">State.extend</span>'), "Missing State.extend declaration name").toBe(true);
 		expect(stateHtml.includes('<span class="docs-signature-name">State.extend</span>'), "Missing State.extend signature name").toBe(true);
 		expect(stateHtml.includes('class="docs-component-section-title"') && stateHtml.includes('>mappingExtension</h2>'), "Missing State mapping extension section").toBe(true);

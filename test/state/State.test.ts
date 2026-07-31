@@ -88,6 +88,58 @@ function captureOrphanCheck (): {
 }
 
 describe("Owner", () => {
+	it("creates distinct standalone owner scopes", () => {
+		const firstOwner = Owner();
+		const secondOwner = Owner();
+
+		expect(firstOwner).not.toBe(secondOwner);
+		expect(firstOwner).toBeInstanceOf(Owner);
+		expect(secondOwner).toBeInstanceOf(Owner);
+		expect(Owner).not.toHaveProperty("create");
+	});
+
+	it("owns State lifecycles from a standalone scope", () => {
+		const owner = Owner();
+		const state = State(owner, "active");
+
+		expect(state.getOwner()).toBe(owner);
+		expect(state.disposed).toBe(false);
+
+		owner.dispose();
+
+		expect(state.disposed).toBe(true);
+	});
+
+	it("runs standalone owner cleanup exactly once", () => {
+		const owner = Owner();
+		const cleanup = vi.fn();
+
+		owner.onCleanup(cleanup);
+		owner.dispose();
+		owner.dispose();
+
+		expect(cleanup).toHaveBeenCalledOnce();
+	});
+
+	it("preserves subclass identity and lifecycle hooks", () => {
+		const beforeDispose = vi.fn();
+
+		class TestOwner extends Owner {
+			protected override beforeDispose (): void {
+				beforeDispose();
+			}
+		}
+
+		const owner = new TestOwner();
+
+		expect(owner).toBeInstanceOf(TestOwner);
+		expect(owner).toBeInstanceOf(Owner);
+
+		owner.dispose();
+
+		expect(beforeDispose).toHaveBeenCalledOnce();
+	});
+
 	it("exposes the synchronous disposal phase across hooks and cleanup", () => {
 		const phases: Array<readonly [string, boolean, boolean]> = [];
 		const owner = new class extends Owner {
