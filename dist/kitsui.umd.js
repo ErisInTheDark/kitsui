@@ -164,7 +164,7 @@ var __kitsui_factory__ = (() => {
     }
     queueMicrotask(flush);
   }
-  var Owner = class {
+  var OwnerClass = class {
     /** @hidden */
     constructor() {
       __publicField(this, "cleanupFunctions", /* @__PURE__ */ new Set());
@@ -253,6 +253,10 @@ var __kitsui_factory__ = (() => {
     afterDispose() {
     }
   };
+  var Owner = function Owner2() {
+    return Reflect.construct(OwnerClass, [], new.target ?? OwnerClass);
+  };
+  Owner.prototype = OwnerClass.prototype;
   var orphanedStateErrorMessage = "States must have an owner before the next tick.";
   function getEqualityFunction(state2) {
     return state2["equalityFunction"];

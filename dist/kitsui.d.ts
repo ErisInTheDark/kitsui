@@ -1772,7 +1772,7 @@ type StateInternalOptions<T> = StateOptions<T> & {
     graph?: StateGraph;
 };
 
-export abstract class Owner {
+abstract class OwnerClass {
     private readonly cleanupFunctions;
     private disposingValue;
     private disposedValue;
@@ -1815,6 +1815,15 @@ export abstract class Owner {
      */
     protected afterDispose(): void;
 }
+
+export type Owner = OwnerClass;
+
+type OwnerConstructor = (abstract new () => Owner) & {
+    (): Owner;
+    prototype: Owner;
+};
+
+export const Owner: OwnerConstructor;
 
 class StateClass<T> extends Owner {
     private owner;
