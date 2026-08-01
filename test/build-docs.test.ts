@@ -2,6 +2,7 @@ import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ReflectionKind, TypeScript } from "typedoc";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildDocsSite } from "../scripts/docs";
 import { createSectionAnchorId } from "../scripts/docs/components/ApiModulePage";
@@ -10,6 +11,17 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "..");
 const docsPublicDirectory = path.join(projectRoot, "scripts", "docs", "public");
 let docsDirectory = "";
+
+interface DocsDeclaration {
+	children?: DocsDeclaration[];
+	comment?: {
+		summary?: Array<{ kind: string; text: string }>;
+	};
+	extendedTypes?: Array<{ type: string; name: string; qualifiedName?: string }>;
+	kind?: number;
+	name: string;
+	sources?: Array<{ fileName?: string; line?: number }>;
+}
 
 async function listPublicPages (directory: string): Promise<string[]> {
 	const entries = await readdir(directory, { withFileTypes: true });
@@ -53,6 +65,54 @@ function declarationSlice (html: string, declarationName: string): string {
 	return html.slice(declarationStart, declarationEnd + "</summary></details>".length);
 }
 
+function commentSummary (declaration: DocsDeclaration | undefined): string {
+	return declaration?.comment?.summary?.map(part => part.text).join("") ?? "";
+}
+
+function readonlyConsumerQuickInfoDocumentation (declarationPath: string, declarationText: string): string {
+	const probePath = path.join(path.dirname(declarationPath), "state-readonly-quick-info-probe.ts");
+	const probeSource = [
+		'import { State } from "kitsui";',
+		"type ReadonlyState = State.Readonly<number>;",
+		"",
+	].join("\n");
+	const virtualFiles = new Map([
+		[path.resolve(declarationPath).toLowerCase(), declarationText],
+		[path.resolve(probePath).toLowerCase(), probeSource],
+	]);
+	const compilerOptions = {
+		module: TypeScript.ModuleKind.ESNext,
+		moduleResolution: TypeScript.ModuleResolutionKind.Bundler,
+		strict: true,
+		target: TypeScript.ScriptTarget.ESNext,
+	};
+	const languageService = TypeScript.createLanguageService({
+		directoryExists: TypeScript.sys.directoryExists,
+		fileExists: fileName => virtualFiles.has(path.resolve(fileName).toLowerCase()) || TypeScript.sys.fileExists(fileName),
+		getCompilationSettings: () => compilerOptions,
+		getCurrentDirectory: () => projectRoot,
+		getDefaultLibFileName: TypeScript.getDefaultLibFilePath,
+		getDirectories: TypeScript.sys.getDirectories,
+		getScriptFileNames: () => [declarationPath, probePath],
+		getScriptSnapshot: fileName => {
+			const text = virtualFiles.get(path.resolve(fileName).toLowerCase()) ?? TypeScript.sys.readFile(fileName);
+			return text === undefined ? undefined : TypeScript.ScriptSnapshot.fromString(text);
+		},
+		getScriptVersion: () => "0",
+		readDirectory: TypeScript.sys.readDirectory,
+		readFile: fileName => virtualFiles.get(path.resolve(fileName).toLowerCase()) ?? TypeScript.sys.readFile(fileName),
+	});
+
+	try {
+		const readonlyPosition = probeSource.indexOf("Readonly<number>") + 1;
+		const quickInfo = languageService.getQuickInfoAtPosition(probePath, readonlyPosition);
+		return TypeScript.displayPartsToString(quickInfo?.documentation ?? []);
+	}
+	finally {
+		languageService.dispose();
+	}
+}
+
 beforeAll(async () => {
 	docsDirectory = await mkdtemp(path.join(os.tmpdir(), "kitsui-docs-test-"));
 	await buildDocsSite({ outputDirectory: docsDirectory });
@@ -86,16 +146,7 @@ describe("build:docs pipeline", () => {
 		const examplesJson = await readFile(examplesJsonPath, "utf8");
 		const clientJs = await readFile(path.join(docsDirectory, "client.js"), "utf8");
 		const kitsuiDeclaration = await readFile(kitsuiDeclarationPath, "utf8");
-		const docsModel = JSON.parse(await readFile(docsJsonPath, "utf8")) as {
-			children?: Array<{
-				name: string;
-				children?: Array<{
-					name: string;
-					sources?: Array<{ fileName?: string; line?: number }>;
-					extendedTypes?: Array<{ type: string; name: string }>;
-				}>;
-			}>;
-		};
+		const docsModel = JSON.parse(await readFile(docsJsonPath, "utf8")) as { children?: DocsDeclaration[] };
 		const indexHtml = await readFile(path.join(docsDirectory, "index.html"), "utf8");
 		const notFoundHtml = await readFile(path.join(docsDirectory, "404.html"), "utf8");
 		const playgroundHtml = await readFile(path.join(docsDirectory, "playground.html"), "utf8");
@@ -230,9 +281,29 @@ describe("build:docs pipeline", () => {
 		expect(componentHtml.includes('id="Component.attribute"'), "Missing semantic Component.attribute anchor").toBe(true);
 		expect(componentHtml.includes('id="Component.style"'), "Missing semantic Component.style anchor").toBe(true);
 		expect(componentHtml.includes('id="ComponentExtensions.appendTo"'), "Missing semantic ComponentExtensions.appendTo anchor").toBe(true);
+		expect(componentHtml.includes('id="Component.EventMap"'), "Merged Component declaration should retain its EventMap namespace type").toBe(true);
+		expect(componentHtml.includes('id="Component.WithEvents"'), "Merged Component declaration should retain its WithEvents namespace interface").toBe(true);
 		expect(stateHtml.includes('<title>State - kitsui</title>'), "Missing State page title").toBe(true);
 		expect(stateHtml.includes('<h1 class="docs-component-title">State</h1>'), "Missing State page heading").toBe(true);
 		expect(stateHtml.includes('<a class="docs-sidebar-link docs-sidebar-link-active" href="State.html">State</a>'), "State page is not active in sidebar").toBe(true);
+		const stateDeclarationCount = (stateHtml.match(/<span class="docs-declaration-name">State<\/span>/gu) ?? []).length;
+		expect(stateDeclarationCount, "State should render as one merged declaration").toBe(1);
+		const mergedStateDeclaration = declarationSlice(stateHtml, "State");
+		expect(mergedStateDeclaration.includes("Public readonly-looking state surface for derived or internally-owned state values."), "Merged State declaration should retain the State.Readonly type description").toBe(true);
+		const stateModule = docsModel.children?.find(child => child.name === "state/State");
+		expect(stateModule, "Missing state/State module in TypeDoc output").toBeDefined();
+		const stateNamespace = stateModule?.children?.find(child => child.name === "State" && child.kind === ReflectionKind.Namespace);
+		expect(stateNamespace, "Missing State namespace in TypeDoc output").toBeDefined();
+		const readonlyInterface = stateNamespace?.children?.find(child => child.name === "Readonly" && child.kind === ReflectionKind.Interface);
+		expect(readonlyInterface, "Missing State.Readonly interface in TypeDoc output").toBeDefined();
+		expect(commentSummary(stateNamespace), "Merged State reflection should retain the reactive state description").toContain("Creates a reactive state container with an initial value.");
+		expect(commentSummary(stateNamespace), "Merged State reflection should not own the readonly state description").not.toContain("Public readonly-looking state surface");
+		expect(commentSummary(readonlyInterface), "State.Readonly should own its IDE and website description").toBe("Public readonly-looking state surface for derived or internally-owned state values.");
+		expect(commentSummary(readonlyInterface), "State.Readonly should not inherit the StateExtensions description").not.toContain("Protocol interface for extending State");
+		expect(
+			readonlyConsumerQuickInfoDocumentation(kitsuiDeclarationPath, kitsuiDeclaration),
+			"Published State.Readonly type should expose its description through TypeScript QuickInfo",
+		).toBe("Public readonly-looking state surface for derived or internally-owned state values.");
 		expect(/class="docs-sidebar-section-link"[^>]*href="#section-state"[^>]*>State<\/a>/u.test(stateHtml), "State page should include section sidebar button for State section").toBe(true);
 		expect(/class="docs-sidebar-section-link"[^>]*href="#section-mappingextension"[^>]*>mappingExtension<\/a>/u.test(stateHtml), "State page should include section sidebar button for mappingExtension section").toBe(true);
 		expect(indexHtml.includes('<a class="docs-sidebar-section-link"'), "Overview page should not render section sidebar buttons").toBe(false);

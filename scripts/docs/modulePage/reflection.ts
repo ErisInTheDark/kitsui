@@ -250,9 +250,15 @@ function mergeCallableClassGroup (
 	const rawComment = factory?.comment ?? typeAlias?.comment ?? classDecl.comment;
 	const comment = rawComment ? stripSignatureBlockTags(rawComment) : undefined;
 	const mergedSignatures = extractCallConstructSignatures(factory) ?? extractCallConstructSignatures(constructorType);
+	const sameNameNamespace = members.find(member =>
+		member.kind === ReflectionKind.Namespace
+		&& member.name === name,
+	);
 
-	const mergedChildren = (classDecl.children ?? [])
-		.filter(child => child.kind !== ReflectionKind.Constructor);
+	const mergedChildren = [
+		...(sameNameNamespace?.children ?? []),
+		...(classDecl.children ?? []).filter(child => child.kind !== ReflectionKind.Constructor),
+	];
 
 	const constructorStaticChildren = extractConstructorChildren(constructorType);
 	if (constructorStaticChildren)

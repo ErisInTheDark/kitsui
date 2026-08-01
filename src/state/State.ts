@@ -86,8 +86,8 @@ export interface StateExtensions<T> { }
  */
 export interface StateStaticExtensions { }
 
-/** Public readonly-looking state surface for derived or internally-owned state values. */
 export namespace State {
+	/** Public readonly-looking state surface for derived or internally-owned state values. */
 	export interface Readonly<T> extends StateExtensions<T> {
 		readonly disposed: boolean;
 		readonly value: T;
