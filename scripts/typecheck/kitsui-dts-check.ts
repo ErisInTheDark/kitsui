@@ -1,4 +1,6 @@
 import type {
+	AsyncSettled,
+	AsyncState,
 	CleanupFunction,
 	ComponentBuilderFunction,
 	ComponentChild,
@@ -8,11 +10,12 @@ import type {
 	QueryExpression,
 	StyleValue,
 } from "kitsui";
-import { Component, Draggable, DropTarget, Owner, Sortable, State, Style, mediaQuery } from "kitsui";
+import { AsyncPending, Component, Draggable, DropTarget, Owner, Sortable, State, Style, mediaQuery } from "kitsui";
 
 const standaloneOwner: Owner = Owner();
 const standaloneState = State(standaloneOwner, "active");
 standaloneOwner.onCleanup(() => undefined);
+standaloneOwner.signal satisfies AbortSignal;
 
 class RequestOwner extends Owner {
 	protected override beforeDispose (): void {
@@ -34,6 +37,11 @@ const state = State(host, 0);
 const mapped = state.map(value => value + 1);
 const staticReadonly = State.Readonly({ count: 1 });
 const readonlySource: State.Readonly<number> = state;
+const debounced: State.Readonly<number> = readonlySource.debounce(100);
+const throttled: State.Readonly<number> = readonlySource.throttle(100);
+const asyncValue: AsyncState<string, unknown> = readonlySource.mapAsync(host, async value => String(value));
+const typedError: AsyncState<string, TypeError> = readonlySource.mapAsync<string, TypeError>(host, async value => String(value));
+const lastSettled: State.Readonly<AsyncSettled<string, unknown> | null> = asyncValue.lastSettled;
 const publicTypes: {
 	child: ComponentChild;
 	cleanup: CleanupFunction;
@@ -45,6 +53,20 @@ const publicTypes: {
 };
 
 void state;
+AsyncPending satisfies { readonly type: "pending" };
+void debounced;
+void throttled;
+void asyncValue;
+void typedError;
+void lastSettled;
+// @ts-expect-error debounced derived state should not expose public set
+debounced.set(1);
+// @ts-expect-error throttled derived state should not expose public update
+throttled.update(value => value + 1);
+// @ts-expect-error async derived state should not expose public set
+asyncValue.set({ type: "resolved", value: "next" });
+// @ts-expect-error lastSettled should not expose public update
+lastSettled.update(() => null);
 mapped.value.toFixed();
 mapped.recompute();
 mapped.subscribe(host, value => value.toFixed());

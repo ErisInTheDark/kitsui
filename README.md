@@ -198,6 +198,8 @@ session.dispose()
 
 When a scope belongs to a UI subtree, use the `Component` as its owner. Integration helpers for routers, sockets, observers, and other systems can accept an `Owner` and use `owner.onCleanup(...)` internally; ordinary application code usually only passes the owner to the helper.
 
+Every owner exposes a lifetime-bound `signal` for cancellable platform work.
+
 ## Manipulator Binding
 
 Use manipulators for reactive DOM effects. A single state can drive text, class, raw attributes, typed ARIA attributes, and events without manual DOM bookkeeping.
@@ -328,7 +330,7 @@ card
 - [`Component`](./Component.html): `append`, `prepend`, `insert`, conditional variants, `clear`, `use`, `and`, `is`, `as`, `remove`, `extend`.
 - Placement extensions: `appendTo`, `prependTo`, `insertTo`, conditional variants, and `place`.
 - Manipulators: [`ClassManipulator`](./ClassManipulator.html), [`StyleManipulator`](./StyleManipulator.html), [`AttributeManipulator`](./AttributeManipulator.html), [`TextManipulator`](./TextManipulator.html), [`EventManipulator`](./EventManipulator.html), [`AriaManipulator`](./AriaManipulator.html).
-- [`State`](./State.html): `set`, `update`, equality options, subscriptions, `map`, `truthy`, `falsy`, `or`, `Group`, `extend`.
+- [`State`](./State.html): `set`, `update`, equality options, subscriptions, `map`, `debounce`, `throttle`, `mapAsync`, `truthy`, `falsy`, `or`, `Group`, `extend`.
 - [`Style`](./Style.html): fragments, classes, ordered classes with `after`, variables, nested selectors, media queries, pseudo selectors, animation helpers, and sticky helpers.
 - ARIA: typed helpers for roles, labels, references, booleans, `current`, and `live`.
 - Docs examples: [counter](./playground.html?example=counter.ts), [composition](./playground.html?example=composition.ts), [append-when](./playground.html?example=append-when.ts), [bind-manipulators](./playground.html?example=bind-manipulators.ts), [place-iframe](./playground.html?example=place-iframe.ts), [state-group](./playground.html?example=state-group.ts), [mount-dispose](./playground.html?example=mount-dispose.ts).

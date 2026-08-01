@@ -174,6 +174,10 @@ describe("build:docs pipeline", () => {
 		expect(kitsuiDeclaration.includes('export interface StateStaticExtensions {'), "Missing flattened StateStaticExtensions interface in the main kitsui module").toBe(true);
 		expect(kitsuiDeclaration.includes('appendTo(target: PlacementContainer): this;'), "Missing merged placeExtension methods on ComponentExtensions").toBe(true);
 		expect(kitsuiDeclaration.includes('Group: GroupConstructor;'), "Missing merged State.Group declaration on StateStaticExtensions").toBe(true);
+		expect(kitsuiDeclaration.includes('debounce(milliseconds: number): State.Readonly<T>;'), "Missing debounce in bundled docs declarations").toBe(true);
+		expect(kitsuiDeclaration.includes('throttle(milliseconds: number): State.Readonly<T>;'), "Missing throttle in bundled docs declarations").toBe(true);
+		expect(kitsuiDeclaration.includes('mapAsync<U, E = unknown>'), "Missing mapAsync in bundled docs declarations").toBe(true);
+		expect(kitsuiDeclaration.includes('export interface AsyncState<T, E>'), "Missing AsyncState in bundled docs declarations").toBe(true);
 		expect(/^\s*declare module "kitsui\//mu.test(kitsuiDeclaration), "Declaration bundle should not emit secondary kitsui submodule declarations").toBe(false);
 		expect(/^\s*declare global\s*\{/mu.test(kitsuiDeclaration), "Declaration bundle should not leak global declarations into the public bundle").toBe(false);
 		expect(kitsuiDeclaration.includes('from "./') || kitsuiDeclaration.includes('from "../'), "Declaration bundle should not contain unresolved relative import specifiers").toBe(false);
@@ -185,6 +189,7 @@ describe("build:docs pipeline", () => {
 		expect(indexHtml.includes('name="viewport"'), "Missing viewport meta tag").toBe(true);
 		expect(indexHtml.includes('<title>kitsui</title>'), "Missing title tag").toBe(true);
 		expect(indexHtml.includes("Overview"), "Missing Overview section").toBe(true);
+		expect(indexHtml.includes("mapAsync"), "Overview should document asynchronous State mapping").toBe(true);
 		expect(indexHtml.includes('<a class="docs-sidebar-link" href="playground.html">Playground</a>'), "Playground should move out of the sidebar on regular docs pages").toBe(false);
 		expect(/class="docs-header-right"[^>]*><a class="docs-header-link" href="playground.html">Playground<\/a><\/div>/u.test(indexHtml), "Regular docs pages should expose Playground in the masthead").toBe(true);
 		expect(/class="docs-header-right"[^>]*><a class="docs-header-link" href="playground.html">Playground<\/a><\/div>/u.test(componentHtml), "API docs pages should expose Playground in the masthead").toBe(true);
@@ -325,6 +330,10 @@ describe("build:docs pipeline", () => {
 		expect(stateHtml.includes('<span class="docs-declaration-name">State.extend</span>'), "Missing State.extend declaration name").toBe(true);
 		expect(stateHtml.includes('<span class="docs-signature-name">State.extend</span>'), "Missing State.extend signature name").toBe(true);
 		expect(stateHtml.includes('class="docs-component-section-title"') && stateHtml.includes('>mappingExtension</h2>'), "Missing State mapping extension section").toBe(true);
+		expect(stateHtml.includes('>temporalExtension</h2>'), "Missing State temporal extension section").toBe(true);
+		expect(stateHtml.includes('>asyncMappingExtension</h2>'), "mapAsync should remain part of mappingExtension rather than creating a separate docs section").toBe(false);
+		expect(stateHtml.includes("waits until source changes stop"), "Missing debounce documentation").toBe(true);
+		expect(stateHtml.includes("Superseded operations are aborted and ignored"), "Missing mapAsync latest-only documentation").toBe(true);
 		expect(styleHtml.includes('<title>Style - kitsui</title>'), "Missing Style page title").toBe(true);
 		expect(styleHtml.includes('<h1 class="docs-component-title">Style</h1>'), "Missing Style page heading").toBe(true);
 		for (const manipulatorModule of manipulatorModules) {
@@ -443,6 +452,7 @@ describe("build:docs pipeline", () => {
 		expect(recomputableStateDeclaration.includes('<span class="docs-declaration-name">value</span>'), "RecomputableState should not duplicate inherited State members").toBe(false);
 		const mappingModule = docsModel.children?.find(child => child.name === "state/extensions/mappingExtension");
 		expect(mappingModule, "Missing mappingExtension module in TypeDoc model").toBeDefined();
+		expect(mappingModule?.children?.some(child => child.name === "AsyncState"), "AsyncState should be documented in mappingExtension").toBe(true);
 		const recomputableStateModel = mappingModule?.children?.find(child => child.name === "RecomputableState");
 		expect(
 			recomputableStateModel?.extendedTypes?.some(type =>

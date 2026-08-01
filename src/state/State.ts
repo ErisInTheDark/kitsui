@@ -203,6 +203,7 @@ function scheduleGraphFlush (graph: StateGraph): void {
  * @group Owner
  */
 abstract class OwnerClass {
+	private abortController: AbortController | null = null;
 	private readonly cleanupFunctions = new Set<CleanupFunction>();
 	private disposingValue = false;
 	private disposedValue = false;
@@ -228,6 +229,23 @@ abstract class OwnerClass {
 	}
 
 	/**
+	 * An abort signal for work scoped to this owner's lifetime.
+	 * The signal is created lazily, keeps a stable identity, and aborts synchronously when the owner is disposed.
+	 * @readonly
+	 */
+	get signal (): AbortSignal {
+		if (this.abortController === null) {
+			this.abortController = new AbortController();
+
+			if (this.disposedValue) {
+				this.abortController.abort();
+			}
+		}
+
+		return this.abortController.signal;
+	}
+
+	/**
 	 * Disposes this owner and invokes all registered cleanup functions.
 	 * Once disposed, an owner cannot be used again.
 	 * Subsequent calls to `dispose()` are no-ops.
@@ -241,6 +259,7 @@ abstract class OwnerClass {
 		this.disposingValue = true;
 
 		try {
+			this.abortController?.abort();
 			this.beforeDispose();
 
 			const cleanupFunctions = [...this.cleanupFunctions];

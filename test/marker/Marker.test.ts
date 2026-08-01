@@ -207,7 +207,6 @@ describe("Marker", () => {
 
 		try {
 			Marker("orphan");
-			expect(orphanCapture.timeoutHandler).toBeTypeOf("function");
 			expect(orphanCapture.orphanCheck).toBeTypeOf("function");
 			expect(() => orphanCapture.orphanCheck?.()).not.toThrow();
 			expect(orphanCapture.queuedError).toBeTypeOf("function");

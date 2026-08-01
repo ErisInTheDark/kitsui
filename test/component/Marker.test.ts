@@ -208,7 +208,6 @@ describe("Marker", () => {
 
 		try {
 			Marker("orphan");
-			expect(orphanCapture.timeoutHandler, "unmanaged markers should still arm a timeout-backed orphan tick").toBeTypeOf("function");
 			expect(orphanCapture.orphanCheck, "the orphan check should be attached through Promise.then").toBeTypeOf("function");
 			expect(() => orphanCapture.orphanCheck?.(), "the Promise.then orphan callback should defer its uncaught rethrow").not.toThrow();
 			expect(orphanCapture.queuedError, "the orphan callback should queue an uncaught rethrow").toBeTypeOf("function");

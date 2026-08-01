@@ -3,7 +3,7 @@
  *
  * Exports the public API: Component, State, and their associated manipulators and types.
  *
- * **Side effect:** Registers internal extensions (place and mapping) on module import.
+ * **Side effect:** Registers internal component and State extensions on module import.
  * These enable advanced features and should not be manually invoked.
  */
 
@@ -12,12 +12,14 @@ import compositionExtension from "./component/extensions/compositionExtension";
 import placeExtension from "./component/extensions/placeExtension";
 import groupExtension from "./state/extensions/groupExtension";
 import mappingExtension from "./state/extensions/mappingExtension";
+import temporalExtension from "./state/extensions/temporalExtension";
 
 breakdownExtension();
 compositionExtension();
 placeExtension();
 groupExtension();
 mappingExtension();
+temporalExtension();
 
 export { AriaManipulator } from "./component/AriaManipulator";
 export type {
@@ -122,7 +124,15 @@ export type {
 } from "./component/Sortable";
 export { TextManipulator } from "./component/TextManipulator";
 export type { TextInput, TextSelection, TextValue } from "./component/TextManipulator";
-export type { Mapper } from "./state/extensions/mappingExtension";
+export { AsyncPending } from "./state/extensions/mappingExtension";
+export type {
+    AsyncRejected,
+    AsyncResolved,
+    AsyncResult,
+    AsyncSettled,
+    AsyncState,
+    Mapper
+} from "./state/extensions/mappingExtension";
 export { Owner, State } from "./state/State";
 export type {
     CleanupFunction,

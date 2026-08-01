@@ -121,6 +121,56 @@ describe("Owner", () => {
 		expect(cleanup).toHaveBeenCalledOnce();
 	});
 
+	it("creates one stable signal lazily and does not allocate it during disposal", () => {
+		const owner = Owner();
+		const controllerSlot = owner as unknown as { abortController: AbortController | null };
+
+		expect(controllerSlot.abortController).toBeNull();
+		owner.dispose();
+		expect(controllerSlot.abortController).toBeNull();
+
+		const signal = owner.signal;
+		expect(controllerSlot.abortController).toBeInstanceOf(AbortController);
+		expect(signal.aborted).toBe(true);
+		expect(owner.signal).toBe(signal);
+		expect(controllerSlot.abortController?.signal).toBe(signal);
+	});
+
+	it("aborts an existing signal synchronously before cleanup and only once", () => {
+		const owner = Owner();
+		const signal = owner.signal;
+		const phases: string[] = [];
+		const abortListener = vi.fn(() => {
+			phases.push("abort");
+		});
+		signal.addEventListener("abort", abortListener);
+		owner.onCleanup(() => {
+			phases.push(`cleanup:${signal.aborted}`);
+		});
+
+		expect(signal.aborted).toBe(false);
+		owner.dispose();
+		owner.dispose();
+
+		expect(signal.aborted).toBe(true);
+		expect(phases).toEqual(["abort", "cleanup:true"]);
+		expect(abortListener).toHaveBeenCalledOnce();
+		expect(owner.signal).toBe(signal);
+	});
+
+	it("gives State instances the same Owner lifetime signal", () => {
+		const owner = Owner();
+		const state = State(owner, 1);
+		const signal = state.signal;
+
+		expect(signal.aborted).toBe(false);
+		state.dispose();
+		expect(signal.aborted).toBe(true);
+		expect(state.signal).toBe(signal);
+
+		owner.dispose();
+	});
+
 	it("preserves subclass identity and lifecycle hooks", () => {
 		const beforeDispose = vi.fn();
 
@@ -1342,16 +1392,17 @@ describe("State", () => {
 	/** Verifies ownerless construction preserves the value, reports no owner, and schedules orphan validation through Promise.then. */
 	it("can be constructed without an owner with State.Group", () => {
 		const orphanCheckSpy = captureOrphanCheck();
+		let state: State<number> | null = null;
 
 		try {
-			const state = State(5);
+			state = State(5);
 
 			expect(state.value, "ownerless state should preserve its initial value").toBe(5);
 			expect(state.getOwner(), "ownerless state should report a null owner").toBeNull();
-			expect(orphanCheckSpy.timeoutHandler, "ownerless state should still arm a timeout-backed tick").toBeTypeOf("function");
 			expect(orphanCheckSpy.orphanCheck, "ownerless state should schedule the orphan check through Promise.then").not.toBeNull();
 		}
 		finally {
+			state?.dispose();
 			orphanCheckSpy.restore();
 		}
 	});
@@ -1363,7 +1414,6 @@ describe("State", () => {
 		try {
 			State(1);
 
-			expect(orphanCheckSpy.timeoutHandler, "ownerless state should still arm a timeout-backed tick").toBeTypeOf("function");
 			expect(orphanCheckSpy.orphanCheck, "ownerless state should register the orphan check through Promise.then").not.toBeNull();
 			expect(() => orphanCheckSpy.orphanCheck!(), "ownerless state should defer its uncaught rethrow").not.toThrow();
 			expect(orphanCheckSpy.queuedError, "ownerless state should queue an uncaught rethrow").toBeTypeOf("function");
@@ -1411,7 +1461,6 @@ describe("State", () => {
 				label: "one",
 			});
 			expect(grouped.getOwner(), "ownerless State.Group should report a null owner").toBeNull();
-			expect(orphanCheckSpy.timeoutHandler, "ownerless State.Group should still arm a timeout-backed tick").toBeTypeOf("function");
 			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group should schedule the orphan check through Promise.then").not.toBeNull();
 		}
 		finally {
@@ -1432,7 +1481,6 @@ describe("State", () => {
 
 			ownerlessGroup({ count, label });
 
-			expect(orphanCheckSpy.timeoutHandler, "ownerless State.Group should still arm a timeout-backed tick").toBeTypeOf("function");
 			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group should register the orphan check through Promise.then").not.toBeNull();
 			expect(() => orphanCheckSpy.orphanCheck!(), "ownerless State.Group should defer its uncaught rethrow").not.toThrow();
 			expect(orphanCheckSpy.queuedError, "ownerless State.Group should queue an uncaught rethrow").toBeTypeOf("function");
@@ -1459,7 +1507,6 @@ describe("State", () => {
 				({ count: currentCount, label: currentLabel }: { count: number; label: string }) => `${currentLabel}:${currentCount}`,
 			);
 
-			expect(orphanCheckSpy.timeoutHandler, "ownerless State.Group should still arm a timeout-backed tick").toBeTypeOf("function");
 			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group mapper overload should register the orphan check through Promise.then").not.toBeNull();
 			expect(() => orphanCheckSpy.orphanCheck!(), "ownerless State.Group mapper overload should defer its uncaught rethrow").not.toThrow();
 			expect(orphanCheckSpy.queuedError, "ownerless State.Group mapper overload should queue an uncaught rethrow").toBeTypeOf("function");

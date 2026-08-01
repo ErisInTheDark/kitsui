@@ -6,6 +6,41 @@ type ComparableValue<T> = T | State.Readonly<T>;
 /** Maps a source state value, and optionally its previous value, into a derived value. */
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
 
+/** The canonical immutable value used while an asynchronous mapping is pending. */
+export const AsyncPending = Object.freeze({
+	type: "pending",
+} as const);
+
+/** The canonical pending value type. */
+export type AsyncPending = typeof AsyncPending;
+
+/** A successfully resolved asynchronous mapping value. */
+export interface AsyncResolved<T> {
+	readonly type: "resolved";
+	readonly value: T;
+}
+
+/** A rejected asynchronous mapping value. */
+export interface AsyncRejected<E> {
+	readonly type: "rejected";
+	readonly error: E;
+}
+
+/** The pending, resolved, or rejected result of the latest asynchronous mapping. */
+export type AsyncResult<T, E> = AsyncPending | AsyncResolved<T> | AsyncRejected<E>;
+
+/** A resolved or rejected asynchronous mapping result. */
+export type AsyncSettled<T, E> = AsyncResolved<T> | AsyncRejected<E>;
+
+/** A readonly latest-only asynchronous mapping State. */
+export interface AsyncState<T, E> extends State.Readonly<AsyncResult<T, E>> {
+	/**
+	 * The latest accepted resolved or rejected result, or `null` before the first settlement.
+	 * Starting a newer evaluation does not clear this State.
+	 */
+	readonly lastSettled: State.Readonly<AsyncSettled<T, E> | null>;
+}
+
 /** A mapped state that can be manually recomputed when external mapping inputs change. */
 export interface RecomputableState<T> extends State.Readonly<T> {
 	/**
@@ -16,6 +51,7 @@ export interface RecomputableState<T> extends State.Readonly<T> {
 }
 
 type MutableRecomputableState<T> = State<T> & RecomputableState<T>;
+type MutableAsyncState<T, E> = State<AsyncResult<T, E>> & AsyncState<T, E>;
 
 type ImplicitOwnerLinkedState = State<unknown> & {
 	_registerImplicitOwnerDependent?: (dependent: State.Readonly<unknown>) => CleanupFunction;
@@ -42,6 +78,15 @@ declare module "../State" {
 		 * @returns A new state with the transformed values.
 		 */
 		map<TMapped> (owner: Owner, mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
+
+		/**
+		 * Maps the latest coalesced source value asynchronously.
+		 * Superseded operations are aborted and ignored, and the returned State is disposed with the explicit owner.
+		 * @param owner The owner responsible for the asynchronous mapping lifetime.
+		 * @param mapper Maps a source value with a signal that aborts on supersession or disposal.
+		 * @returns A readonly asynchronous State that begins with the canonical pending value.
+		 */
+		mapAsync<U, E = unknown> (owner: Owner, mapper: (value: T, signal: AbortSignal) => Promise<U>): AsyncState<U, E>;
 
 		/**
 		 * A boolean state indicating whether the current value is truthy.
@@ -125,6 +170,110 @@ function createMappedState<T, TMapped> (
 	return mapped;
 }
 
+function createAsyncMappingState<T, U, E> (
+	source: State<T>,
+	owner: Owner,
+	mapper: (value: T, signal: AbortSignal) => Promise<U>,
+): AsyncState<U, E> {
+	const graphOptions = {
+		graph: source.getGraph(),
+	};
+	const asyncState = createOwnedState<AsyncResult<U, E>>(owner, AsyncPending, graphOptions as StateOptions<AsyncResult<U, E>>) as MutableAsyncState<U, E>;
+	const lastSettled = createOwnedState<AsyncSettled<U, E> | null>(asyncState, null, graphOptions as StateOptions<AsyncSettled<U, E> | null>);
+
+	Object.defineProperty(asyncState, "lastSettled", {
+		configurable: false,
+		enumerable: false,
+		value: lastSettled as State.Readonly<AsyncSettled<U, E> | null>,
+		writable: false,
+	});
+
+	let generation = 0;
+	let activeController: AbortController | null = null;
+
+	const evaluate = (value: T): void => {
+		if (asyncState.disposed) {
+			return;
+		}
+
+		const currentGeneration = ++generation;
+		activeController?.abort();
+
+		const operationController = new AbortController();
+		activeController = operationController;
+		const signal = AbortSignal.any([
+			asyncState.signal,
+			operationController.signal,
+		]);
+
+		asyncState.set(AsyncPending);
+
+		const acceptsSettlement = (): boolean => currentGeneration === generation
+			&& activeController === operationController
+			&& !signal.aborted
+			&& !asyncState.disposed;
+
+		void Promise.resolve()
+			.then(() => {
+				if (!acceptsSettlement()) {
+					return undefined;
+				}
+
+				return mapper(value, signal);
+			})
+			.then((mappedValue) => {
+				if (!acceptsSettlement()) {
+					return;
+				}
+
+				activeController = null;
+				const settled: AsyncResolved<U> = {
+					type: "resolved",
+					value: mappedValue as U,
+				};
+				asyncState.set(settled);
+
+				if (!lastSettled.disposed) {
+					lastSettled.set(settled);
+				}
+			}, (error: unknown) => {
+				if (!acceptsSettlement()) {
+					return;
+				}
+
+				activeController = null;
+				const settled: AsyncRejected<E> = {
+					error: error as E,
+					type: "rejected",
+				};
+				asyncState.set(settled);
+
+				if (!lastSettled.disposed) {
+					lastSettled.set(settled);
+				}
+			});
+	};
+
+	const releaseSourceSubscription = source.subscribe(asyncState, (value) => {
+		evaluate(value);
+	});
+	const releaseSourceCleanup = source.onCleanup(() => {
+		asyncState.dispose();
+	});
+
+	asyncState.onCleanup(() => {
+		generation++;
+		activeController?.abort();
+		activeController = null;
+		releaseSourceCleanup();
+		releaseSourceSubscription();
+	});
+
+	evaluate(source.value);
+
+	return asyncState;
+}
+
 function createComparisonState<T> (
 	source: State<T>,
 	compareValue: ComparableValue<T>,
@@ -151,8 +300,8 @@ function createComparisonState<T> (
 }
 
 /**
- * Extends the State class with mapping and transformation methods.
- * This extension adds the {@link StateExtensions.map}, {@link StateExtensions.truthy},
+ * Extends the State class with synchronous and asynchronous mapping and transformation methods.
+ * This extension adds the {@link StateExtensions.map}, {@link StateExtensions.mapAsync}, {@link StateExtensions.truthy},
  * {@link StateExtensions.falsy}, {@link StateExtensions.or}, {@link StateExtensions.equals},
  * and {@link StateExtensions.notEquals} methods to all State instances.
  * Safe to call multiple times; subsequent calls are no-ops.
@@ -177,6 +326,13 @@ export default function mappingExtension (): void {
 		}
 
 		return createMappedState(this, null, ownerOrMapValue, maybeMapValueOrOptions as StateOptions<TMapped> | undefined);
+	};
+
+	prototype.mapAsync = function mapAsync<U, E = unknown> (
+		owner: Owner,
+		mapper: (value: unknown, signal: AbortSignal) => Promise<U>,
+	): AsyncState<U, E> {
+		return createAsyncMappingState(this, owner, mapper);
 	};
 
 	Object.defineProperty(prototype, "truthy", {

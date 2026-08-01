@@ -3,6 +3,7 @@ import * as kitsui from "../src/index";
 
 describe("kitsui entrypoint", () => {
 	it("re-exports the core building blocks", () => {
+		expect(kitsui).toHaveProperty("AsyncPending");
 		expect(kitsui).toHaveProperty("AttributeManipulator");
 		expect(kitsui).toHaveProperty("Component");
 		expect(kitsui).toHaveProperty("ClassManipulator");
@@ -32,7 +33,12 @@ describe("kitsui entrypoint", () => {
 		expect(typeof component.appendTo).toBe("function");
 		expect(component.event).toBe(component.event);
 		expect(component.text).toBe(component.text);
+		expect(typeof state.debounce).toBe("function");
 		expect(typeof state.map).toBe("function");
+		expect(typeof state.mapAsync).toBe("function");
+		expect(typeof state.throttle).toBe("function");
+		expect(kitsui.AsyncPending).toEqual({ type: "pending" });
+		expect(Object.isFrozen(kitsui.AsyncPending)).toBe(true);
 		expect(state.truthy).toBeInstanceOf(kitsui.State);
 	});
 });

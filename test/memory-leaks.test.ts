@@ -30,6 +30,7 @@ async function leakProbe (
 		sortableUrl: string;
 		stateUrl: string;
 		styleUrl: string;
+		temporalExtensionUrl: string;
 	},
 	dependencies: {
 		Component: typeof import("../src/component/Component").Component;
@@ -364,8 +365,10 @@ async function leakProbe (
 		it("base state disposal", async ({ track }) => {
 			let owner = track("base state owner", new TestOwner());
 			let state = track("base state", State(owner, 1));
+			const signal = owner.signal;
 
 			owner.dispose();
+			if (!signal.aborted) throw new Error("Owner signal did not abort.");
 
 			owner = null as never;
 			state = null as never;
@@ -406,22 +409,48 @@ async function leakProbe (
 			};
 		});
 
-		it("mapped state cleanup while source survives", async ({ hold, track }) => {
+		it("derived state cleanup while source survives", async ({ hold, track }) => {
 			const sourceOwner = hold(new TestOwner());
 			const source = hold(State(sourceOwner, 1));
-			let mappedOwner = track("mapped owner", new TestOwner());
+			let mappedOwner = track("derived owner", new TestOwner());
 			const mapValue = track("mapped callback", (value: number) => {
 				return value + 1;
 			});
 			let mapped = track("mapped state", source.map(mappedOwner, mapValue));
+			const temporalListener = track("temporal listener", () => undefined);
+			let debounced = track("debounced state", source.debounce(1_000));
+			let throttled = track("throttled state", source.throttle(1_000));
+			const operationSignals: AbortSignal[] = [];
+			const asyncMapper = track("async mapper", (_value: number, signal: AbortSignal) => {
+				operationSignals.push(track("async signal", signal));
+				return new Promise<number>((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+			});
+			let asyncState = track("async state", source.mapAsync(mappedOwner, asyncMapper));
+			let lastSettled = track("last settled", asyncState.lastSettled);
+
+			debounced.subscribe(mappedOwner, temporalListener);
+			throttled.subscribe(mappedOwner, temporalListener);
+			source.set(2);
+			await flushEffects();
 
 			mappedOwner.dispose();
+			await settle();
+			if (!operationSignals[0]?.aborted) throw new Error("Async signal did not abort.");
 
 			mappedOwner = null as never;
 			mapped = null as never;
+			debounced = null as never;
+			throttled = null as never;
+			operationSignals.length = 0;
+			asyncState = null as never;
+			lastSettled = null as never;
 
 			return {
-				expected: ["mapped owner", "mapped callback", "mapped state"],
+				expected: [
+					"derived owner", "mapped callback", "mapped state",
+					"temporal listener", "debounced state", "throttled state",
+					"async mapper", "async signal", "async state", "last settled",
+				],
 				release: () => {
 					sourceOwner.dispose();
 				},
@@ -956,6 +985,7 @@ async function runLeakProbe (): Promise<LeakProbeReport> {
 		sortableUrl: pathToFileURL(resolve(cwd, "src", "component", "Sortable.ts")).href,
 		stateUrl: pathToFileURL(resolve(cwd, "src", "state", "State.ts")).href,
 		styleUrl: pathToFileURL(resolve(cwd, "src", "component", "Style.ts")).href,
+		temporalExtensionUrl: pathToFileURL(resolve(cwd, "src", "state", "extensions", "temporalExtension.ts")).href,
 	});
 	const probeCodeLines = [
 		`const args = JSON.parse(${JSON.stringify(payload)});`,
@@ -966,6 +996,7 @@ async function runLeakProbe (): Promise<LeakProbeReport> {
 		"\tconst dropTargetModule = await import(args.dropTargetUrl);",
 		"\tconst stateModule = await import(args.stateUrl);",
 		"\tconst styleModule = await import(args.styleUrl);",
+		"\tconst temporalExtensionModule = await import(args.temporalExtensionUrl);",
 		"\tconst sortableModule = await import(args.sortableUrl);",
 		"\tconst placeExtensionModule = await import(args.placeExtensionUrl);",
 		"\tconst mappingExtensionModule = await import(args.mappingExtensionUrl);",
@@ -979,6 +1010,7 @@ async function runLeakProbe (): Promise<LeakProbeReport> {
 		"\tconst resolveExtension = (moduleValue) => moduleValue?.default?.default ?? moduleValue?.default ?? moduleValue;",
 		"\tconst placeExtension = resolveExtension(placeExtensionModule);",
 		"\tconst mappingExtension = resolveExtension(mappingExtensionModule);",
+		"\tconst temporalExtension = resolveExtension(temporalExtensionModule);",
 		"\tif (typeof Component !== \"function\") throw new Error(`Component export was not callable: ${Object.keys(componentModule).join(\",\")}`);",
 		"\tif (typeof Draggable !== \"function\") throw new Error(`Draggable export was not callable: ${Object.keys(draggableModule).join(\",\")}`);",
 		"\tif (typeof DropTarget !== \"function\") throw new Error(`DropTarget export was not callable: ${Object.keys(dropTargetModule).join(\",\")}`);",
@@ -988,8 +1020,10 @@ async function runLeakProbe (): Promise<LeakProbeReport> {
 		"\tif (typeof Style !== \"function\" || typeof Style.Class !== \"function\") throw new Error(`Style export was not callable: ${Object.keys(styleModule).join(\",\")}`);",
 		"\tif (typeof placeExtension !== \"function\") throw new Error(`placeExtension export was not callable: ${Object.keys(placeExtensionModule).join(\",\")}`);",
 		"\tif (typeof mappingExtension !== \"function\") throw new Error(`mappingExtension export was not callable: ${Object.keys(mappingExtensionModule).join(\",\")}`);",
+		"\tif (typeof temporalExtension !== \"function\") throw new Error(`temporalExtension export was not callable: ${Object.keys(temporalExtensionModule).join(\",\")}`);",
 		"\tplaceExtension();",
 		"\tmappingExtension();",
+		"\ttemporalExtension();",
 		`	const report = await (${leakProbe.toString()})(args, { Component, Draggable, DropTarget, Owner, Sortable, State, Style, Window });`,
 		`	console.log(${JSON.stringify(reportPrefix)} + JSON.stringify(report));`,
 		"} catch (error) {",

@@ -1,17 +1,21 @@
+import { scheduleTimeout, type ScheduledTimeoutHandle } from "./timer";
+
 export interface DeferredTimeoutHandle {
 	cancel (): void;
 }
 
 export function scheduleTimeoutPromise (callback: () => void): DeferredTimeoutHandle {
 	let active = true;
-	let timeoutId: ReturnType<typeof setTimeout> | null = null;
+	let timeoutHandle: ScheduledTimeoutHandle | null = null;
 
 	const timeoutPromise = new Promise<void>((resolve) => {
-		timeoutId = setTimeout(resolve, 0);
+		timeoutHandle = scheduleTimeout(resolve, 0);
 	});
 
 	void timeoutPromise.then(() => {
-		timeoutId = null;
+		const scheduledTimeout = timeoutHandle;
+		timeoutHandle = null;
+		scheduledTimeout?.cancel();
 
 		if (!active) {
 			return;
@@ -37,12 +41,12 @@ export function scheduleTimeoutPromise (callback: () => void): DeferredTimeoutHa
 
 			active = false;
 
-			if (timeoutId === null) {
+			if (timeoutHandle === null) {
 				return;
 			}
 
-			clearTimeout(timeoutId);
-			timeoutId = null;
+			timeoutHandle.cancel();
+			timeoutHandle = null;
 		},
 	};
 }

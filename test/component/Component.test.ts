@@ -1471,7 +1471,6 @@ describe("Component", () => {
 			try {
 				Component("div");
 
-				expect(orphanCheckSpy.timeoutHandler, "unmanaged components should still arm a timeout-backed orphan tick").toBeTypeOf("function");
 				expect(orphanCheckSpy.orphanCheck, "the orphan check should be attached through Promise.then").toBeTypeOf("function");
 				expect(() => orphanCheckSpy.orphanCheck?.(), "the Promise.then orphan callback should defer its uncaught rethrow").not.toThrow();
 				expect(orphanCheckSpy.queuedError, "the orphan callback should queue an uncaught rethrow").toBeTypeOf("function");
