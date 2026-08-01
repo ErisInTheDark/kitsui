@@ -400,8 +400,14 @@ function extractDeclaredModuleBody (statement: string): string {
 	return "";
 }
 
-function renderModuleStatements (sourceText: string, selectedExports: Set<string>): string[] {
-	const rendered: string[] = [];
+interface RenderedModuleStatements {
+	augmentations: string[];
+	declarations: string[];
+}
+
+function renderModuleStatements (sourceText: string, selectedExports: Set<string>): RenderedModuleStatements {
+	const augmentations: string[] = [];
+	const declarations: string[] = [];
 
 	for (const statement of splitTopLevelStatements(sourceText)) {
 		const code = statementCode(statement);
@@ -424,7 +430,7 @@ function renderModuleStatements (sourceText: string, selectedExports: Set<string
 			for (const bodyStatement of splitTopLevelStatements(body)) {
 				const normalized = ensureExportedDeclaration(bodyStatement).trim();
 				if (normalized) {
-					rendered.push(normalized);
+					augmentations.push(normalized);
 				}
 			}
 			continue;
@@ -436,14 +442,14 @@ function renderModuleStatements (sourceText: string, selectedExports: Set<string
 
 		const exportedName = getExportedDeclarationName(statement);
 		if (exportedName) {
-			rendered.push(stripAmbientDeclareKeyword(selectedExports.has(exportedName) ? statement : stripExportKeyword(statement)).trim());
+			declarations.push(stripAmbientDeclareKeyword(selectedExports.has(exportedName) ? statement : stripExportKeyword(statement)).trim());
 			continue;
 		}
 
-		rendered.push(stripAmbientDeclareKeyword(statement).trim());
+		declarations.push(stripAmbientDeclareKeyword(statement).trim());
 	}
 
-	return rendered;
+	return { augmentations, declarations };
 }
 
 function orderIncludedModules (exportsByModule: ModuleExportMap, includedModules: Set<string>): string[] {
@@ -511,7 +517,9 @@ export async function buildDeclarationBundle (options: BuildDeclarationBundleOpt
 		}
 	}
 
-	const renderedStatements: string[] = [];
+	const declarations: string[] = [];
+	const exportedModuleAugmentations: string[] = [];
+	const supplementalAugmentations: string[] = [];
 	for (const modulePath of orderIncludedModules(exportsByModule, includedModules)) {
 		const sourceText = declarationTexts.get(modulePath);
 		if (!sourceText) {
@@ -519,9 +527,17 @@ export async function buildDeclarationBundle (options: BuildDeclarationBundleOpt
 		}
 
 		const selectedExports = exportsByModule.get(modulePath) ?? new Set<string>();
-		renderedStatements.push(...renderModuleStatements(sourceText, selectedExports));
+		const rendered = renderModuleStatements(sourceText, selectedExports);
+		declarations.push(...rendered.declarations);
+
+		const augmentations = exportsByModule.has(modulePath)
+			? exportedModuleAugmentations
+			: supplementalAugmentations;
+		augmentations.push(...rendered.augmentations);
 	}
 
+	// Feature-owned overloads must follow general extension overloads because TypeScript gives later merged declarations priority.
+	const renderedStatements = [...declarations, ...supplementalAugmentations, ...exportedModuleAugmentations];
 	return `declare module "kitsui" {\n${renderedStatements.join("\n\n")}\n}\n`;
 }
 

@@ -940,3 +940,13 @@ export const Sortable = function Sortable<
 Sortable.Transfer = function Transfer<T> (label?: string): SortableTransfer<T> {
 	return { label };
 };
+
+declare module "./Component" {
+	interface ComponentExtensions {
+		and<T, TItem extends Component = Component, K extends PropertyKey = number> (
+			builder: typeof Sortable,
+			input: readonly T[] | State.Readonly<readonly T[]>,
+			options: SortableOptions<T, TItem, K>,
+		): this & Component & SortableExtensions<T, TItem, K>;
+	}
+}
