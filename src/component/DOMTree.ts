@@ -80,7 +80,7 @@ function runPlacementCallbacks (placementNode: PlacementNode, onPlaced: (node: N
 }
 
 function isRegistrationDisposed (registration: DOMTreeNodeRegistration): boolean {
-	return !registration.active || registration.owner.deref()?.disposed !== false;
+	return !registration.active || registration.owner.deref()?.disposed === true;
 }
 
 function isDisposedNode (node: Node): boolean {

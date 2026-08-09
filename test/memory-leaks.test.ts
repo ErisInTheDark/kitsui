@@ -230,6 +230,25 @@ async function leakProbe (
 			};
 		});
 
+		it("late child placement through a collected wrapper", async ({ track }) => {
+			const root = Component("section").appendTo(body);
+			let intermediate = track("collected live intermediate", Component("div").appendTo(root));
+			const target = Component("div").appendTo(intermediate);
+			intermediate = null as never;
+
+			return {
+				expected: ["collected live intermediate"],
+				release () {
+					const lateChild = Component("span").appendTo(target);
+					if (lateChild.element.parentNode !== target.element || !lateChild.element.isConnected) {
+						throw new Error("A collected Component wrapper poisoned its connected DOM subtree.");
+					}
+
+					root.remove();
+				},
+			};
+		});
+
 		it("owned component subtree cleanup", async ({ track }) => {
 			let owner = track("subtree owner", Component("section").appendTo(body));
 			const child = track("subtree child", Component("div"));
