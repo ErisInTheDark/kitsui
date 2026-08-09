@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { AttributeManipulator } from "../../src/component/AttributeManipulator";
-import { Component } from "../../src/component/Component";
+import { Component, registerComponentOwnerResolver, type ComponentSelectionState } from "../../src/component/Component";
+import { DOMTree } from "../../src/component/DOMTree";
 import type { Place } from "../../src/component/extensions/placeExtension";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Style } from "../../src/component/Style";
-import { State } from "../../src/state/State";
+import { Owner, State, type CleanupFunction } from "../../src/state/State";
 
 declare module "../../src/component/Component" {
 	interface ComponentExtensions {
@@ -108,8 +109,65 @@ function captureOrphanCheck (): {
 	};
 }
 
+function captureDeferredOrphanErrors (): {
+	readonly queuedErrors: readonly VoidFunction[];
+	flush: () => Promise<void>;
+	restore: () => void;
+} {
+	vi.useFakeTimers();
+	const queuedErrors: VoidFunction[] = [];
+	const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation(callback => queuedErrors.push(callback));
+
+	return {
+		queuedErrors,
+		async flush (): Promise<void> {
+			await vi.runAllTimersAsync();
+			await Promise.resolve();
+		},
+		restore (): void {
+			queueMicrotaskSpy.mockRestore();
+			vi.useRealTimers();
+		},
+	};
+}
+
+function customReadonlyBooleanState (value: boolean, subscribe: State.Readonly<boolean>["subscribe"]): State.Readonly<boolean> {
+	return Object.assign(Object.create(State.Readonly(value)) as State.Readonly<boolean>, { subscribe });
+}
+
+function synchronousSelection (initialValue: Component | null): ComponentSelectionState & { set: (value: Component | null) => void } {
+	let value = initialValue;
+	let listener: ((value: Component | null) => void) | null = null;
+
+	return {
+		get value () {
+			return value;
+		},
+		set (nextValue) {
+			value = nextValue;
+			listener?.(nextValue);
+		},
+		subscribe (_owner, nextListener) {
+			listener = nextListener;
+			return () => {
+				if (listener === nextListener) listener = null;
+			};
+		},
+	};
+}
+
 function nonCommentNodes (element: HTMLElement): Node[] {
 	return Array.from(element.childNodes).filter((node) => !(node instanceof Comment));
+}
+
+function captureThrown (action: () => void): unknown {
+	try {
+		action();
+	} catch (error) {
+		return error;
+	}
+
+	throw new Error("Expected action to throw.");
 }
 
 function findCommentNode (element: HTMLElement, data: string): Comment | undefined {
@@ -198,6 +256,32 @@ describe("Component", () => {
 		expect(element.component).toBeUndefined();
 	});
 
+	it("rejects rewrapping an element during its old Component cleanup", () => {
+		const element = document.createElement("div");
+		document.body.append(element);
+		const component = Component(element);
+		let replacement: Component | undefined;
+		let rewrapError: unknown;
+		component.onCleanup(() => {
+			try {
+				replacement = Component(element);
+			} catch (error) {
+				rewrapError = error;
+			}
+		});
+
+		try {
+			component.remove();
+			expect.soft(rewrapError).toBeInstanceOf(Error);
+			expect.soft((rewrapError as Error | undefined)?.message).toBe("This node already has a component. Use node.component to retrieve it.");
+			expect.soft(replacement).toBeUndefined();
+			expect(element.component).toBeUndefined();
+		} finally {
+			if (replacement && !replacement.disposed) replacement.remove();
+			element.remove();
+		}
+	});
+
 	it("wraps DOM elements and appends children", () => {
 		const root = mountedComponent("div", (component) => {
 			component.attribute.set("class", "shell");
@@ -261,6 +345,21 @@ describe("Component", () => {
 		expect(root.element.textContent).toBe("firstsecondtail");
 	});
 
+	it("preserves prepend argument order when the first requested child already leads", () => {
+		const root = mountedComponent("div");
+		const alpha = Component("span").text.set("a");
+		const beta = Component("span").text.set("b");
+		const gamma = Component("span").text.set("c");
+
+		root.append(alpha, beta, gamma);
+		root.prepend(alpha, gamma);
+
+		expect.soft(Array.from(root.element.childNodes)).toEqual([alpha.element, gamma.element, beta.element]);
+		expect.soft(root.element.textContent).toBe("acb");
+		expect(new Set(root.element.childNodes)).toEqual(new Set([alpha.element, beta.element, gamma.element]));
+		root.remove();
+	});
+
 	it("ignores falsy prepend children", () => {
 		const root = mountedComponent("div");
 		const child = Component("span").text.set("child");
@@ -301,6 +400,126 @@ describe("Component", () => {
 			first.remove();
 			second.remove();
 			root.remove();
+		}
+	});
+
+	it("keeps a stable prepend anchor after a DocumentFragment is consumed", () => {
+		const host = mountedComponent("section");
+		const tail = Component("i").text.set("tail");
+		const direct = Component("b").text.set("direct");
+		const selected = Component("em").text.set("selected");
+		const selection = synchronousSelection(selected);
+		const fragment = document.createDocumentFragment();
+		const fragmentChild = document.createElement("span");
+		fragmentChild.textContent = "fragment";
+		fragment.append(fragmentChild);
+		host.append(tail);
+
+		try {
+			host.prepend(fragment, direct, selection);
+
+			expect(fragment.childNodes).toHaveLength(0);
+			expect(nonCommentNodes(host.element)).toEqual([
+				fragmentChild,
+				direct.element,
+				selected.element,
+				tail.element,
+			]);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!direct.disposed) direct.remove();
+			if (!selected.disposed) selected.remove();
+			if (!tail.disposed) tail.remove();
+		}
+	});
+
+	it("keeps following prepend children anchored after a recursive first node is rejected", () => {
+		const host = mountedComponent("section");
+		const tail = Component("i").text.set("tail");
+		const direct = Component("b").text.set("direct");
+		const selected = Component("em").text.set("selected");
+		const selection = synchronousSelection(selected);
+		host.append(tail);
+
+		try {
+			expect(() => host.prepend(host, direct, selection)).not.toThrow();
+			expect(nonCommentNodes(host.element)).toEqual([
+				direct.element,
+				selected.element,
+				tail.element,
+			]);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!direct.disposed) direct.remove();
+			if (!selected.disposed) selected.remove();
+			if (!tail.disposed) tail.remove();
+		}
+	});
+
+	it("keeps following prepend children anchored when the first child and original tail are reparented during Mount", () => {
+		const host = mountedComponent("section");
+		const reparentHost = mountedComponent("aside");
+		const tail = Component("i").text.set("tail");
+		const first = Component("span").text.set("first");
+		const direct = Component("b").text.set("direct");
+		const selected = Component("em").text.set("selected");
+		const selection = synchronousSelection(selected);
+		first.event.owned.on.Mount(() => {
+			first.appendTo(reparentHost);
+			tail.appendTo(reparentHost);
+		});
+		host.append(tail);
+
+		try {
+			host.prepend(first, direct, selection);
+
+			expect.soft(Array.from(reparentHost.element.childNodes)).toEqual([first.element, tail.element]);
+			expect(nonCommentNodes(host.element)).toEqual([
+				direct.element,
+				selected.element,
+			]);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!reparentHost.disposed) reparentHost.remove();
+			if (!first.disposed) first.remove();
+			if (!direct.disposed) direct.remove();
+			if (!selected.disposed) selected.remove();
+			if (!tail.disposed) tail.remove();
+		}
+	});
+
+	it.each(["append", "prepend", "insert"] as const)("cleans unprocessed Components when %s loses its host during the first Mount", async (method) => {
+		const orphanCapture = captureDeferredOrphanErrors();
+		const host = mountedComponent("div");
+		const anchor = method === "insert" ? Component("i").appendTo(host) : null;
+		const externalManager = mountedComponent("aside");
+		const first = Component("span");
+		const unownedLater = Component("b");
+		const ownedLater = Component("em").owner.add(externalManager);
+		first.event.owned.on.Mount(() => method === "insert" ? anchor!.remove() : host.remove());
+
+		try {
+			expect.soft(() => {
+				if (method === "append") host.append(first, unownedLater, ownedLater);
+				else if (method === "prepend") host.prepend(first, unownedLater, ownedLater);
+				else anchor!.insert("before", first, unownedLater, ownedLater);
+			}).not.toThrow();
+			await orphanCapture.flush();
+
+			expect.soft(orphanCapture.queuedErrors).toEqual([]);
+			expect.soft(unownedLater.disposed).toBe(true);
+			expect.soft(ownedLater.disposed).toBe(false);
+			expect.soft(ownedLater.element.parentNode).toBeNull();
+			externalManager.remove();
+			expect(ownedLater.disposed).toBe(true);
+		} finally {
+			orphanCapture.restore();
+			if (!first.disposed) first.remove();
+			if (!unownedLater.disposed) unownedLater.remove();
+			if (!ownedLater.disposed) ownedLater.remove();
+			if (anchor && !anchor.disposed) anchor.remove();
+			if (!host.disposed) host.remove();
+			if (!externalManager.disposed) externalManager.remove();
 		}
 	});
 
@@ -367,6 +586,457 @@ describe("Component", () => {
 		dynamic.set(null);
 		await flushEffects();
 		expect(nonCommentNodes(host.element)).toEqual([anchor.element]);
+	});
+
+	it("replaces an ordinary selection controller when the same Component is authored again", async () => {
+		const firstHost = mountedComponent("section");
+		const secondHost = mountedComponent("aside");
+		const child = Component("span");
+		const firstSelection = State<Component | null>(firstHost, child);
+		const secondSelection = State<Component | null>(secondHost, child);
+		firstHost.append(firstSelection);
+
+		expect.soft(() => secondHost.append(secondSelection)).not.toThrow();
+		expect.soft(child.element.parentNode).toBe(secondHost.element);
+		expect.soft(nonCommentNodes(firstHost.element)).toEqual([]);
+
+		firstSelection.set(null);
+		await flushEffects();
+		expect.soft(child.disposed).toBe(false);
+		expect.soft(child.element.parentNode).toBe(secondHost.element);
+		firstSelection.set(child);
+		await flushEffects();
+		expect.soft(child.element.parentNode).toBe(secondHost.element);
+
+		secondSelection.set(null);
+		await flushEffects();
+		expect(child.disposed).toBe(true);
+		firstHost.remove();
+		secondHost.remove();
+	});
+
+	it.each(["deselection", "host cleanup"] as const)("detaches an externally owned ordinary selection during %s", async (cleanup) => {
+		const externalOwner = mountedComponent("article");
+		const host = mountedComponent("section");
+		const child = Component("span").owner.add(externalOwner);
+		const selection = State<Component | null>(host, child);
+		host.append(selection);
+
+		if (cleanup === "deselection") {
+			selection.set(null);
+			await flushEffects();
+		} else {
+			host.remove();
+		}
+
+		expect.soft(child.disposed).toBe(false);
+		expect.soft(child.element.parentNode).toBeNull();
+		if (!host.disposed) host.remove();
+		externalOwner.remove();
+		expect(child.disposed).toBe(true);
+	});
+
+	it.each(["ordinary", "conditional"] as const)("disposes later %s selection children when the first Mount removes the host", async (api) => {
+		const orphanCapture = captureDeferredOrphanErrors();
+		const host = mountedComponent("section");
+		const first = Component("span");
+		const later = Component("b");
+		const selection = State(host, [first, later]);
+		const visible = State(host, true);
+		first.event.owned.on.Mount(() => host.remove());
+
+		try {
+			expect.soft(() => api === "ordinary" ? host.append(selection) : host.appendWhen(visible, selection)).not.toThrow();
+			await orphanCapture.flush();
+			expect.soft(orphanCapture.queuedErrors).toEqual([]);
+			expect.soft(host.disposed).toBe(true);
+			expect.soft(first.disposed).toBe(true);
+			expect(later.disposed).toBe(true);
+		} finally {
+			orphanCapture.restore();
+			if (!first.disposed) first.remove();
+			if (!later.disposed) later.remove();
+			if (!host.disposed) host.remove();
+		}
+	});
+
+	it.each(["ordinary", "conditional"] as const)("ignores a later %s selection child removed by the first child's Mount", async (api) => {
+		const orphanCapture = captureDeferredOrphanErrors();
+		const host = mountedComponent("section");
+		const first = Component("span");
+		const later = Component("b");
+		const selection = State(host, [first, later]);
+		const visible = State(host, true);
+		first.event.owned.on.Mount(() => later.remove());
+
+		try {
+			expect.soft(() => api === "ordinary" ? host.append(selection) : host.appendWhen(visible, selection)).not.toThrow();
+			await orphanCapture.flush();
+			expect.soft(orphanCapture.queuedErrors).toEqual([]);
+			expect.soft(later.disposed).toBe(true);
+			expect.soft(nonCommentNodes(host.element)).toEqual([first.element]);
+			expect.soft(() => host.remove()).not.toThrow();
+			expect(first.disposed).toBe(true);
+		} finally {
+			orphanCapture.restore();
+			if (!first.disposed) first.remove();
+			if (!later.disposed) later.remove();
+			if (!host.disposed) host.remove();
+		}
+	});
+
+	it.each(["ordinary", "conditional"] as const)("handles synchronous owner disposal from a custom %s ComponentSelectionState subscription", async (api) => {
+		const orphanCapture = captureDeferredOrphanErrors();
+		const host = mountedComponent("section");
+		const child = Component("span");
+		const visible = State(host, true);
+		const releaseSubscription = vi.fn();
+		const selection: ComponentSelectionState = {
+			value: child,
+			subscribe: (owner, listener) => {
+				try {
+					owner.dispose();
+				} finally {
+					listener(child);
+				}
+				return releaseSubscription;
+			},
+		};
+
+		try {
+			expect.soft(() => api === "ordinary" ? host.append(selection) : host.appendWhen(visible, selection)).not.toThrow();
+			await orphanCapture.flush();
+			expect.soft(orphanCapture.queuedErrors).toEqual([]);
+			expect.soft(host.disposed).toBe(true);
+			expect.soft(releaseSubscription).toHaveBeenCalledTimes(1);
+			expect(child.disposed).toBe(true);
+		} finally {
+			orphanCapture.restore();
+			if (!child.disposed) child.remove();
+			if (!host.disposed) host.remove();
+		}
+	});
+
+	it.each(["ordinary", "conditional"] as const)("cleans the prepared and current %s selections when an earlier Mount replaces the selection and removes the host", async (api) => {
+		const orphanCapture = captureDeferredOrphanErrors();
+		const host = mountedComponent("section");
+		const trigger = Component("button");
+		const prepared = Component("span");
+		const current = Component("b");
+		const selection = State<Component | null>(host, prepared);
+		const visible = State(host, true);
+		trigger.event.owned.on.Mount(() => {
+			selection.set(current);
+			host.remove();
+		});
+
+		try {
+			expect.soft(() => api === "ordinary" ? host.append(trigger, selection) : host.appendWhen(visible, trigger, selection)).not.toThrow();
+			await orphanCapture.flush();
+			expect.soft(orphanCapture.queuedErrors).toEqual([]);
+			expect.soft(host.disposed).toBe(true);
+			expect.soft(trigger.disposed).toBe(true);
+			expect.soft(prepared.disposed).toBe(true);
+			expect(current.disposed).toBe(true);
+		} finally {
+			orphanCapture.restore();
+			if (!trigger.disposed) trigger.remove();
+			if (!prepared.disposed) prepared.remove();
+			if (!current.disposed) current.remove();
+			if (!host.disposed) host.remove();
+		}
+	});
+
+	it.each(["ordinary", "conditional"] as const)("preserves an externally reparented %s selection until its new destination is removed", async (api) => {
+		const source = mountedComponent("section");
+		const destination = mountedComponent("aside");
+		const child = Component("span");
+		const selection = State<Component | null>(source, child);
+		const visible = State(source, true);
+		if (api === "ordinary") source.append(selection);
+		else source.appendWhen(visible, selection);
+
+		destination.append(child);
+		selection.set(null);
+		await flushEffects();
+		source.remove();
+
+		expect.soft(child.disposed).toBe(false);
+		expect.soft(child.element.parentNode).toBe(destination.element);
+		destination.remove();
+		expect(child.disposed).toBe(true);
+	});
+
+	it.each(["ordinary", "conditional"] as const)("does not mistake an unmoved %s sibling selection's controller container for an external destination", async (api) => {
+		const host = mountedComponent("section");
+		const anchor = Component("i").appendTo(host);
+		const child = Component("span");
+		const selection = State<Component | null>(anchor, child);
+		const visible = State(anchor, true);
+		if (api === "ordinary") anchor.insert("after", selection);
+		else anchor.insertWhen(visible, "after", selection);
+
+		selection.set(null);
+		await flushEffects();
+
+		expect(child.disposed).toBe(true);
+		host.remove();
+	});
+
+	it("settles a direct conditional child when visibility subscription throws after a synchronous render", async () => {
+		const orphanCapture = captureDeferredOrphanErrors();
+		const externalOwner = mountedComponent("article");
+		const host = mountedComponent("section");
+		const reuseHost = mountedComponent("aside");
+		const child = Component("span").owner.add(externalOwner);
+		const sentinel = new Error("visibility subscription sentinel");
+		const visible = customReadonlyBooleanState(false, (_owner, listener) => {
+			listener(true, false);
+			throw sentinel;
+		});
+
+		try {
+			expect.soft(() => host.appendWhen(visible, child)).toThrow(sentinel);
+			await orphanCapture.flush();
+			expect.soft(orphanCapture.queuedErrors).toEqual([]);
+			expect.soft(Array.from(host.element.childNodes)).toEqual([]);
+			expect.soft(child.element.parentNode).toBeNull();
+			expect.soft(child.disposed).toBe(false);
+			expect.soft(() => reuseHost.appendWhen(State.Readonly(true), child)).not.toThrow();
+			expect(child.element.parentNode).toBe(reuseHost.element);
+		} finally {
+			orphanCapture.restore();
+			if (!host.disposed) host.remove();
+			if (!reuseHost.disposed) reuseHost.remove();
+			if (!externalOwner.disposed) externalOwner.remove();
+			if (!child.disposed) child.remove();
+		}
+	});
+
+	it.each(["direct", "selection"] as const)("preserves the original %s conditional subscription error while cleanup settles", (attacher) => {
+		const host = mountedComponent("section");
+		const reuseHost = mountedComponent("aside");
+		const child = Component("span");
+		const originalError = new Error(`${attacher} conditional subscription error`);
+		const cleanupError = new Error(`${attacher} child cleanup error`);
+		let attach!: () => void;
+		let markerData: string;
+		let replacement: Component | undefined;
+		child.onCleanup(() => {
+			throw cleanupError;
+		});
+
+		if (attacher === "direct") {
+			const visible = customReadonlyBooleanState(false, (_owner, listener) => {
+				listener(true, false);
+				throw originalError;
+			});
+			attach = () => host.appendWhen(visible, child);
+			markerData = "kitsui:conditional";
+		} else {
+			const selection: ComponentSelectionState = {
+				value: child,
+				subscribe: (_owner, listener) => {
+					listener(child);
+					throw originalError;
+				},
+			};
+			attach = () => host.appendWhen(State.Readonly(true), selection);
+			markerData = "kitsui:conditional-stateful";
+		}
+
+		try {
+			let thrown: unknown;
+			try {
+				attach();
+			} catch (error) {
+				thrown = error;
+			}
+
+			expect.soft(thrown).toBe(originalError);
+			expect.soft(child.disposed).toBe(true);
+			expect.soft(child.element.parentNode).toBeNull();
+			expect.soft(child.element.component).toBeUndefined();
+			expect.soft(findCommentNode(host.element, markerData)).toBeUndefined();
+			expect.soft(() => {
+				replacement = Component(child.element);
+			}).not.toThrow();
+			if (replacement) {
+				expect.soft(() => reuseHost.appendWhen(State.Readonly(true), replacement!)).not.toThrow();
+				expect(replacement.element.parentNode).toBe(reuseHost.element);
+			}
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!reuseHost.disposed) reuseHost.remove();
+			if (replacement && !replacement.disposed) replacement.remove();
+			if (!child.disposed) child.remove();
+		}
+	});
+
+	it("settles a late direct conditional subscription cleanup after synchronous host disposal", async () => {
+		const orphanCapture = captureDeferredOrphanErrors();
+		const host = mountedComponent("section");
+		const child = Component("span");
+		const releaseSubscription = vi.fn();
+		const visible = customReadonlyBooleanState(false, (owner) => {
+			owner.dispose();
+			return releaseSubscription;
+		});
+
+		try {
+			expect.soft(() => host.appendWhen(visible, child)).not.toThrow();
+			await orphanCapture.flush();
+			expect.soft(orphanCapture.queuedErrors).toEqual([]);
+			expect.soft(releaseSubscription).toHaveBeenCalledTimes(1);
+			expect.soft(host.disposed).toBe(true);
+			expect.soft(child.element.parentNode).toBeNull();
+			expect(child.disposed).toBe(true);
+		} finally {
+			orphanCapture.restore();
+			if (!child.disposed) child.remove();
+			if (!host.disposed) host.remove();
+		}
+	});
+
+	it("releases later claims in one prepared selection after the first controlled child disposal throws", () => {
+		const host = mountedComponent("section");
+		const reuseHost = mountedComponent("aside");
+		const trigger = Component("button");
+		const first = Component("span");
+		const later = Component("b");
+		const cleanupError = new Error("first controlled child cleanup failed");
+		const selection = State.Readonly([first, later]);
+		first.onCleanup(() => {
+			throw cleanupError;
+		});
+		trigger.event.owned.on.Mount(() => host.remove());
+
+		try {
+			expect.soft(() => host.append(trigger, selection)).toThrow(cleanupError);
+			expect.soft(first.disposed).toBe(true);
+			expect.soft(later.disposed).toBe(false);
+			expect.soft(later.element.parentNode).toBeNull();
+			expect.soft(() => reuseHost.append(State.Readonly<Component | null>(later))).not.toThrow();
+			expect(later.element.parentNode).toBe(reuseHost.element);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!reuseHost.disposed) reuseHost.remove();
+			if (!first.disposed) first.remove();
+			if (!later.disposed) later.remove();
+		}
+	});
+
+	it.each(["ordinary", "conditional"] as const)("releases the newly claimed %s selection when old-child cleanup throws", (api) => {
+		const host = mountedComponent("section");
+		const reuseHost = mountedComponent("aside");
+		const oldChild = Component("span");
+		const newChild = Component("b");
+		const cleanupError = new Error(`${api} old-child cleanup failed`);
+		const selection = synchronousSelection(oldChild);
+		oldChild.onCleanup(() => {
+			throw cleanupError;
+		});
+
+		try {
+			if (api === "ordinary") host.append(selection);
+			else host.appendWhen(State.Readonly(true), selection);
+
+			expect.soft(() => selection.set(newChild)).toThrow(cleanupError);
+			expect.soft(oldChild.disposed).toBe(true);
+			expect.soft(newChild.disposed).toBe(false);
+			expect.soft(newChild.element.parentNode).toBeNull();
+			expect.soft(() => api === "ordinary"
+				? reuseHost.append(State.Readonly<Component | null>(newChild))
+				: reuseHost.appendWhen(State.Readonly(true), State.Readonly<Component | null>(newChild))).not.toThrow();
+			expect(newChild.element.parentNode).toBe(reuseHost.element);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!reuseHost.disposed) reuseHost.remove();
+			if (!oldChild.disposed) oldChild.remove();
+			if (!newChild.disposed) newChild.remove();
+		}
+	});
+
+	it.each(["ordinary", "conditional"] as const)("settles a synchronously nested %s render superseded during old-child disposal", (api) => {
+		const externalOwner = mountedComponent("article");
+		const host = mountedComponent("section");
+		const reuseHost = mountedComponent("aside");
+		const oldChild = Component("span");
+		const replacement = Component("b");
+		const nested = Component("em").owner.add(externalOwner);
+		const selection = synchronousSelection(oldChild);
+		oldChild.onCleanup(() => selection.set(nested));
+
+		try {
+			if (api === "ordinary") host.append(selection);
+			else host.appendWhen(State.Readonly(true), selection);
+
+			selection.set(replacement);
+
+			expect.soft(nonCommentNodes(host.element)).toEqual([replacement.element]);
+			expect.soft(nested.element.parentNode).toBeNull();
+			expect.soft(nested.disposed).toBe(false);
+			expect.soft(() => api === "ordinary"
+				? reuseHost.append(State.Readonly<Component | null>(nested))
+				: reuseHost.appendWhen(State.Readonly(true), State.Readonly<Component | null>(nested))).not.toThrow();
+			expect(nested.element.parentNode).toBe(reuseHost.element);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!reuseHost.disposed) reuseHost.remove();
+			if (!externalOwner.disposed) externalOwner.remove();
+			if (!oldChild.disposed) oldChild.remove();
+			if (!replacement.disposed) replacement.remove();
+			if (!nested.disposed) nested.remove();
+		}
+	});
+
+	it.each(["ordinary", "conditional"] as const)("keeps the outer %s replacement authoritative when placement cleanup renders a nested selection", (api) => {
+		const placementOwner = Owner();
+		const nestedOwner = mountedComponent("article");
+		const placementHost = mountedComponent("nav");
+		const host = mountedComponent("section");
+		const reuseHost = mountedComponent("aside");
+		const outer = Component("span");
+		const nested = Component("b").owner.add(nestedOwner);
+		const selection = synchronousSelection(null);
+		let place!: Place;
+		const releasePlacement = vi.fn(() => selection.set(nested));
+		outer.place(placementOwner, (PlaceConstructor) => {
+			place = PlaceConstructor().appendTo(placementHost);
+			return {
+				value: place,
+				subscribe: () => releasePlacement,
+			} as unknown as State.Readonly<Place | null>;
+		});
+
+		try {
+			if (api === "ordinary") host.append(selection);
+			else host.appendWhen(State.Readonly(true), selection);
+
+			selection.set(outer);
+
+			expect.soft(releasePlacement).toHaveBeenCalledOnce();
+			expect.soft(nonCommentNodes(host.element)).toEqual([outer.element]);
+			expect.soft(outer.disposed).toBe(false);
+			expect.soft(outer.element.parentNode).toBe(host.element);
+			expect.soft(nested.disposed).toBe(false);
+			expect.soft(nested.element.parentNode).toBeNull();
+			expect.soft(place.marker.disposed).toBe(true);
+			expect.soft(Array.from(placementHost.element.childNodes).filter(node => node instanceof Comment)).toEqual([]);
+			expect.soft(() => api === "ordinary"
+				? reuseHost.append(State.Readonly<Component | null>(nested))
+				: reuseHost.appendWhen(State.Readonly(true), State.Readonly<Component | null>(nested))).not.toThrow();
+			expect(nested.element.parentNode).toBe(reuseHost.element);
+		} finally {
+			if (!placementOwner.disposed) placementOwner.dispose();
+			if (!host.disposed) host.remove();
+			if (!reuseHost.disposed) reuseHost.remove();
+			if (!nestedOwner.disposed) nestedOwner.remove();
+			if (!placementHost.disposed) placementHost.remove();
+			if (!outer.disposed) outer.remove();
+			if (!nested.disposed) nested.remove();
+			if (place && !place.marker.disposed) place.remove();
+		}
 	});
 
 	it("reacts to state changes through use with a state", async () => {
@@ -473,6 +1143,153 @@ describe("Component", () => {
 		expect(host.element.childNodes).toHaveLength(0);
 	});
 
+	it("clear settles later structural owners after the first cleanup error", () => {
+		const host = mountedComponent("div");
+		const first = Component("span");
+		const later = Component("b");
+		const cleanupError = new Error("first structural cleanup failed");
+		const firstRelease = vi.fn(() => {
+			throw cleanupError;
+		});
+		const laterRelease = vi.fn();
+		const firstVisible = customReadonlyBooleanState(true, () => firstRelease);
+		const laterVisible = customReadonlyBooleanState(true, () => laterRelease);
+
+		host.appendWhen(firstVisible, first);
+		host.appendWhen(laterVisible, later);
+
+		expect.soft(() => host.clear()).toThrow(cleanupError);
+		expect.soft(firstRelease).toHaveBeenCalledOnce();
+		expect.soft(laterRelease).toHaveBeenCalledOnce();
+		expect.soft(first.disposed).toBe(true);
+		expect.soft(later.disposed).toBe(true);
+		expect(host.element.childNodes).toHaveLength(0);
+		host.remove();
+	});
+
+	it("parent removal settles later implicit children after the first child cleanup error", () => {
+		const parent = mountedComponent("section");
+		const first = Component("span");
+		const later = Component("b");
+		const cleanupError = new Error("first implicit child cleanup failed");
+		first.onCleanup(() => {
+			throw cleanupError;
+		});
+		parent.append(first, later);
+
+		try {
+			expect.soft(() => parent.remove()).toThrow(cleanupError);
+			expect.soft(parent.disposed).toBe(true);
+			expect.soft(parent.disposing).toBe(false);
+			expect.soft(first.disposed).toBe(true);
+			expect.soft(later.disposed).toBe(true);
+			expect.soft(first.element.isConnected).toBe(false);
+			expect(later.element.isConnected).toBe(false);
+		} finally {
+			if (!first.disposed) first.remove();
+			if (!later.disposed) later.remove();
+		}
+	});
+
+	it.each([
+		["host.clear", (host: Component) => host.clear()],
+		["parent.remove", (host: Component) => host.remove()],
+	] as const)("%s revisits a settled intermediate after later cleanup raw-moves a managed Component beneath it", (operation, disposeHost) => {
+		const host = mountedComponent("section");
+		const reuseHost = mountedComponent("aside");
+		const intermediate = document.createElement("div");
+		const trigger = Component("span");
+		const reentrant = mountedComponent("b");
+		let replacement: Component | undefined;
+		trigger.onCleanup(() => intermediate.append(reentrant.element));
+		host.append(intermediate, trigger);
+
+		try {
+			expect.soft(() => disposeHost(host)).not.toThrow();
+			expect.soft(trigger.disposed).toBe(true);
+			expect.soft(reentrant.disposed).toBe(true);
+			expect.soft(reentrant.element.parentNode).toBeNull();
+			expect.soft(reentrant.element.component).toBeUndefined();
+			if (operation === "host.clear") expect.soft(host.element.childNodes).toHaveLength(0);
+			expect.soft(() => {
+				replacement = Component(reentrant.element).appendTo(reuseHost);
+			}).not.toThrow();
+			expect(replacement?.element.parentNode).toBe(reuseHost.element);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (replacement && !replacement.disposed) replacement.remove();
+			if (!trigger.disposed) trigger.remove();
+			if (!reentrant.disposed) reentrant.remove();
+			reuseHost.remove();
+		}
+	});
+
+	it.each(["during parent cleanup", "after parent cleanup"] as const)("parent removal reconsiders a retained resolver-managed child whose manager is disposed %s", (timing) => {
+		const parent = mountedComponent("section");
+		const externalOwner = mountedComponent("article");
+		const retained = Component("span");
+		const later = Component("b");
+		const unregisterResolver = registerComponentOwnerResolver(component => component === retained ? externalOwner : null);
+		if (timing === "during parent cleanup") later.onCleanup(() => externalOwner.remove());
+		parent.append(retained, later);
+
+		try {
+			parent.remove();
+			if (timing === "after parent cleanup") {
+				expect.soft(retained.disposed).toBe(false);
+				expect.soft(retained.element.parentNode).toBe(parent.element);
+				externalOwner.remove();
+			}
+
+			expect.soft(later.disposed).toBe(true);
+			expect.soft(externalOwner.disposed).toBe(true);
+			expect.soft(retained.disposed).toBe(true);
+			expect(retained.element.parentNode).toBeNull();
+		} finally {
+			unregisterResolver();
+			if (!parent.disposed) parent.remove();
+			if (!externalOwner.disposed) externalOwner.remove();
+			if (!retained.disposed) retained.remove();
+			if (!later.disposed) later.remove();
+		}
+	});
+
+	it.each([
+		["host.clear", (host: Component) => host.clear()],
+		["parent.remove", (host: Component) => host.remove()],
+	] as const)("%s enumerates a wide managed child set within a linear structural budget", (_operation, disposeHost) => {
+		const childCount = 32;
+		const host = mountedComponent("section");
+		const children = Array.from({ length: childCount }, () => Component("span"));
+		host.append(children);
+		const originalChildrenOf = DOMTree.childrenOf.bind(DOMTree);
+		let calls = 0;
+		let entries = 0;
+		const childrenOfSpy = vi.spyOn(DOMTree, "childrenOf").mockImplementation((parent) => {
+			const childNodes = originalChildrenOf(parent);
+			if (parent === host.element) {
+				calls += 1;
+				entries += childNodes.length;
+			}
+			return childNodes;
+		});
+
+		try {
+			disposeHost(host);
+
+			expect.soft(calls).toBeLessThanOrEqual(childCount + 2);
+			expect.soft(entries).toBeLessThanOrEqual(childCount * 3);
+			expect.soft(children.every(child => child.disposed)).toBe(true);
+			expect(host.element.childNodes).toHaveLength(0);
+		} finally {
+			childrenOfSpy.mockRestore();
+			if (!host.disposed) host.remove();
+			for (const child of children) {
+				if (!child.disposed) child.remove();
+			}
+		}
+	});
+
 	it("text.set disposes managed component children", () => {
 		const host = mountedComponent("div");
 		const child = Component("span");
@@ -561,6 +1378,35 @@ describe("Component", () => {
 		retentionOwner.remove();
 	});
 
+	it("keeps a hidden conditional child managed after its explicit owner is manually deregistered", async () => {
+		const host = mountedComponent("div");
+		const explicitOwner = mountedComponent("section");
+		const visible = State(host, false);
+		const child = Component("span").owner.add(explicitOwner);
+		host.appendWhen(visible, child);
+		const queuedErrors: VoidFunction[] = [];
+		const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation(callback => queuedErrors.push(callback));
+
+		try {
+			child.owner.remove(explicitOwner);
+			await new Promise<void>(resolve => setTimeout(resolve, 0));
+			await Promise.resolve();
+
+			expect.soft(queuedErrors).toEqual([]);
+			expect.soft(child.disposed).toBe(false);
+			expect.soft(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+			queueMicrotaskSpy.mockRestore();
+
+			host.remove();
+			expect(child.disposed).toBe(true);
+		} finally {
+			queueMicrotaskSpy.mockRestore();
+			if (!host.disposed) host.remove();
+			if (!explicitOwner.disposed) explicitOwner.remove();
+			if (!child.disposed) child.remove();
+		}
+	});
+
 	it("preserves explicit owners for hidden conditional children across visibility toggles", async () => {
 		const host = mountedComponent("div");
 		const retentionOwner = mountedComponent("section");
@@ -639,6 +1485,37 @@ describe("Component", () => {
 		expect(toggled.disposed).toBe(true);
 	});
 
+	it.each([
+		["appendWhen", (host: Component, _anchor: Component, visible: State<boolean>, fragment: DocumentFragment) => host.appendWhen(visible, fragment)],
+		["prependWhen", (host: Component, _anchor: Component, visible: State<boolean>, fragment: DocumentFragment) => host.prependWhen(visible, fragment)],
+		["insertWhen", (_host: Component, anchor: Component, visible: State<boolean>, fragment: DocumentFragment) => anchor.insertWhen(visible, "after", fragment)],
+	] as const)("%s preserves every raw DocumentFragment child across hide and show", async (_operation, place) => {
+		const host = mountedComponent("div");
+
+		try {
+			const anchor = Component("span").appendTo(host);
+			const visible = State(host, true);
+			const fragment = document.createDocumentFragment();
+			const first = document.createElement("i");
+			const second = document.createElement("b");
+			fragment.append(first, second);
+
+			place(host, anchor, visible, fragment);
+			expect(nonCommentNodes(host.element).filter(node => node !== anchor.element)).toEqual([first, second]);
+
+			visible.set(false);
+			await flushEffects();
+			expect.soft(host.element.contains(first)).toBe(false);
+			expect.soft(host.element.contains(second)).toBe(false);
+
+			visible.set(true);
+			await flushEffects();
+			expect(nonCommentNodes(host.element).filter(node => node !== anchor.element)).toEqual([first, second]);
+		} finally {
+			host.remove();
+		}
+	});
+
 	it("accepts multiple children in appendWhen", async () => {
 		const host = mountedComponent("div");
 		const first = Component("span").text.set("first");
@@ -656,6 +1533,33 @@ describe("Component", () => {
 			first.element,
 			second.element,
 		]);
+	});
+
+	it("disposes every appendWhen child when the first Mount synchronously removes the host", async () => {
+		vi.useFakeTimers();
+		const queuedErrors: VoidFunction[] = [];
+		const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation(callback => queuedErrors.push(callback));
+		const host = mountedComponent("div");
+		const visible = State(host, true);
+		const first = Component("span");
+		const second = Component("span");
+		first.event.owned.on.Mount(() => host.remove());
+
+		try {
+			expect.soft(() => host.appendWhen(visible, first, second)).not.toThrow();
+			await vi.runAllTimersAsync();
+			await Promise.resolve();
+			expect.soft(queuedErrors).toEqual([]);
+			expect.soft(host.disposed).toBe(true);
+			expect.soft(first.disposed).toBe(true);
+			expect(second.disposed).toBe(true);
+		} finally {
+			queueMicrotaskSpy.mockRestore();
+			vi.useRealTimers();
+			if (!first.disposed) first.remove();
+			if (!second.disposed) second.remove();
+			if (!host.disposed) host.remove();
+		}
 	});
 
 	it("prepends conditional children at the front of the component", async () => {
@@ -835,7 +1739,7 @@ describe("Component", () => {
 		]);
 	});
 
-	it("preserves multi-component selection order across hidden conditional transitions", async () => {
+	it("keeps an initially hidden single selection ownerless until its host mounts", async () => {
 		const timeoutSpy = captureTimeoutCallbacks();
 
 		try {
@@ -860,6 +1764,67 @@ describe("Component", () => {
 		}
 		finally {
 			timeoutSpy.restore();
+		}
+	});
+
+	it("keeps an invisible appendWhen selection managed across the real orphan timer boundary and reuse", async () => {
+		const queuedErrors: VoidFunction[] = [];
+		const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation(callback => queuedErrors.push(callback));
+		const host = mountedComponent("section");
+		const visible = State(host, false);
+		const selected = Component("span");
+		const selection = State<Component | null>(host, selected);
+
+		try {
+			host.appendWhen(visible, selection);
+			expect(selected.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+
+			await new Promise<void>(resolve => setTimeout(resolve, 0));
+			await Promise.resolve();
+			expect.soft(queuedErrors).toEqual([]);
+			queueMicrotaskSpy.mockRestore();
+
+			visible.set(true);
+			await flushEffects();
+			expect(host.element.contains(selected.element)).toBe(true);
+			visible.set(false);
+			await flushEffects();
+			expect(selected.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+			expect(selected.disposed).toBe(false);
+
+			host.remove();
+			expect(selected.disposed).toBe(true);
+		} finally {
+			queueMicrotaskSpy.mockRestore();
+			if (!host.disposed) host.remove();
+			if (!selected.disposed) selected.remove();
+		}
+	});
+
+	it("ignores a disposed ComponentSelectionState entry when a later visibility update renders", () => {
+		const scheduled: VoidFunction[] = [];
+		const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation(callback => scheduled.push(callback));
+		const host = mountedComponent("section");
+		const visible = State(host, false);
+		const selection = State<Component[]>(host, []);
+		const disposed = Component("span");
+		disposed.remove();
+		host.appendWhen(visible, selection);
+
+		try {
+			selection.set([disposed]);
+			visible.set(true);
+			expect.soft(() => {
+				while (scheduled.length > 0) scheduled.shift()!();
+			}).not.toThrow();
+
+			expect.soft(nonCommentNodes(host.element)).toEqual([]);
+			const live = Component("b");
+			expect.soft(() => host.append(live)).not.toThrow();
+			expect(live.element.parentNode).toBe(host.element);
+		} finally {
+			queueMicrotaskSpy.mockRestore();
+			host.remove();
 		}
 	});
 
@@ -964,6 +1929,29 @@ describe("Component", () => {
 		expect(host.element.contains(selectedB.element)).toBe(true);
 	});
 
+	it("parks both selections when visibility and selection replacement coalesce while hiding", async () => {
+		const host = mountedComponent("div");
+		const visible = State(host, true);
+		const oldSelection = Component("span").text.set("old");
+		const newSelection = Component("span").text.set("new");
+		const selection = State<Component | null>(host, oldSelection);
+		host.appendWhen(visible, selection);
+
+		visible.set(false);
+		selection.set(newSelection);
+		await flushEffects();
+
+		expect.soft(nonCommentNodes(host.element)).toEqual([]);
+		expect.soft(oldSelection.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect.soft(newSelection.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect.soft(oldSelection.disposed).toBe(false);
+		expect.soft(newSelection.disposed).toBe(false);
+
+		host.remove();
+		expect.soft(oldSelection.disposed).toBe(true);
+		expect(newSelection.disposed).toBe(true);
+	});
+
 	it("disposes retained hidden conditional selections when the host is removed", async () => {
 		const host = mountedComponent("div");
 		const visible = State(host, true);
@@ -982,6 +1970,217 @@ describe("Component", () => {
 
 		expect(selectedA.disposed).toBe(true);
 		expect(selectedB.disposed).toBe(true);
+	});
+
+	it("preserves externally owned selected and retained Components when their conditional host is removed", async () => {
+		const host = mountedComponent("div");
+		const externalOwner = mountedComponent("section");
+		const visible = State(host, true);
+		const selected = Component("span").text.set("selected").owner.add(externalOwner);
+		const retained = Component("span").text.set("retained").owner.add(externalOwner);
+		const selection = State<Component | null>(host, retained);
+		host.appendWhen(visible, selection);
+		visible.set(false);
+		await flushEffects();
+		selection.set(selected);
+		await flushEffects();
+
+		host.remove();
+
+		expect.soft(retained.disposed).toBe(false);
+		expect.soft(selected.disposed).toBe(false);
+		expect.soft(retained.element.parentNode).toBeNull();
+		expect.soft(selected.element.parentNode).toBeNull();
+
+		externalOwner.remove();
+		expect.soft(retained.disposed).toBe(true);
+		expect(selected.disposed).toBe(true);
+	});
+
+	it("replaces a structural conditional controller when the same Component is authored again", async () => {
+		const firstHost = mountedComponent("section");
+		const secondHost = mountedComponent("aside");
+		const firstVisible = State(firstHost, false);
+		const secondVisible = State(secondHost, false);
+		const child = Component("span");
+		firstHost.appendWhen(firstVisible, child);
+		const firstStorage = child.element.parentElement;
+
+		expect.soft(() => secondHost.appendWhen(secondVisible, child)).not.toThrow();
+		expect.soft(child.disposed).toBe(false);
+		expect.soft(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect.soft(child.element.parentElement).not.toBe(firstStorage);
+
+		firstVisible.set(true);
+		await flushEffects();
+		expect.soft(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		secondVisible.set(true);
+		await flushEffects();
+		expect.soft(child.element.parentNode).toBe(secondHost.element);
+
+		firstHost.remove();
+		expect.soft(child.disposed).toBe(false);
+		secondHost.remove();
+		expect(child.disposed).toBe(true);
+	});
+
+	it("replaces earlier authorities independently across a multi-node conditional call", async () => {
+		const firstHost = mountedComponent("section");
+		const secondHost = mountedComponent("aside");
+		const firstVisible = State(firstHost, false);
+		const secondVisible = State(secondHost, false);
+		const controlled = Component("span");
+		const safe = Component("b");
+		firstHost.appendWhen(firstVisible, controlled);
+
+		expect.soft(() => secondHost.appendWhen(secondVisible, safe, controlled)).not.toThrow();
+		expect.soft(safe.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect.soft(controlled.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		const controlledStorage = controlled.element.parentElement;
+
+		firstVisible.set(true);
+		await flushEffects();
+		expect.soft(controlled.element.parentNode).toBe(controlledStorage);
+		secondVisible.set(true);
+		await flushEffects();
+		expect.soft(nonCommentNodes(secondHost.element)).toEqual([safe.element, controlled.element]);
+
+		firstHost.remove();
+		expect.soft(safe.disposed).toBe(false);
+		expect.soft(controlled.disposed).toBe(false);
+		secondHost.remove();
+		expect.soft(safe.disposed).toBe(true);
+		expect(controlled.disposed).toBe(true);
+	});
+
+	it("keeps the newest authority across selection, conditional placement, and imperative placement families", async () => {
+		const selectionHost = mountedComponent("section");
+		const conditionalHost = mountedComponent("aside");
+		const finalHost = mountedComponent("article");
+		const child = Component("span");
+		const selection = State<Component | null>(selectionHost, child);
+		const visible = State(conditionalHost, true);
+
+		selectionHost.append(selection);
+		child.appendToWhen(visible, conditionalHost);
+		child.appendTo(finalHost);
+
+		expect.soft(child.element.parentNode).toBe(finalHost.element);
+		selection.set(null);
+		visible.set(false);
+		await flushEffects();
+		expect.soft(child.disposed).toBe(false);
+		expect.soft(child.element.parentNode).toBe(finalHost.element);
+		selection.set(child);
+		visible.set(true);
+		await flushEffects();
+		expect(child.element.parentNode).toBe(finalHost.element);
+
+		selectionHost.remove();
+		conditionalHost.remove();
+		finalHost.remove();
+	});
+
+	it.each(["ordinary", "conditional"] as const)("keeps unaffected nodes live after replacing one %s selection authority", async (api) => {
+		const oldHost = mountedComponent("section");
+		const newerHost = mountedComponent("aside");
+		const retentionOwner = mountedComponent("article");
+		const alpha = Component("span").text.set("alpha").owner.add(retentionOwner);
+		const beta = Component("b").text.set("beta").owner.add(retentionOwner);
+		const selection = State<Component[]>(oldHost, [alpha, beta]);
+		const newerSelection = State<Component[]>(newerHost, [alpha]);
+		const visible = State(oldHost, true);
+		if (api === "ordinary") oldHost.append(selection);
+		else oldHost.appendWhen(visible, selection);
+		newerHost.append(newerSelection);
+
+		if (api === "ordinary") {
+			selection.set([alpha]);
+			await flushEffects();
+			expect.soft(beta.element.parentNode, "the unaffected ordinary node should still deselect").toBeNull();
+			selection.set([alpha, beta]);
+			await flushEffects();
+		} else {
+			visible.set(false);
+			await flushEffects();
+			expect.soft(beta.element.parentElement?.tagName, "the unaffected conditional node should still hide").toBe("KITSUI-STORAGE");
+			visible.set(true);
+			await flushEffects();
+		}
+		expect.soft([alpha.element.parentNode, beta.element.parentNode]).toEqual([newerHost.element, oldHost.element]);
+
+		newerSelection.set([]);
+		await flushEffects();
+		expect.soft([alpha.disposed, alpha.element.parentNode], "the newer selection should relinquish alpha without disposing it").toEqual([false, null]);
+		selection.set([beta]);
+		await flushEffects();
+		selection.set([alpha, beta]);
+		await flushEffects();
+		expect.soft([alpha.element.parentNode, beta.element.parentNode], "the older selection must not reacquire alpha when it is re-added").toEqual([null, oldHost.element]);
+
+		oldHost.remove();
+		expect.soft([alpha.disposed, alpha.element.parentNode, beta.disposed, beta.element.parentNode]).toEqual([false, null, false, null]);
+		newerHost.remove();
+		expect.soft([alpha.disposed, beta.disposed]).toEqual([false, false]);
+		retentionOwner.remove();
+		expect([alpha.disposed, beta.disposed]).toEqual([true, true]);
+	});
+
+	it("replaces repeatable conditional authority for a raw Node identity", async () => {
+		const firstHost = mountedComponent("section");
+		const secondHost = mountedComponent("aside");
+		const firstVisible = State(firstHost, false);
+		const secondVisible = State(secondHost, false);
+		const raw = document.createElement("em");
+
+		firstHost.appendWhen(firstVisible, raw);
+		secondHost.appendWhen(secondVisible, raw);
+		const secondStorage = raw.parentNode;
+
+		firstVisible.set(true);
+		await flushEffects();
+		expect.soft(raw.parentNode).toBe(secondStorage);
+		secondVisible.set(true);
+		await flushEffects();
+		expect.soft(raw.parentNode).toBe(secondHost.element);
+		firstVisible.set(false);
+		await flushEffects();
+		expect(raw.parentNode).toBe(secondHost.element);
+
+		firstHost.remove();
+		secondHost.remove();
+	});
+
+	it("keeps a conditional DocumentFragment's initial nodes stable across reuse and later replacement", async () => {
+		const fragmentHost = mountedComponent("section");
+		const replacementHost = mountedComponent("aside");
+		const fragmentVisible = State(fragmentHost, true);
+		const replacementVisible = State(replacementHost, false);
+		const fragment = document.createDocumentFragment();
+		const first = document.createElement("i");
+		const second = document.createTextNode("text");
+		fragment.append(first, second);
+
+		fragmentHost.appendWhen(fragmentVisible, fragment);
+		expect.soft(Array.from(fragmentHost.element.childNodes).filter(node => !(node instanceof Comment))).toEqual([first, second]);
+		fragmentVisible.set(false);
+		await flushEffects();
+		fragmentVisible.set(true);
+		await flushEffects();
+		expect.soft(Array.from(fragmentHost.element.childNodes).filter(node => !(node instanceof Comment))).toEqual([first, second]);
+
+		replacementHost.appendWhen(replacementVisible, first);
+		fragmentVisible.set(false);
+		fragmentVisible.set(true);
+		await flushEffects();
+		expect.soft(first.parentNode?.nodeName).toBe("KITSUI-STORAGE");
+		expect.soft(second.parentNode).toBe(fragmentHost.element);
+		replacementVisible.set(true);
+		await flushEffects();
+		expect(first.parentNode).toBe(replacementHost.element);
+
+		fragmentHost.remove();
+		replacementHost.remove();
 	});
 
 	it("preserves nested conditional children inside hidden selected components", async () => {
@@ -1358,6 +2557,82 @@ describe("Component", () => {
 		errorSpy.mockRestore();
 	});
 
+	it("parks a recursively blocked reactive placement when its State later becomes null", async () => {
+		const root = mountedComponent("div");
+		const placementOwner = mountedComponent("section");
+		const parent = Component("article");
+		const child = Component("aside");
+		const current = State<Place | null>(placementOwner, null);
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		root.append(parent);
+		parent.append(child);
+		parent.place(placementOwner, (PlaceConstructor) => {
+			current.set(PlaceConstructor().appendTo(child));
+			return current;
+		});
+		expect.soft(parent.element.parentNode).toBe(root.element);
+
+		current.set(null);
+		await flushEffects();
+
+		expect.soft(errorSpy).toHaveBeenCalledWith("Cannot move a node into itself or one of its descendants.");
+		expect.soft(parent.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		expect(child.element.parentNode).toBe(parent.element);
+		errorSpy.mockRestore();
+			placementOwner.remove();
+		root.remove();
+	});
+
+	it.each(["recursive", "stale disposed raw target"] as const)("preserves an active reactive placement when a %s imperative move is rejected", async (rejection) => {
+		const placementOwner = mountedComponent("section");
+		const firstHost = mountedComponent("div");
+		const secondHost = mountedComponent("article");
+		const child = Component("span");
+		const staleTarget = Component("aside");
+		const current = State<Place | null>(placementOwner, null);
+		let firstPlace!: Place;
+		let secondPlace!: Place;
+
+		child.place(placementOwner, (PlaceConstructor) => {
+			firstPlace = PlaceConstructor().appendTo(firstHost);
+			secondPlace = PlaceConstructor().appendTo(secondHost);
+			current.set(firstPlace);
+			return current;
+		});
+		staleTarget.remove();
+		const rejectedTarget = rejection === "recursive" ? child.element : staleTarget.element;
+
+		const orphanCallbacks = captureTimeoutCallbacks();
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => { });
+
+		try {
+			expect(() => child.appendTo(rejectedTarget)).not.toThrow();
+			if (rejection === "recursive") {
+				expect(errorSpy).toHaveBeenCalledWith("Cannot move a node into itself or one of its descendants.");
+			}
+			else {
+				expect(errorSpy).not.toHaveBeenCalled();
+			}
+			expect(child.element.parentNode).toBe(firstHost.element);
+			expect(firstPlace.marker.disposed).toBe(false);
+			expect(child.disposed).toBe(false);
+			expect(orphanCallbacks.callbacks).toHaveLength(0);
+		} finally {
+			errorSpy.mockRestore();
+			orphanCallbacks.restore();
+		}
+
+		current.set(secondPlace);
+		await flushEffects();
+		expect(child.element.parentNode).toBe(secondHost.element);
+
+		placementOwner.remove();
+		if (!child.disposed) child.remove();
+		firstHost.remove();
+		secondHost.remove();
+	});
+
 	it("appendTo and prependTo move components into their destination component", () => {
 		const host = mountedComponent("div");
 		const child = Component("span").text.set("child");
@@ -1564,6 +2839,32 @@ describe("Component", () => {
 				expect(child.element.isConnected, "disposed descendants should no longer be connected").toBe(false);
 			} finally {
 				intermediary.remove();
+				vi.useRealTimers();
+			}
+		});
+
+		it.each(["open", "closed"] as const)("removing an outer Component reaches a wrapped descendant inside a nested raw %s ShadowRoot", async (mode) => {
+			vi.useFakeTimers();
+			const outer = mountedComponent("section");
+			const intermediary = document.createElement("div");
+			const shadowHost = document.createElement("article");
+			const shadowRoot = shadowHost.attachShadow({ mode });
+			const child = Component("span");
+			outer.element.append(intermediary);
+			intermediary.append(shadowHost);
+			shadowRoot.append(child.element);
+
+			try {
+				expect(() => vi.advanceTimersByTime(0)).not.toThrow();
+				await flushEffects();
+				expect.soft(child.disposed).toBe(false);
+				expect.soft(child.element.parentNode).toBe(shadowRoot);
+
+				outer.remove();
+				expect(child.disposed).toBe(true);
+			} finally {
+				if (!outer.disposed) outer.remove();
+				if (!child.disposed) child.remove();
 				vi.useRealTimers();
 			}
 		});
@@ -1943,6 +3244,81 @@ describe("Component", () => {
 		child.remove();
 	});
 
+	it.each([0, 2])("rolls back a throwing placer after creating %i provisional Place markers", (placeCount) => {
+		const placementOwner = mountedComponent("section");
+		const host = mountedComponent("div");
+		const child = Component("span");
+		const places: Place[] = [];
+
+		try {
+			expect.soft(() => child.place(placementOwner, (PlaceConstructor) => {
+				for (let index = 0; index < placeCount; index += 1) {
+					places.push(PlaceConstructor().appendTo(host));
+				}
+				throw new Error("placer failed");
+			})).toThrow("placer failed");
+
+			expect(places.every(place => place.marker.disposed)).toBe(true);
+			expect(Array.from(host.element.childNodes).filter(node => node instanceof Comment)).toHaveLength(0);
+			expect(child.element.parentNode).toBeNull();
+			expect(child.owner.get()).toBeNull();
+
+			const orphanCheck = captureOrphanCheck();
+			try {
+				child.owner.add(placementOwner, "orphan-probe");
+				child.owner.remove("orphan-probe");
+				expect(orphanCheck.orphanCheck).toBeTypeOf("function");
+				expect(() => orphanCheck.orphanCheck?.()).not.toThrow();
+				expect(() => orphanCheck.queuedError?.()).toThrow("Components must be connected to the document or have a managed owner before the next tick.");
+				child.appendTo(host);
+				placementOwner.remove();
+				expect(child.element.parentNode).toBe(host.element);
+				expect(child.disposed).toBe(false);
+			} finally {
+				orphanCheck.restore();
+			}
+		} finally {
+			for (const place of places) {
+				if (!place.marker.disposed) place.remove();
+			}
+			if (!child.disposed) child.remove();
+			placementOwner.remove();
+			host.remove();
+		}
+	});
+
+	it.each([0, 2])("rolls back an invalid placer result after creating %i provisional Place markers", (placeCount) => {
+		const placementOwner = mountedComponent("section");
+		const host = mountedComponent("div");
+		const child = Component("span");
+		const places: Place[] = [];
+
+		try {
+			expect(() => child.place(placementOwner, (PlaceConstructor) => {
+				for (let index = 0; index < placeCount; index += 1) {
+					places.push(PlaceConstructor().appendTo(host));
+				}
+				return {} as State.Readonly<Place | null>;
+			})).toThrow("Component.place placer must return a State<Place | null>.");
+
+			expect.soft(places.every(place => place.marker.disposed)).toBe(true);
+			expect.soft(Array.from(host.element.childNodes).filter(node => node instanceof Comment)).toHaveLength(0);
+			expect.soft(child.element.parentNode).toBeNull();
+			expect.soft(child.owner.get()).toBeNull();
+			expect.soft(() => child.appendTo(host)).not.toThrow();
+			placementOwner.remove();
+			expect.soft(child.element.parentNode).toBe(host.element);
+			expect(child.disposed).toBe(false);
+		} finally {
+			for (const place of places) {
+				if (!place.marker.disposed) place.remove();
+			}
+			if (!child.disposed) child.remove();
+			if (!placementOwner.disposed) placementOwner.remove();
+			host.remove();
+		}
+	});
+
 	it("treats a removed place marker as null placement and logs an error", async () => {
 		const owner = mountedComponent("section");
 		const host = mountedComponent("div");
@@ -2239,6 +3615,33 @@ describe("Component", () => {
 		visible.set(true);
 		expect(right.element.firstElementChild).toBe(child.element);
 		expect(left.element.childNodes).toHaveLength(0);
+	});
+
+	it("keeps replacement placement ownership when the old owner and physical host are removed", () => {
+		const firstOwner = mountedComponent("section");
+		const secondOwner = mountedComponent("aside");
+		const host = mountedComponent("div");
+		const child = Component("span");
+		let secondPlace!: Place;
+
+		child.place(firstOwner, (PlaceConstructor) => State.Readonly<Place | null>(PlaceConstructor().appendTo(host)));
+		child.place(secondOwner, (PlaceConstructor) => {
+			secondPlace = PlaceConstructor().appendTo(host);
+			return State.Readonly<Place | null>(secondPlace);
+		});
+
+		firstOwner.remove();
+		expect(secondPlace.marker.disposed).toBe(false);
+		host.remove();
+
+		expect(child.disposed).toBe(false);
+		expect(secondPlace.marker.disposed).toBe(false);
+		expect(child.element.parentNode).toBe(host.element);
+
+		secondOwner.remove();
+		expect(secondPlace.marker.disposed).toBe(true);
+		expect(child.element.parentElement?.tagName).toBe("KITSUI-STORAGE");
+		child.remove();
 	});
 
 	it("creates and memoizes a ClassManipulator from the style getter", () => {

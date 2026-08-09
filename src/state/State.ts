@@ -2,6 +2,7 @@
  * Function invoked during cleanup to release resources.
  */
 import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
+import { runCleanupSteps } from "../utility/cleanup";
 
 export type CleanupFunction = () => void;
 
@@ -120,12 +121,17 @@ interface ImmediateStateListenerRecord<T> {
 	listener: StateListener<T>;
 }
 
+interface StateNotification<T> {
+	force: boolean;
+	immediateListeners: ImmediateStateListenerRecord<T>[];
+	previousValue: T;
+	value: T;
+}
+
 interface QueuedStateListenerRecord<T> {
 	active: boolean;
 	forcePendingEmit: boolean;
-	graph: StateGraph;
 	listener: StateListener<T>;
-	pending: boolean;
 	pendingOriginalValue: T;
 	pendingFinalValue: T;
 	equals: StateEqualityFunction<T>;
@@ -165,23 +171,29 @@ function scheduleGraphFlush (graph: StateGraph): void {
 	graph.scheduled = true;
 	const flush = () => {
 		graph.scheduled = false;
-		const pendingListeners = [...graph.pendingListeners];
+		const pendingDeliveries = [...graph.pendingListeners].map(record => ({
+			equals: record.equals,
+			finalValue: record.pendingFinalValue,
+			force: record.forcePendingEmit,
+			originalValue: record.pendingOriginalValue,
+			record,
+		}));
 		graph.pendingListeners.clear();
-
-		for (const pendingListener of pendingListeners) {
-			pendingListener.pending = false;
-
-			if (!pendingListener.active) {
-				continue;
-			}
-
-			if (!pendingListener.forcePendingEmit && pendingListener.equals(pendingListener.pendingOriginalValue, pendingListener.pendingFinalValue)) {
-				continue;
-			}
-
-			pendingListener.forcePendingEmit = false;
-			pendingListener.listener(pendingListener.pendingFinalValue, pendingListener.pendingOriginalValue);
+		for (const { record } of pendingDeliveries) {
+			record.forcePendingEmit = false;
 		}
+
+		runCleanupSteps(pendingDeliveries.map(({ equals, finalValue, force, originalValue, record }) => () => {
+			if (!record.active) {
+				return;
+			}
+
+			if (!force && equals(originalValue, finalValue)) {
+				return;
+			}
+
+			record.listener(finalValue, originalValue);
+		}));
 	};
 
 	const schedulerRef = globalThis as typeof globalThis & {
@@ -257,22 +269,38 @@ abstract class OwnerClass {
 
 		this.disposedValue = true;
 		this.disposingValue = true;
+		let firstError: unknown;
+		let failed = false;
+		const settle = (callback: () => void) => {
+			try {
+				callback();
+			} catch (error) {
+				if (!failed) {
+					failed = true;
+					firstError = error;
+				}
+			}
+		};
 
 		try {
-			this.abortController?.abort();
-			this.beforeDispose();
+			settle(() => this.abortController?.abort());
+			settle(() => this.beforeDispose());
 
 			const cleanupFunctions = [...this.cleanupFunctions];
 			this.cleanupFunctions.clear();
 
 			for (const cleanupFunction of cleanupFunctions) {
-				cleanupFunction();
+				settle(cleanupFunction);
 			}
 
-			this.afterDispose();
+			settle(() => this.afterDispose());
 		}
 		finally {
 			this.disposingValue = false;
+		}
+
+		if (failed) {
+			throw firstError;
 		}
 	}
 
@@ -416,6 +444,7 @@ class StateClass<T> extends Owner {
 	private readonly immediateListeners = new Set<ImmediateStateListenerRecord<any>>();
 	/** @deprecated Use getQueuedListeners(this) */
 	private readonly queuedListeners = new Set<QueuedStateListenerRecord<any>>();
+	private notificationQueue: StateNotification<any>[] | null = null;
 
 	constructor (owner: Owner | null, initialValue: T, options: StateInternalOptions<T> = {}) {
 		super();
@@ -490,34 +519,43 @@ class StateClass<T> extends Owner {
 	private commit (nextValue: T, forceNotify: boolean): T {
 		const previousValue = this.currentValue;
 		this.currentValue = nextValue;
-
-
-		for (const listenerRecord of [...getImmediateListeners(this)]) {
-			if (!listenerRecord.active) {
-				continue;
-			}
-
-			listenerRecord.listener(this.currentValue, previousValue);
+		const notification: StateNotification<T> = {
+			force: forceNotify,
+			immediateListeners: [...getImmediateListeners(this)],
+			previousValue,
+			value: nextValue,
+		};
+		if (this.notificationQueue) {
+			this.notificationQueue.push(notification);
+			return this.currentValue;
 		}
 
-		for (const listenerRecord of getQueuedListeners(this)) {
-			if (!listenerRecord.active) {
-				continue;
-			}
+		const notificationQueue = [notification];
+		this.notificationQueue = notificationQueue;
+		try {
+			for (const change of notificationQueue) {
+				for (const listenerRecord of change.immediateListeners) {
+					if (listenerRecord.active) listenerRecord.listener(change.value, change.previousValue);
+				}
 
-			if (!listenerRecord.pending) {
-				listenerRecord.pending = true;
-				listenerRecord.forcePendingEmit = forceNotify;
-				listenerRecord.pendingOriginalValue = previousValue;
-				listenerRecord.pendingFinalValue = this.currentValue;
-				listenerRecord.equals = getEqualityFunction(this);
-				listenerRecord.graph.pendingListeners.add(listenerRecord as QueuedStateListenerRecord<unknown>);
-				scheduleGraphFlush(listenerRecord.graph);
-				continue;
-			}
+				for (const listenerRecord of getQueuedListeners(this)) {
+					if (!listenerRecord.active) continue;
+					if (!this.graph.pendingListeners.has(listenerRecord as QueuedStateListenerRecord<unknown>)) {
+						listenerRecord.forcePendingEmit = change.force;
+						listenerRecord.pendingOriginalValue = change.previousValue;
+						listenerRecord.pendingFinalValue = change.value;
+						listenerRecord.equals = getEqualityFunction(this);
+						this.graph.pendingListeners.add(listenerRecord as QueuedStateListenerRecord<unknown>);
+						scheduleGraphFlush(this.graph);
+						continue;
+					}
 
-			listenerRecord.forcePendingEmit ||= forceNotify;
-			listenerRecord.pendingFinalValue = this.currentValue;
+					listenerRecord.forcePendingEmit ||= change.force;
+					listenerRecord.pendingFinalValue = change.value;
+				}
+			}
+		} finally {
+			this.notificationQueue = null;
 		}
 
 		return this.currentValue;
@@ -607,9 +645,7 @@ class StateClass<T> extends Owner {
 			active: true,
 			equals: getEqualityFunction(this),
 			forcePendingEmit: false,
-			graph: this.graph,
 			listener,
-			pending: false,
 			pendingFinalValue: this.currentValue,
 			pendingOriginalValue: this.currentValue,
 		};
@@ -621,10 +657,7 @@ class StateClass<T> extends Owner {
 			}
 
 			listenerRecord.active = false;
-			if (listenerRecord.pending) {
-				listenerRecord.pending = false;
-				this.graph.pendingListeners.delete(listenerRecord as QueuedStateListenerRecord<unknown>);
-			}
+			this.graph.pendingListeners.delete(listenerRecord as QueuedStateListenerRecord<unknown>);
 
 			getQueuedListeners(this).delete(listenerRecord);
 		};
@@ -725,10 +758,7 @@ class StateClass<T> extends Owner {
 
 		for (const listenerRecord of getQueuedListeners(this)) {
 			listenerRecord.active = false;
-			if (listenerRecord.pending) {
-				listenerRecord.pending = false;
-				this.graph.pendingListeners.delete(listenerRecord as QueuedStateListenerRecord<unknown>);
-			}
+			this.graph.pendingListeners.delete(listenerRecord as QueuedStateListenerRecord<unknown>);
 		}
 
 		getImmediateListeners(this).clear();

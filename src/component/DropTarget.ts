@@ -1,4 +1,5 @@
 import { Component, type ComponentBuilderFunction } from "./Component";
+import { DOMTree } from "./DOMTree";
 import { State, type CleanupFunction } from "../state/State";
 import type {
 	DragInputSource,
@@ -190,7 +191,7 @@ function targetFromExplicitComponent (component: Component | undefined): DropTar
 			}
 		}
 
-		current = current.parentNode;
+		current = DOMTree.physical.parentOf(current);
 	}
 
 	return null;

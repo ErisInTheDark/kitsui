@@ -1,4 +1,5 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
+import { cleanupAndRethrow, runCleanupSteps } from "../utility/cleanup";
 
 type Claimant = Owner | State<boolean>;
 
@@ -6,6 +7,7 @@ interface ClaimRecord {
 	id: string | null;
 	claimant: Claimant;
 	active: boolean;
+	activate: CleanupFunction;
 	cleanup: CleanupFunction;
 }
 
@@ -51,11 +53,22 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 	 */
 	protected registerClaim (id: string | null, claim: Claimant): void {
 		this.ensureActive();
+		if (claim.disposed) {
+			throw new Error("Disposed owners cannot be modified.");
+		}
 
 		if (id === null) {
 			const record = this.createClaimRecord(id, claim);
 			this.anonymousClaims.add(record);
 			this.trackClaimant(record);
+			try {
+				record.activate();
+			} catch (error) {
+				cleanupAndRethrow(error, record.cleanup);
+			}
+			if (this.anonymousClaims.has(record)) {
+				this.onClaimsChanged();
+			}
 			return;
 		}
 
@@ -63,8 +76,44 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 		const previousClaim = this.keyedClaims.get(id);
 		this.keyedClaims.set(id, record);
 		this.trackClaimant(record);
+		try {
+			record.activate();
+		} catch (error) {
+			if (previousClaim) {
+				this.keyedClaims.set(id, previousClaim);
+			} else {
+				this.keyedClaims.delete(id);
+			}
+			cleanupAndRethrow(error, record.cleanup);
+		}
+		const recordSurvivedActivation = this.keyedClaims.get(id) === record;
 		previousClaim?.cleanup();
+		if (recordSurvivedActivation) {
+			this.onClaimsChanged();
+		}
 	}
+
+	/** Returns the claimant registered in a keyed slot, if any. */
+	protected getRegisteredClaimant (id: string): Claimant | null {
+		return this.keyedClaims.get(id)?.claimant ?? null;
+	}
+
+	/** Returns whether the claimant has an anonymous registration. */
+	protected hasAnonymousClaim (claimant: Claimant): boolean {
+		return [...(this.claimsByClaimant.get(claimant) ?? [])]
+			.some(record => record.id === null);
+	}
+
+	/** Returns every registered claimant in keyed-then-anonymous order. */
+	protected getRegisteredClaimants (): Claimant[] {
+		return [
+			...this.keyedClaims.values(),
+			...this.anonymousClaims,
+		].map(record => record.claimant);
+	}
+
+	/** Runs after the registered claim set changes. */
+	protected onClaimsChanged (_disposedClaimantRemoved = false): void { }
 
 	/**
 	 * Deregisters claims by claimant, by keyed id, or by the `(id, claimant)` composite used during registration.
@@ -121,6 +170,7 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 			}
 
 			this.untrackClaimant(record);
+			this.onClaimsChanged(record.claimant.disposed);
 		};
 
 		record = isBooleanStateClaim(claim)
@@ -135,10 +185,11 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 			id,
 			claimant: claim,
 			active: false,
+			activate: noop,
 			cleanup: noop,
 		};
 
-		let active = true;
+		let active = false;
 		let releaseOwner = noop;
 		let releaseClaim = noop;
 		const cleanup = () => {
@@ -147,16 +198,35 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 			}
 
 			active = false;
-			this.setClaimActive(record, false);
-			onCleanup();
-			releaseOwner();
-			releaseClaim();
+			runCleanupSteps([
+				() => this.setClaimActive(record, false),
+				onCleanup,
+				releaseOwner,
+				releaseClaim,
+			]);
 		};
 
 		record.cleanup = cleanup;
-		releaseOwner = this.owner.onCleanup(cleanup);
-		this.setClaimActive(record, true);
-		releaseClaim = claim.onCleanup(cleanup);
+		record.activate = () => {
+			if (active) {
+				return;
+			}
+
+			active = true;
+			releaseOwner = this.owner.onCleanup(cleanup);
+			if (!active) {
+				releaseOwner();
+				return;
+			}
+
+			releaseClaim = claim.onCleanup(cleanup);
+			if (!active) {
+				releaseClaim();
+				return;
+			}
+
+			this.setClaimActive(record, true);
+		};
 		return record;
 	}
 
@@ -165,10 +235,11 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 			id,
 			claimant: claim,
 			active: false,
+			activate: noop,
 			cleanup: noop,
 		};
 
-		let active = true;
+		let active = false;
 		let releaseOwner = noop;
 		let releaseClaim = noop;
 		let releaseClaimOwner = noop;
@@ -178,24 +249,48 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 			}
 
 			active = false;
-			this.setClaimActive(record, false);
-			onCleanup();
-			releaseOwner();
-			releaseClaim();
-			releaseClaimOwner();
+			runCleanupSteps([
+				() => this.setClaimActive(record, false),
+				onCleanup,
+				releaseOwner,
+				releaseClaim,
+				releaseClaimOwner,
+			]);
 		};
 
 		record.cleanup = cleanup;
-		releaseOwner = this.owner.onCleanup(cleanup);
-		this.setClaimActive(record, claim.value);
-		releaseClaimOwner = claim.onCleanup(cleanup);
-		releaseClaim = claim.subscribe(this.owner, (value) => {
-			if (!active) {
+		record.activate = () => {
+			if (active) {
 				return;
 			}
 
-			this.setClaimActive(record, value);
-		});
+			active = true;
+			releaseOwner = this.owner.onCleanup(cleanup);
+			if (!active) {
+				releaseOwner();
+				return;
+			}
+
+			releaseClaimOwner = claim.onCleanup(cleanup);
+			if (!active) {
+				releaseClaimOwner();
+				return;
+			}
+
+			releaseClaim = claim.subscribe(this.owner, (value) => {
+				if (!active) {
+					return;
+				}
+
+				this.setClaimActive(record, value);
+			});
+			if (!active) {
+				releaseClaim();
+				return;
+			}
+
+			this.setClaimActive(record, claim.value);
+		};
 		return record;
 	}
 
@@ -204,13 +299,8 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
 			return;
 		}
 
-		for (const record of [...records]) {
-			if (predicate && !predicate(record)) {
-				continue;
-			}
-
-			record.cleanup();
-		}
+		const matchingRecords = [...records].filter(record => !predicate || predicate(record));
+		runCleanupSteps(matchingRecords.map(record => record.cleanup));
 	}
 
 	private trackClaimant (record: ClaimRecord): void {

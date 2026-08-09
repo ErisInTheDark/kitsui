@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import placeExtension from "../../src/component/extensions/placeExtension";
+import { Marker } from "../../src/component/Marker";
 import { OwnerManipulator } from "../../src/component/OwnerManipulator";
 import { Owner } from "../../src/state/State";
 
@@ -16,23 +17,36 @@ class TestOwner extends Owner {
 	}
 }
 
-async function flushEffects (): Promise<void> {
-	const schedulerRef = globalThis as typeof globalThis & {
-		scheduler?: {
-			yield?: () => Promise<unknown>;
-		};
-	};
-
-	if (typeof schedulerRef.scheduler?.yield === "function") {
-		await schedulerRef.scheduler.yield();
-		return;
-	}
-
-	await Promise.resolve();
-}
-
 describe("OwnerManipulator", () => {
-	it("is memoized and exposes the current explicit owner set", async () => {
+	it.each([
+		["Component", () => {
+			const owned = mountedComponent("div");
+			return { cleanup: () => {
+				if (!owned.disposed) owned.remove();
+			}, owned };
+		}],
+		["Marker", () => {
+			const host = mountedComponent("div");
+			const owned = Marker("self-owner").appendTo(host);
+			return { cleanup: () => {
+				if (!owned.disposed) owned.remove();
+				host.remove();
+			}, owned };
+		}],
+	] as const)("rejects %s self ownership without installing a claim", (_type, setup) => {
+		const { cleanup, owned } = setup();
+		const ownersBefore = owned.owner.getAll();
+
+		try {
+			expect.soft(() => owned.owner.add(owned)).toThrow("An owner cannot own itself.");
+			expect.soft(owned.owner.getAll()).toHaveLength(ownersBefore.length);
+			expect(owned.owner.getAll()).not.toContain(owned);
+		} finally {
+			cleanup();
+		}
+	});
+
+	it("is memoized and exposes the current explicit owner set", () => {
 		vi.useFakeTimers();
 
 		const host = mountedComponent("section");
@@ -57,7 +71,7 @@ describe("OwnerManipulator", () => {
 		}
 	});
 
-	it("supports overlapping explicit owners until the last one is cleaned up", async () => {
+	it("supports overlapping explicit owners until the last one is cleaned up", () => {
 		vi.useFakeTimers();
 
 		const host = mountedComponent("section");
@@ -91,7 +105,7 @@ describe("OwnerManipulator", () => {
 		}
 	});
 
-	it("removes explicit owners by owner, by id, and by composite", async () => {
+	it("removes explicit owners by owner, by id, and by composite", () => {
 		vi.useFakeTimers();
 
 		const host = mountedComponent("section");
@@ -124,5 +138,35 @@ describe("OwnerManipulator", () => {
 		finally {
 			vi.useRealTimers();
 		}
+	});
+
+	it("rejects a disposed owner atomically", () => {
+		const host = mountedComponent("section");
+		const owner = host.owner;
+		const liveOwner = new TestOwner();
+		const disposedOwner = new TestOwner();
+		owner.add(liveOwner, "keyed");
+		disposedOwner.remove();
+
+		try {
+			expect.soft(() => owner.add(disposedOwner, "keyed")).toThrow("Disposed owners cannot be modified.");
+			expect.soft(host.disposed).toBe(false);
+			expect.soft(owner.getAll()).toEqual([liveOwner]);
+			expect(owner.get()).toBe(liveOwner);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!liveOwner.disposed) liveOwner.remove();
+		}
+	});
+
+	it("rejects a live claimant atomically after the cached host owner is disposed", () => {
+		const host = mountedComponent("section");
+		const owner = host.owner;
+		const claimant = new TestOwner();
+		host.remove();
+
+		expect.soft(() => owner.add(claimant)).toThrow("Disposed owners cannot be modified.");
+		expect.soft(owner.getAll()).toEqual([]);
+		expect(() => claimant.remove()).not.toThrow();
 	});
 });

@@ -1,4 +1,5 @@
 import { Component, type ComponentBuilderFunction } from "./Component";
+import { DOMTree } from "./DOMTree";
 import type { ComponentEvent } from "./EventManipulator";
 import { State, type CleanupFunction } from "../state/State";
 
@@ -178,7 +179,7 @@ function isComponent (value: unknown): value is Component {
 }
 
 function isUnplacedOwnerlessComponent (component: Component): boolean {
-	return component.owner.get() === null && component.element.parentNode === null;
+	return component.owner.get() === null && DOMTree.parentOf(component.element) === null;
 }
 
 function eachElement (root: HTMLElement, callback: (element: HTMLElement) => void): void {
@@ -692,7 +693,11 @@ class DraggableController implements Draggable {
 		preview.element.style.top = "0px";
 		preview.element.style.width = `${context.rect.width}px`;
 		preview.element.style.zIndex = "2147483647";
-		this.component.element.ownerDocument.body.append(preview.element);
+		DOMTree.physical.place(
+			[preview.element],
+			{ type: "append", parent: this.component.element.ownerDocument.body },
+			() => { },
+		);
 		this.activePreview = {
 			component: preview,
 			localPosition: context.localPosition,

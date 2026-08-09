@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
+import { beginDOMTreeTransaction, DOMTree } from "../../src/component/DOMTree";
 import { EventManipulator } from "../../src/component/EventManipulator";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Marker } from "../../src/component/Marker";
@@ -9,6 +10,16 @@ placeExtension();
 
 function mountedComponent<NAME extends keyof HTMLElementTagNameMap = "div">(tagName: NAME = "div" as NAME): Component<HTMLElementTagNameMap[NAME]> {
 	return Component(tagName).appendTo(document.body);
+}
+
+function captureThrown (action: () => void): unknown {
+	try {
+		action();
+	} catch (error) {
+		return error;
+	}
+
+	throw new Error("Expected action to throw.");
 }
 
 async function flushEffects (): Promise<void> {
@@ -85,6 +96,167 @@ function captureOrphanCheck (): {
 }
 
 describe("Marker", () => {
+	it("updates virtual placement and ownership synchronously while Mount waits for commit", () => {
+		const host = mountedComponent("section");
+		const marker = Marker("transactional-marker");
+		const mount = vi.fn();
+		marker.event.owned.on.Mount(mount);
+		const transaction = beginDOMTreeTransaction();
+
+		marker.appendTo(host);
+
+		expect.soft(DOMTree.parentOf(marker.node)).toBe(host.element);
+		expect.soft(DOMTree.childrenOf(host.element)).toContain(marker.node);
+		expect.soft(marker.owner.get()).toBe(host);
+		expect.soft(marker.node.parentNode).toBeNull();
+		expect.soft(mount).not.toHaveBeenCalled();
+
+		transaction.commit();
+		expect.soft(marker.node.parentNode).toBe(host.element);
+		expect(mount).toHaveBeenCalledOnce();
+		host.remove();
+	});
+
+	it("runs later Marker.use Mount hooks when an earlier Mount hook throws", () => {
+		const host = mountedComponent("section");
+		const marker = Marker("multiple-use-mount-error");
+		const mountError = new Error("first Mount hook failed");
+		const phases: string[] = [];
+		marker.use(() => {
+			phases.push("first Mount");
+			throw mountError;
+		});
+		marker.use(() => {
+			phases.push("later Mount");
+			return () => phases.push("later cleanup");
+		}, () => phases.push("later onDispose"));
+
+		try {
+			expect.soft(() => marker.appendTo(host)).toThrow(mountError);
+			expect.soft(phases).toEqual(["first Mount", "later Mount"]);
+			marker.remove();
+			expect.soft(phases).toEqual(["first Mount", "later Mount", "later cleanup", "later onDispose"]);
+			expect.soft(marker.disposed).toBe(true);
+			expect(marker.node.marker).toBeUndefined();
+		} finally {
+			if (!marker.disposed) marker.remove();
+			host.remove();
+		}
+	});
+
+	it("runs later Marker.use cleanup and onDispose hooks when an earlier cleanup throws", () => {
+		const host = mountedComponent("section");
+		const marker = Marker("multiple-use-dispose-error");
+		const cleanupError = new Error("first Dispose cleanup failed");
+		const phases: string[] = [];
+		marker.use(() => () => {
+			phases.push("first cleanup");
+			throw cleanupError;
+		}, () => phases.push("first onDispose"));
+		marker.use(() => () => phases.push("later cleanup"), () => phases.push("later onDispose"));
+		marker.appendTo(host);
+
+		try {
+			expect.soft(() => marker.remove()).toThrow(cleanupError);
+			expect.soft(phases).toEqual([
+				"first cleanup",
+				"first onDispose",
+				"later cleanup",
+				"later onDispose",
+			]);
+			expect.soft(marker.disposed).toBe(true);
+			expect.soft(marker.disposing).toBe(false);
+			expect.soft(marker.node.marker).toBeUndefined();
+			expect(marker.node.parentNode).toBeNull();
+		} finally {
+			if (!marker.disposed) marker.remove();
+			host.remove();
+		}
+	});
+
+	it("runs cleanup before onDispose when Marker.use Mount removes the marker", () => {
+		const host = mountedComponent();
+		const marker = Marker("self-removing-use");
+		const cleanupError = new Error("self-removing Mount cleanup failed");
+		const disposeError = new Error("self-removing onDispose failed");
+		const phases: string[] = [];
+		marker.use(() => {
+			phases.push("Mount");
+			marker.remove();
+			return () => {
+				phases.push("cleanup");
+				throw cleanupError;
+			};
+		}, () => {
+			phases.push("onDispose");
+			throw disposeError;
+		});
+
+		try {
+			expect.soft(captureThrown(() => marker.appendTo(host))).toBe(cleanupError);
+			expect.soft(phases).toEqual(["Mount", "cleanup", "onDispose"]);
+			expect.soft(marker.disposed).toBe(true);
+			expect.soft(marker.disposing).toBe(false);
+			expect.soft(marker.node.parentNode).toBeNull();
+			expect.soft(marker.node.marker).toBeUndefined();
+			expect(() => marker.remove()).not.toThrow();
+		} finally {
+			if (!marker.disposed) marker.remove();
+			host.remove();
+		}
+	});
+
+	it.each([
+		["use", (cleanup: () => void) => {
+			const marker = Marker("use-remove-on-mount");
+			return marker.use(() => {
+				marker.remove();
+				return cleanup;
+			});
+		}],
+		["builder", (cleanup: () => void) => Marker.builder({
+			id: () => "builder-remove-on-mount",
+			build: (marker) => {
+				marker.remove();
+				return cleanup;
+			},
+		})()],
+	] as const)("runs %s cleanup once when its Mount action synchronously removes the marker", (_api, createMarker) => {
+		const host = mountedComponent("section");
+		const cleanup = vi.fn();
+		const marker = createMarker(cleanup);
+
+		try {
+			expect.soft(() => marker.appendTo(host)).not.toThrow();
+			expect.soft(marker.disposed).toBe(true);
+			expect(cleanup).toHaveBeenCalledTimes(1);
+		} finally {
+			if (!marker.disposed) marker.remove();
+			host.remove();
+		}
+	});
+
+	it("runs onDispose and reaches terminal state when mounted cleanup throws", () => {
+		const host = mountedComponent("section");
+		const marker = Marker("throwing-use-cleanup");
+		const cleanupError = new Error("mounted cleanup failed");
+		const mountCleanup = vi.fn(() => {
+			throw cleanupError;
+		});
+		const onDispose = vi.fn();
+		marker.use(() => mountCleanup, onDispose).appendTo(host);
+
+		expect.soft(() => marker.remove()).toThrow(cleanupError);
+		expect.soft(mountCleanup).toHaveBeenCalledOnce();
+		expect.soft(onDispose).toHaveBeenCalledOnce();
+		expect.soft(marker.disposed).toBe(true);
+		expect.soft(marker.disposing).toBe(false);
+		expect.soft(marker.node.marker).toBeUndefined();
+		expect.soft(marker.node.parentNode).toBeNull();
+		expect(() => marker.remove()).not.toThrow();
+		host.remove();
+	});
+
 	it("can be constructed with or without new and exposes node.marker", () => {
 		const withNew = new Marker("with-new");
 		const withoutNew = Marker("without-new");
@@ -200,6 +372,49 @@ describe("Marker", () => {
 		marker.remove();
 		child.remove();
 		owner.remove();
+	});
+
+	it("treats a detached explicitly-managed ShadowRoot host as implicit ownership for a raw Marker", () => {
+		const owner = mountedComponent("section");
+		const host = Component("div").owner.add(owner);
+		const shadowRoot = host.element.attachShadow({ mode: "open" });
+		const orphanCapture = captureOrphanCheck();
+		const marker = Marker("detached-shadow-managed");
+		shadowRoot.append(marker.node);
+
+		try {
+			expect(orphanCapture.orphanCheck).toBeTypeOf("function");
+			expect(() => orphanCapture.orphanCheck?.()).not.toThrow();
+			expect.soft(orphanCapture.queuedError).toBeNull();
+			expect.soft(marker.disposed).toBe(false);
+			expect(marker.node.parentNode).toBe(shadowRoot);
+		} finally {
+			orphanCapture.restore();
+			if (!marker.disposed) marker.remove();
+			if (!host.disposed) host.remove();
+			if (!owner.disposed) owner.remove();
+		}
+	});
+
+	it("disposes a raw Marker inside a closed ShadowRoot when its wrapped host is removed", async () => {
+		const host = mountedComponent("section");
+		const shadowRoot = host.element.attachShadow({ mode: "closed" });
+		const marker = Marker("raw-closed-shadow-child");
+		const mount = vi.fn();
+		marker.event.owned.on.Mount(mount);
+		shadowRoot.append(marker.node);
+
+		try {
+			await flushLifecycle();
+			expect.soft(mount).toHaveBeenCalledOnce();
+			expect.soft(marker.disposed).toBe(false);
+
+			host.remove();
+			expect(marker.disposed).toBe(true);
+		} finally {
+			if (!host.disposed) host.remove();
+			if (!marker.disposed) marker.remove();
+		}
 	});
 
 	/** Verifies unmanaged markers still defer orphan validation to a timeout tick, then route the throw through Promise.then. */

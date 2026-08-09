@@ -2,6 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Owner, State } from "../../src/state/State";
+
+if (false) {
+	// @ts-expect-error State<string | undefined> should no longer be accepted.
+	State<string | undefined>(mountedOwner(), "ready");
+	// @ts-expect-error State<string | undefined> should no longer accept undefined-valued state construction.
+	State<string | undefined>(mountedOwner(), undefined);
+	// @ts-expect-error State.Readonly<string | undefined> should no longer accept undefined-valued construction.
+	State.Readonly<string | undefined>(undefined);
+}
 import groupExtension from "../../src/state/extensions/groupExtension";
 import mappingExtension from "../../src/state/extensions/mappingExtension";
 
@@ -220,6 +229,37 @@ describe("Owner", () => {
 		expect(owner.disposing).toBe(false);
 	});
 
+	it("runs later cleanup and afterDispose while exposing the first cleanup error", () => {
+		const firstCleanupError = new Error("first cleanup failed");
+		const laterCleanupError = new Error("later cleanup failed");
+		const phases: string[] = [];
+		const owner = new class extends Owner {
+			protected override afterDispose (): void {
+				phases.push("after");
+			}
+		}();
+		owner.onCleanup(() => {
+			phases.push("first cleanup");
+			throw firstCleanupError;
+		});
+		owner.onCleanup(() => {
+			phases.push("later cleanup");
+			throw laterCleanupError;
+		});
+
+		let thrown: unknown;
+		try {
+			owner.dispose();
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect.soft(thrown).toBe(firstCleanupError);
+		expect.soft(phases).toEqual(["first cleanup", "later cleanup", "after"]);
+		expect.soft(owner.disposed).toBe(true);
+		expect(owner.disposing).toBe(false);
+	});
+
 	it("clears the disposal phase when a lifecycle hook throws", () => {
 		const owner = new class extends Owner {
 			protected beforeDispose (): void {
@@ -229,6 +269,67 @@ describe("Owner", () => {
 
 		expect(() => owner.dispose()).toThrow("lifecycle failed");
 		expect(owner.disposed).toBe(true);
+		expect(owner.disposing).toBe(false);
+	});
+
+	it.each(["abort", "before", "cleanup"] as const)("settles every Owner phase when %s is the first failing phase", (firstFailure) => {
+		const errors = {
+			abort: new Error("abort failed"),
+			before: new Error("before failed"),
+			cleanup: new Error("cleanup failed"),
+		};
+		const phases: string[] = [];
+		const failureOrder = ["abort", "before", "cleanup"] as const;
+		const mustFail = (phase: keyof typeof errors) => failureOrder.indexOf(phase) >= failureOrder.indexOf(firstFailure);
+		const owner = new class extends Owner {
+			protected override beforeDispose (): void {
+				phases.push("before");
+				this.dispose();
+				if (mustFail("before")) throw errors.before;
+			}
+
+			protected override afterDispose (): void {
+				phases.push("after");
+				this.dispose();
+			}
+		}();
+		const signal = owner.signal;
+		let abortSpy: ReturnType<typeof vi.spyOn> | null = null;
+		if (firstFailure === "abort") {
+			const controller = (owner as unknown as { abortController: AbortController }).abortController;
+			abortSpy = vi.spyOn(controller, "abort").mockImplementation(() => {
+				phases.push("abort");
+				owner.dispose();
+				throw errors.abort;
+			});
+		} else {
+			signal.addEventListener("abort", () => {
+				phases.push("abort");
+				owner.dispose();
+			});
+		}
+		owner.onCleanup(() => {
+			phases.push("cleanup");
+			owner.dispose();
+			if (mustFail("cleanup")) throw errors.cleanup;
+		});
+		owner.onCleanup(() => {
+			phases.push("later cleanup");
+			throw new Error("later cleanup failed");
+		});
+
+		let thrown: unknown;
+		try {
+			owner.dispose();
+		} catch (error) {
+			thrown = error;
+		}
+		owner.dispose();
+		abortSpy?.mockRestore();
+
+		expect.soft(thrown).toBe(errors[firstFailure]);
+		expect.soft(phases).toEqual(["abort", "before", "cleanup", "later cleanup", "after"]);
+		expect.soft(owner.disposed).toBe(true);
 		expect(owner.disposing).toBe(false);
 	});
 });
@@ -348,19 +449,6 @@ describe("State", () => {
 		expect(queuedListener, "queued subscribers should receive the retained value as both current and previous values").toHaveBeenCalledWith("ready", "ready");
 	});
 
-	it("rejects undefined-valued state construction at the type level", () => {
-		if (false) {
-			// @ts-expect-error State<string | undefined> should no longer be accepted.
-			State<string | undefined>(mountedOwner(), "ready");
-			// @ts-expect-error State<string | undefined> should no longer accept undefined-valued state construction.
-			State<string | undefined>(mountedOwner(), undefined);
-			// @ts-expect-error State.Readonly<string | undefined> should no longer accept undefined-valued construction.
-			State.Readonly<string | undefined>(undefined);
-		}
-
-		expect(true).toBe(true);
-	});
-
 	/** Verifies clear updates the stored value without notifying immediate or queued listeners. */
 	it("clears values without notifying listeners", async () => {
 		const state = State(mountedOwner(), "idle");
@@ -398,6 +486,67 @@ describe("State", () => {
 		expect(calls).toEqual([["idle", "done"]]);
 	});
 
+	it("settles every queued listener before rethrowing and does not starve later listeners", () => {
+		const scheduled: VoidFunction[] = [];
+		const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation(callback => scheduled.push(callback));
+		const owner = mountedOwner();
+		const state = State(owner, 0);
+		const error = new Error("first queued listener failed");
+		const calls: string[] = [];
+		const releaseThrowing = state.subscribeUnbound(() => {
+			calls.push("first");
+			throw error;
+		});
+		state.subscribeUnbound(() => calls.push("later"));
+
+		try {
+			state.set(1);
+			let thrown: unknown;
+			try {
+				scheduled.shift()!();
+			} catch (caught) {
+				thrown = caught;
+			}
+
+			expect.soft(calls).toEqual(["first", "later"]);
+			expect.soft(thrown).toBe(error);
+
+			releaseThrowing();
+			state.set(2);
+			expect.soft(scheduled).toHaveLength(1);
+			scheduled.shift()?.();
+			expect(calls).toEqual(["first", "later", "later"]);
+		} finally {
+			queueMicrotaskSpy.mockRestore();
+			owner.remove();
+		}
+	});
+
+	it("preserves the current queued batch when a listener schedules a reentrant update", () => {
+		const scheduled: VoidFunction[] = [];
+		const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation(callback => scheduled.push(callback));
+		const owner = mountedOwner();
+		const state = State(owner, 0);
+		const laterCalls: Array<[number, number]> = [];
+		state.subscribeUnbound(value => {
+			if (value === 1) state.set(2);
+		});
+		state.subscribeUnbound((value, previousValue) => laterCalls.push([value, previousValue]));
+
+		try {
+			state.set(1);
+			expect(scheduled).toHaveLength(1);
+			scheduled.shift()!();
+			expect.soft(laterCalls, "later listeners should receive the intact current batch").toEqual([[1, 0]]);
+			expect.soft(scheduled, "the reentrant update should schedule a second flush").toHaveLength(1);
+			scheduled.shift()?.();
+			expect(laterCalls, "the second flush should deliver the reentrant update").toEqual([[1, 0], [2, 1]]);
+		} finally {
+			queueMicrotaskSpy.mockRestore();
+			owner.remove();
+		}
+	});
+
 	it("supports immediate subscribers for state derivation", () => {
 		const state = State(mountedOwner(), "idle");
 		const calls: Array<[string, string]> = [];
@@ -413,6 +562,24 @@ describe("State", () => {
 			["idle", "running"],
 			["running", "done"],
 		]);
+	});
+
+	it("preserves immediate listener order and queued coalescing across a reentrant set", async () => {
+		const owner = mountedOwner();
+		const state = State(owner, 0);
+		const immediateCalls: Array<[number, number]> = [];
+		const queuedCalls: Array<[number, number]> = [];
+		state.subscribeImmediateUnbound(value => {
+			if (value === 1) state.set(2);
+		});
+		state.subscribeImmediateUnbound((value, previousValue) => immediateCalls.push([value, previousValue]));
+		state.subscribeUnbound((value, previousValue) => queuedCalls.push([value, previousValue]));
+
+		state.set(1);
+		expect.soft(immediateCalls).toEqual([[1, 0], [2, 1]]);
+		await flushEffects();
+		expect(queuedCalls).toEqual([[2, 0]]);
+		owner.remove();
 	});
 
 	it("does not notify queued listeners for identical values", async () => {

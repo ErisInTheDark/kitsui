@@ -1,7 +1,15 @@
 import { Owner, type CleanupFunction } from "../state/State";
+import { runCleanupSteps } from "../utility/cleanup";
 import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
 import { EventManipulator } from "./EventManipulator";
+import {
+	DOMTree,
+	registerDOMTreeNode,
+	type DOMTreeNodeRegistration,
+	unregisterDOMTreeNode,
+} from "./DOMTree";
 import { OwnerManipulator } from "./OwnerManipulator";
+import { releasePlacementAuthority } from "./PlacementAuthority";
 
 declare global {
 	interface Node {
@@ -167,7 +175,7 @@ function isManagedOwner (owner: Owner | null, visitedOwners: Set<Owner>): boolea
 }
 
 function isManagedNode (node: Node, visitedOwners: Set<Owner> = new Set()): boolean {
-	if (node.isConnected) {
+	if (DOMTree.isConnected(node)) {
 		return true;
 	}
 
@@ -178,10 +186,19 @@ function isManagedNode (node: Node, visitedOwners: Set<Owner> = new Set()): bool
 			return true;
 		}
 
-		current = current.parentNode;
+		current = DOMTree.composedParentOf(current);
 	}
 
 	return false;
+}
+
+interface MarkerUseHook {
+	onMount: () => CleanupFunction | undefined;
+	onDispose: (() => unknown) | undefined;
+	cleanup: CleanupFunction | undefined;
+	disposePending: boolean;
+	mounting: boolean;
+	settled: boolean;
 }
 
 /**
@@ -191,6 +208,8 @@ function isManagedNode (node: Node, visitedOwners: Set<Owner> = new Set()): bool
 class MarkerClass extends Owner {
 	/** The underlying DOM comment node that this marker wraps. */
 	readonly node: Comment;
+	private readonly domTreeRegistration: DOMTreeNodeRegistration;
+	private readonly useHooks = new Set<MarkerUseHook>();
 	private mounted = false;
 	private orphanCheckId: DeferredTimeoutHandle | null = null;
 
@@ -203,6 +222,7 @@ class MarkerClass extends Owner {
 		installNodeMarkerAccessor();
 		this.node = document.createComment(id);
 		markers.set(this.node, new WeakRef(this));
+		this.domTreeRegistration = registerDOMTreeNode(this.node, this);
 		this.refreshOrphanCheck();
 	}
 
@@ -250,33 +270,45 @@ class MarkerClass extends Owner {
 	 * @returns This marker for chaining.
 	 */
 	use (onMount: () => CleanupFunction | undefined, onDispose?: () => unknown): this {
-		let disposeCleanup: CleanupFunction | undefined;
-
-		this.event.owned.on.Mount(() => {
-			disposeCleanup = onMount();
+		this.ensureActive();
+		this.useHooks.add({
+			onMount,
+			onDispose,
+			cleanup: undefined,
+			disposePending: false,
+			mounting: false,
+			settled: false,
 		});
 
-		this.event.owned.on.Dispose(() => {
-			disposeCleanup?.()
-			onDispose?.()
-			disposeCleanup = undefined
-			onDispose = undefined
-		});
-
-		return this
+		return this;
 	}
 
 	protected beforeDispose (): void {
-		this.node.dispatchEvent(new CustomEvent("Dispose"));
-		this.clearOrphanCheck();
+		const useHooks = [...this.useHooks];
+		this.useHooks.clear();
+		runCleanupSteps([
+			() => this.node.dispatchEvent(new CustomEvent("Dispose")),
+			() => releasePlacementAuthority(this.node, true),
+			...useHooks.map(hook => () => {
+				if (hook.mounting) {
+					hook.disposePending = true;
+					return;
+				}
 
-		if (getLiveMarker(this.node) === this) {
-			markers.delete(this.node);
-		}
+				this.settleUseHook(hook);
+			}),
+			() => this.clearOrphanCheck(),
+			() => {
+				if (getLiveMarker(this.node) === this) {
+					markers.delete(this.node);
+				}
+			},
+			() => unregisterDOMTreeNode(this.domTreeRegistration),
+		]);
 	}
 
 	protected afterDispose (): void {
-		this.node.remove();
+		DOMTree.remove(this.node);
 	}
 
 	/** @internal */
@@ -286,7 +318,46 @@ class MarkerClass extends Owner {
 		}
 
 		this.mounted = true;
-		this.node.dispatchEvent(new CustomEvent("Mount"));
+		const useHooks = [...this.useHooks];
+		runCleanupSteps([
+			() => this.node.dispatchEvent(new CustomEvent("Mount")),
+			...useHooks.map(hook => () => {
+				if (this.disposed) {
+					return;
+				}
+
+				hook.mounting = true;
+				let cleanup: CleanupFunction | undefined;
+				runCleanupSteps([
+					() => {
+						cleanup = hook.onMount();
+					},
+					() => {
+						hook.mounting = false;
+						hook.cleanup = cleanup;
+						if (this.disposed || hook.disposePending) {
+							this.settleUseHook(hook);
+						}
+					},
+				]);
+			}),
+		]);
+	}
+
+	private settleUseHook (hook: MarkerUseHook): void {
+		if (hook.settled) {
+			return;
+		}
+
+		hook.settled = true;
+		const cleanup = hook.cleanup;
+		const onDispose = hook.onDispose;
+		hook.cleanup = undefined;
+		hook.onDispose = undefined;
+		runCleanupSteps([
+			() => cleanup?.(),
+			() => onDispose?.(),
+		]);
 	}
 
 	private ensureActive (): void {
@@ -322,6 +393,7 @@ class MarkerClass extends Owner {
 				return;
 			}
 
+			this.refreshPlacementOwner();
 			if (this.isManaged()) {
 				this.dispatchMount();
 				return;
@@ -329,6 +401,20 @@ class MarkerClass extends Owner {
 
 			throw new Error(orphanedMarkerErrorMessage);
 		});
+	}
+
+	/** @internal Updates Kitsui-derived placement ownership from the current virtual tree. */
+	private refreshPlacementOwner (): void {
+		let current: Node | null = DOMTree.parentOf(this.node);
+		while (current) {
+			const owner = getWrappedNodeOwner(current);
+			if (owner && owner !== this) {
+				this.owner.add(owner, "placement");
+				return;
+			}
+			current = DOMTree.composedParentOf(current);
+		}
+		this.owner.remove("placement");
 	}
 
 	private isManaged (): boolean {
@@ -370,9 +456,17 @@ Marker.builder = function builder<A extends any[]> (definition: MarkerBuilderDef
 
 		marker.event.owned.on.Mount(() => {
 			const cleanup = definition.build(marker, ...args);
-			if (cleanup) marker.event.owned.on.Dispose(() => cleanup?.());
+			if (!cleanup) {
+				return;
+			}
+			if (marker.disposed) {
+				cleanup();
+				return;
+			}
+
+			marker.event.owned.on.Dispose(cleanup);
 		});
 
 		return marker;
-	}
-}
+	};
+};

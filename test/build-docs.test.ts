@@ -45,7 +45,21 @@ async function listPublicPages (directory: string): Promise<string[]> {
 	return pages.sort((left, right) => left.localeCompare(right));
 }
 
-function declarationSlice (html: string, declarationName: string): string {
+function declarationSlice (html: string, declarationName: string, semanticDeclarationId?: string): string {
+	if (semanticDeclarationId) {
+		const declarationIdIndex = html.indexOf(`id="${semanticDeclarationId}"`);
+		expect(declarationIdIndex, `Missing ${semanticDeclarationId} semantic declaration`).toBeGreaterThanOrEqual(0);
+		const canonicalAnchor = html.slice(declarationIdIndex, declarationIdIndex + 500).match(/href="[^"]*#([^"]+)"/u);
+		expect(canonicalAnchor, `Missing ${semanticDeclarationId} canonical declaration link`).not.toBeNull();
+		const canonicalIdIndex = html.indexOf(`id="${canonicalAnchor![1]}"`);
+		expect(canonicalIdIndex, `Missing ${semanticDeclarationId} canonical declaration`).toBeGreaterThanOrEqual(0);
+		const declarationStart = html.lastIndexOf("<details", canonicalIdIndex);
+		expect(declarationStart, `Missing ${semanticDeclarationId} canonical declaration container`).toBeGreaterThanOrEqual(0);
+		const declarationEnd = html.indexOf("</summary></details>", canonicalIdIndex);
+		expect(declarationEnd, `Missing ${semanticDeclarationId} declaration end`).toBeGreaterThanOrEqual(0);
+		return html.slice(declarationStart, declarationEnd + "</summary></details>".length);
+	}
+
 	const headerNeedle = `<span class="docs-declaration-name">${declarationName}</span>`;
 	const headerIndex = html.lastIndexOf(headerNeedle);
 	expect(headerIndex, `Missing ${declarationName} declaration`).toBeGreaterThanOrEqual(0);
@@ -286,6 +300,55 @@ describe("build:docs pipeline", () => {
 		expect(componentHtml.includes('id="Component.attribute"'), "Missing semantic Component.attribute anchor").toBe(true);
 		expect(componentHtml.includes('id="Component.style"'), "Missing semantic Component.style anchor").toBe(true);
 		expect(componentHtml.includes('id="ComponentExtensions.appendTo"'), "Missing semantic ComponentExtensions.appendTo anchor").toBe(true);
+		for (const [method, physicalPlacement] of [
+			["appendTo", "Physically appends this component to the end of the target component or DOM parent."],
+			["prependTo", "Physically prepends this component to the start of the target component or DOM parent."],
+			["insertTo", "Physically inserts this component before or after the target node, component, or place."],
+		] as const) {
+			const placementDocumentation = declarationSlice(componentHtml, method, `ComponentExtensions.${method}`);
+			expect.soft(placementDocumentation.includes(physicalPlacement), `${method} should describe its physical placement`).toBe(true);
+			expect.soft(placementDocumentation.includes("If placement crosses a ShadowRoot boundary, the nearest wrapped host owns this component's lifetime."), `${method} should describe ShadowRoot-host lifetime ownership`).toBe(true);
+			expect.soft(placementDocumentation.includes("Ordinary light-DOM placement does not add an explicit owner."), `${method} should disclaim ordinary light-DOM explicit ownership`).toBe(true);
+			expect.soft(placementDocumentation.includes("This authoring call synchronously replaces any prior Kitsui placement authority for this component."), `${method} should document replacement authority`).toBe(true);
+			expect.soft(placementDocumentation.includes("nearest wrapped ancestor for raw DOM parents"), `${method} should not promise ordinary raw-parent owner assignment`).toBe(false);
+			expect.soft(placementDocumentation.includes("Sets the owner based on the target's owner if applicable."), `${method} should not promise target-derived ownership`).toBe(false);
+		}
+		const breakdownDocumentationPhrases = [
+			"The initial render runs synchronously. Later State updates are queued, batched, and coalesced through State.subscribe.",
+			"Virtual parent, order, containment, connectivity, and lifecycle intent update synchronously during the handler.",
+			"Only physical DOM mutation and Mount wait until the handler returns.",
+			"Async handlers, await, and Part or structural calls after the handler returns are unsupported.",
+			"Kitsui structural APIs update the scoped virtual tree during the pass. Raw DOM operations and non-structural manipulators remain physical and immediate.",
+			"Part only builds, registers, or reuses a Component; it never places that Component.",
+			"Part builders must return an ownerless, unplaced Component root.",
+			"If the handler throws, recorded structural intents still commit, omission reconciliation is skipped, and there is no rollback.",
+			"After a successful pass, omitted parts are disposed and stale or disposed relative references are ignored.",
+			"Placement does not transfer Breakdown lifetime.",
+			"Mount fires once after the transaction closes and materializes. It means managed-parent placement, not document connectivity.",
+			"Nested Breakdown calls join the outer transaction.",
+		] as const;
+		for (const phrase of breakdownDocumentationPhrases) {
+			expect.soft(componentHtml.includes(phrase), `Component Breakdown docs should include: ${phrase}`).toBe(true);
+		}
+		for (const phrase of [
+			"Use a stable key for each logical item.",
+			"Update and place every returned part during every pass.",
+			"never places a Component for you",
+			"Keep the callback synchronous",
+			"Later State updates are batched and can skip intermediate values",
+			"Breakdown continues to own each part even when you place it somewhere else.",
+		] as const) {
+			expect.soft(indexHtml.includes(phrase), `README Breakdown guide should include: ${phrase}`).toBe(true);
+		}
+		expect.soft(indexHtml.includes("Write the README"), "README Breakdown guide should include its keyed Todo example").toBe(true);
+		expect.soft(indexHtml.includes("todo.id"), "README Breakdown example should key parts by logical item identity").toBe(true);
+		const featureIndexStart = indexHtml.indexOf("Feature Index");
+		const featureIndexEnd = indexHtml.indexOf("<h2", featureIndexStart);
+		const featureIndexHtml = indexHtml.slice(featureIndexStart, featureIndexEnd < 0 ? undefined : featureIndexEnd);
+		expect(/<li[^>]*>[\s\S]*?Breakdown[\s\S]*?<\/li>/u.test(featureIndexHtml), "README Overview feature index should mention Breakdown").toBe(true);
+		expect.soft(indexHtml.includes("Build and move real Components directly; kitsui does not run an application-wide render cycle behind your code."), "README overview should explain the direct authoring model").toBe(true);
+		expect.soft(indexHtml.includes("Breakdown uses scoped DOM transactions and keyed reconciliation within an explicit reactive region."), "README overview should not narrate Breakdown internals").toBe(false);
+		expect(indexHtml.includes("No virtual DOM, no reconciliation, no hidden state."), "README overview should not deny Kitsui's scoped transaction and reconciliation machinery").toBe(false);
 		expect(componentHtml.includes('id="Component.EventMap"'), "Merged Component declaration should retain its EventMap namespace type").toBe(true);
 		expect(componentHtml.includes('id="Component.WithEvents"'), "Merged Component declaration should retain its WithEvents namespace interface").toBe(true);
 		expect(stateHtml.includes('<title>State - kitsui</title>'), "Missing State page title").toBe(true);

@@ -1,4 +1,5 @@
 import { Component } from "./Component";
+import { DOMTree } from "./DOMTree";
 import { State, type CleanupFunction } from "../state/State";
 import { Draggable, type DragEventDetail, type DraggableComponent } from "./Draggable";
 import { handleDropTargetDrop, resolveDropTarget } from "./DropTarget";
@@ -101,7 +102,7 @@ function isComponent (value: unknown): value is Component {
 }
 
 function isUnplacedOwnerlessComponent (component: Component): boolean {
-	return component.owner.get() === null && component.element.parentNode === null;
+	return component.owner.get() === null && DOMTree.parentOf(component.element) === null;
 }
 
 function validateRenderedComponent (component: unknown, message: string): Component {
@@ -147,7 +148,7 @@ function closestSortableController (component: Component | undefined): SortableC
 			}
 		}
 
-		current = current.parentNode;
+		current = DOMTree.physical.parentOf(current);
 	}
 
 	return null;
@@ -348,7 +349,7 @@ export class SortableController<
 		this.preview.set(valuesFromRecords(this.recordsByKey, this.previewOrder));
 		this.placePlaceholder(this, session.targetIndex);
 		this.handleDragMove(detail);
-		record.component.element.remove();
+		DOMTree.physical.remove(record.component.element);
 	}
 
 	handleDragMove (detail: DragEventDetail): void {
@@ -491,7 +492,9 @@ export class SortableController<
 	}
 
 	private suspendPlaceholder (session: ActiveSortSession<any, any, any>): void {
-		session.placeholder?.element.remove();
+		if (session.placeholder) {
+			DOMTree.physical.remove(session.placeholder.element);
+		}
 	}
 
 	private commitSession (session: ActiveSortSession<any, any, any>): void {
@@ -686,7 +689,13 @@ export class SortableController<
 
 		const referenceRecord = target.recordAtInsertionIndex(session, index);
 		const referenceNode = referenceRecord?.component.element ?? null;
-		target.component.element.insertBefore(placeholder.element, referenceNode);
+		DOMTree.physical.place(
+			[placeholder.element],
+			referenceNode
+				? { type: "before", reference: referenceNode }
+				: { type: "append", parent: target.component.element },
+			() => { },
+		);
 	}
 
 	private baseOrderForSession (session: ActiveSortSession<any, any, any>): K[] {

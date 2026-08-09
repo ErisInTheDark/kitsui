@@ -52,7 +52,7 @@ describe("docs SPA scrollPostNavigate", () => {
 		const monacoStylesheet = document.createElement("link");
 		monacoStylesheet.rel = "stylesheet";
 		monacoStylesheet.setAttribute("data-monaco-editor-styles", "true");
-		monacoStylesheet.href = "./vs/editor/editor.main.css";
+		monacoStylesheet.href = "data:text/css,%2F*%20inert%20Monaco%20stylesheet%20fixture%20*%2F";
 		document.head.appendChild(monacoStylesheet);
 
 		const persistentRuntimeNodes = capturePersistentRuntimeNodes(document);

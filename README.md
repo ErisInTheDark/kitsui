@@ -2,7 +2,7 @@
 
 kitsui is a DOM-first UI library built around owned `Component` and `State` objects. A `Component` wraps a real `HTMLElement`; a `State` is an owned reactive value.
 
-Think of kitsui like react but with less magic. Every possible effect is explicitly declared and controlled by you. No virtual DOM, no reconciliation, no hidden state.
+Think of kitsui like react but with less magic. Every possible effect is explicitly declared and controlled by you. Build and move real Components directly; kitsui does not run an application-wide render cycle behind your code.
 
 ## A Typical Component
 
@@ -234,7 +234,10 @@ Use `attribute.toggle(name, enabled)` for immediate boolean attribute toggling i
 ## Movement And Placement
 
 Use `appendTo`, `prependTo`, and `insertTo` when an existing component should move relative to another component, node, or marker. Use `appendToWhen`, `prependToWhen`, `insertToWhen`, `appendWhen`, `prependWhen`, and `insertWhen` for conditional placement. Use `place` when the target location itself is reactive.
-kitsui parks nodes off-DOM when conditions are not met, then disposes them when the owner is removed.
+
+Keep one active kitsui placement flow per Component or raw Node. If you place it again through another kitsui API, the newer call takes control and the older conditional or selection flow stops moving it. Replacing one Component from a shared selection does not stop its siblings.
+
+Conditional placement keeps hidden nodes alive off-DOM and restores them when their condition becomes true. Removing their lifetime owner disposes them.
 
 ```ts
 const root = Component("section")
@@ -325,9 +328,42 @@ card
 	.event.owned.on.pointerleave(() => raised.set(false))
 ```
 
+## Breakdown
+
+Use `component.breakdown(...)` when a State drives a keyed list or region and each Component should be reused by key.
+
+```ts
+interface Todo {
+	id: string
+	label: string
+}
+
+const list = Component("ul")
+const todos = State(list, [
+	{ id: "first", label: "Write the README" },
+])
+
+list.breakdown(todos, (list, Part, todos) => {
+	for (const todo of todos) {
+		Part(todo.id, () => Component("li"))
+			.text.set(todo.label)
+			.appendTo(list)
+	}
+})
+```
+
+Use a stable key for each logical item. `Part` returns the same Component while that key remains present. Its builder runs when the key needs a new Component and must return a new, active, ownerless Component that has not been placed yet.
+
+Update and place every returned part during every pass. `Part` never places a Component for you, and the order of your placement calls establishes the rendered order. If a successful pass omits a key, kitsui disposes that part.
+
+Keep the callback synchronous: do not use an async callback, `await`, or delayed `Part` and placement calls. Later State updates are batched and can skip intermediate values, so author each pass from the value supplied to the callback.
+
+Use kitsui placement APIs inside the callback. If you need to inspect the physical DOM, do so after the callback returns. Breakdown continues to own each part even when you place it somewhere else.
+
 ## Feature Index
 
 - [`Component`](./Component.html): `append`, `prepend`, `insert`, conditional variants, `clear`, `use`, `and`, `is`, `as`, `remove`, `extend`.
+- Breakdown: `component.breakdown(...)` and `Component.Breakdown(...)` for stable keyed rendering from State values.
 - Placement extensions: `appendTo`, `prependTo`, `insertTo`, conditional variants, and `place`.
 - Manipulators: [`ClassManipulator`](./ClassManipulator.html), [`StyleManipulator`](./StyleManipulator.html), [`AttributeManipulator`](./AttributeManipulator.html), [`TextManipulator`](./TextManipulator.html), [`EventManipulator`](./EventManipulator.html), [`AriaManipulator`](./AriaManipulator.html).
 - [`State`](./State.html): `set`, `update`, equality options, subscriptions, `map`, `debounce`, `throttle`, `mapAsync`, `truthy`, `falsy`, `or`, `Group`, `extend`.

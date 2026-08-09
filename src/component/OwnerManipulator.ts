@@ -1,16 +1,5 @@
-import { Owner, type CleanupFunction } from "../state/State";
+import { Owner } from "../state/State";
 import { GenericClaimManipulator } from "./GenericClaimManipulator";
-
-interface OwnerClaimEntry {
-	active: boolean;
-	id: string | null;
-	owner: Owner;
-	releaseLifecycle: CleanupFunction;
-}
-
-const noop: CleanupFunction = () => {
-	// Intentionally empty.
-};
 
 /**
  * Manages explicit lifecycle owners for a component-like host.
@@ -18,19 +7,11 @@ const noop: CleanupFunction = () => {
  * @typeParam HOST The owning host type returned for fluent chaining.
  */
 export class OwnerManipulator<HOST extends Owner & { remove (): void; }> extends GenericClaimManipulator<HOST> {
-	private readonly anonymousEntries = new Map<Owner, OwnerClaimEntry>();
-	private readonly entriesByOwner = new Map<Owner, Set<OwnerClaimEntry>>();
-	private readonly keyedEntries = new Map<string, OwnerClaimEntry>();
-
 	constructor (
 		owner: HOST,
 		private readonly refreshManagement: () => void,
 	) {
 		super(owner);
-
-		owner.onCleanup(() => {
-			this.clearEntries();
-		});
 	}
 
 	/**
@@ -40,45 +21,26 @@ export class OwnerManipulator<HOST extends Owner & { remove (): void; }> extends
 	 * @param owner Explicit owner to register.
 	 * @param id Optional keyed claim slot.
 	 * @returns The owning host for fluent chaining.
+	 * @throws If the host attempts to own itself.
 	 */
 	add (owner: Owner, id: string | null = null): HOST {
+		if (this.owner.disposed || owner.disposed) {
+			throw new Error("Disposed owners cannot be modified.");
+		}
+		if (owner === this.owner) {
+			throw new Error("An owner cannot own itself.");
+		}
+
 		if (id === null) {
-			if (this.anonymousEntries.has(owner)) {
+			if (this.hasAnonymousClaim(owner)) {
 				return this.owner;
 			}
 		}
-		else {
-			const existingEntry = this.keyedEntries.get(id);
-			if (existingEntry?.owner === owner) {
-				return this.owner;
-			}
-
-			if (existingEntry) {
-				this.unregisterEntry(existingEntry, true);
-			}
+		else if (this.getRegisteredClaimant(id) === owner) {
+			return this.owner;
 		}
 
-		const entry: OwnerClaimEntry = {
-			active: true,
-			id,
-			owner,
-			releaseLifecycle: noop,
-		};
-
-		entry.releaseLifecycle = owner.onCleanup(() => {
-			if (!entry.active) {
-				return;
-			}
-
-			this.unregisterEntry(entry, true);
-			if (this.getAll().length === 0) {
-				this.owner.remove();
-			}
-		});
-
-		this.trackEntry(entry);
 		this.registerClaim(id, owner);
-		this.refreshManagement();
 		return this.owner;
 	}
 
@@ -104,37 +66,17 @@ export class OwnerManipulator<HOST extends Owner & { remove (): void; }> extends
 	remove (id: string | null, owner: Owner): HOST;
 	remove (idOrOwner: string | Owner | null, owner?: Owner): HOST {
 		if (owner !== undefined) {
-			if (idOrOwner === null) {
-				const anonymousEntry = this.anonymousEntries.get(owner);
-				if (anonymousEntry) {
-					this.unregisterEntry(anonymousEntry, true);
-				}
-
-				return this.owner;
-			}
-
-			const keyedEntry = this.keyedEntries.get(idOrOwner as string);
-			if (keyedEntry?.owner === owner) {
-				this.unregisterEntry(keyedEntry, true);
-			}
-
+			this.deregisterClaim(idOrOwner as string | null, owner);
 			return this.owner;
 		}
 
 		if (typeof idOrOwner === "string") {
-			const keyedEntry = this.keyedEntries.get(idOrOwner);
-			if (keyedEntry) {
-				this.unregisterEntry(keyedEntry, true);
-			}
-
+			this.deregisterClaim(idOrOwner);
 			return this.owner;
 		}
 
 		if (idOrOwner !== null) {
-			const entries = this.entriesByOwner.get(idOrOwner);
-			for (const entry of [...(entries ?? [])]) {
-				this.unregisterEntry(entry, true);
-			}
+			this.deregisterClaim(idOrOwner);
 		}
 
 		return this.owner;
@@ -146,15 +88,7 @@ export class OwnerManipulator<HOST extends Owner & { remove (): void; }> extends
 	 * @returns One explicit owner or null when no owners are registered.
 	 */
 	get (): Owner | null {
-		for (const entry of this.keyedEntries.values()) {
-			return entry.owner;
-		}
-
-		for (const entry of this.anonymousEntries.values()) {
-			return entry.owner;
-		}
-
-		return null;
+		return this.getRegisteredClaimants()[0] as Owner | undefined ?? null;
 	}
 
 	/**
@@ -162,74 +96,13 @@ export class OwnerManipulator<HOST extends Owner & { remove (): void; }> extends
 	 * @returns All explicit owners currently managing the host.
 	 */
 	getAll (): Owner[] {
-		return [...new Set([
-			...this.keyedEntries.values(),
-			...this.anonymousEntries.values(),
-		].map(entry => entry.owner))];
+		return [...new Set(this.getRegisteredClaimants() as Owner[])];
 	}
 
-	private clearEntries (): void {
-		for (const entry of [
-			...this.keyedEntries.values(),
-			...this.anonymousEntries.values(),
-		]) {
-			this.untrackEntry(entry);
-			entry.active = false;
-			entry.releaseLifecycle();
-		}
-	}
-
-	private trackEntry (entry: OwnerClaimEntry): void {
-		if (entry.id === null) {
-			this.anonymousEntries.set(entry.owner, entry);
-		}
-		else {
-			this.keyedEntries.set(entry.id, entry);
-		}
-
-		let entries = this.entriesByOwner.get(entry.owner);
-		if (!entries) {
-			entries = new Set<OwnerClaimEntry>();
-			this.entriesByOwner.set(entry.owner, entries);
-		}
-
-		entries.add(entry);
-	}
-
-	private untrackEntry (entry: OwnerClaimEntry): void {
-		if (entry.id === null) {
-			if (this.anonymousEntries.get(entry.owner) === entry) {
-				this.anonymousEntries.delete(entry.owner);
-			}
-		}
-		else if (this.keyedEntries.get(entry.id) === entry) {
-			this.keyedEntries.delete(entry.id);
-		}
-
-		const ownerEntries = this.entriesByOwner.get(entry.owner);
-		if (!ownerEntries) {
-			return;
-		}
-
-		ownerEntries.delete(entry);
-		if (ownerEntries.size === 0) {
-			this.entriesByOwner.delete(entry.owner);
-		}
-	}
-
-	private unregisterEntry (entry: OwnerClaimEntry, deregisterClaim: boolean): void {
-		if (!entry.active) {
-			return;
-		}
-
-		entry.active = false;
-		this.untrackEntry(entry);
-		entry.releaseLifecycle();
-
-		if (deregisterClaim) {
-			this.deregisterClaim(entry.id, entry.owner);
-		}
-
+	protected onClaimsChanged (disposedOwnerRemoved = false): void {
 		this.refreshManagement();
+		if (disposedOwnerRemoved && this.getAll().length === 0 && !this.owner.disposed) {
+			this.owner.remove();
+		}
 	}
 }
