@@ -69,7 +69,7 @@ async function importEditorModule () {
 	return import("../scripts/docs/client/editor");
 }
 
-function createFakeMonaco () {
+function createFakeMonaco (outputFiles: Array<{ name: string; text: string }> = []) {
 	const models = new Map<string, FakeMonacoModel>();
 
 	const monaco = {
@@ -117,7 +117,7 @@ function createFakeMonaco () {
 			ModuleResolutionKind: { NodeJs: "NodeJs" },
 			ScriptTarget: { ESNext: "ESNext" },
 			getTypeScriptWorker: vi.fn(async () => async () => ({
-				getEmitOutput: async () => ({ outputFiles: [] }),
+				getEmitOutput: async () => ({ outputFiles }),
 			})),
 			typescriptDefaults: {
 				addExtraLib: vi.fn(),
@@ -211,12 +211,12 @@ describe("docs editor preview import rewriting", () => {
 		expect(document.querySelector("link[data-monaco-editor-styles='true']")).not.toBeNull();
 	});
 
-	it("can initialize the playground twice in the same document without creating a duplicate Monaco model", async () => {
+	it("reinitializes the playground after cleaning its first preview", async () => {
 		const { initEditor } = await importEditorModule();
 		document.body.innerHTML = makeEditorHtml();
 		installMatchMediaStub();
 
-		const { monaco } = createFakeMonaco();
+		const { monaco } = createFakeMonaco([{ name: "main.js", text: "export default function () {}" }]);
 		const loader = document.createElement("script");
 		loader.id = "monaco-loader";
 		document.head.appendChild(loader);
@@ -234,8 +234,14 @@ describe("docs editor preview import rewriting", () => {
 
 		await expect(initEditor()).resolves.toBeUndefined();
 		expect(monaco.editor.createModel).toHaveBeenCalledTimes(1);
+		await flushPromises();
+		const firstPreviewFrame = document.querySelector<HTMLIFrameElement>("iframe");
+		const previewCleanup = vi.fn();
+		firstPreviewFrame!.contentWindow!.addEventListener("pagehide", previewCleanup, { once: true });
 		await expect(initEditor()).resolves.toBeUndefined();
 		expect(monaco.editor.createModel).toHaveBeenCalledTimes(2);
+		expect(previewCleanup, "preview lifecycle cleanup should run before iframe removal").toHaveBeenCalledOnce();
+		expect(firstPreviewFrame!.isConnected).toBe(false);
 	});
 
 	it("cancels a pending editor bootstrap when page cleanup runs during async startup", async () => {

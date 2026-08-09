@@ -116,6 +116,8 @@ function clearPreviewFrame (runtime: EditorRuntime): void {
 	}
 
 	if (runtime.previewFrame) {
+		const previewWindow = runtime.previewFrame.contentWindow as (Window & typeof globalThis) | null;
+		previewWindow?.dispatchEvent(new previewWindow.Event("pagehide"));
 		runtime.previewFrame.remove();
 		runtime.previewFrame = null;
 	}

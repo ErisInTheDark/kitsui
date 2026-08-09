@@ -83,6 +83,38 @@ function trackStructuralMoves (parent: Element): {
 }
 
 describe("Component.Breakdown", () => {
+	it("materializes ownerless part descendants before orphan validation", async () => {
+		const owner = mountedComponent("div");
+		const source = State(owner, 0);
+		let child!: Component;
+		let childMounts = 0;
+
+		try {
+			Component.Breakdown(owner, source, (Part, count) => {
+				if (count === 0) return;
+
+				const part = Part("fish", () => {
+					child = Component("span");
+					child.event.owned.on.Mount(() => childMounts += 1);
+					const built = Component("article").append(child);
+					expect(child.element.parentNode, "the child should stay physical until commit").toBeNull();
+					expect(DOMTree.parentOf(child.element), "the child should have its virtual parent immediately").toBe(built.element);
+					return built;
+				});
+				owner.append(part);
+			});
+
+			source.set(1);
+			await flushEffects();
+			expect(child.element.isConnected).toBe(true);
+			expect(childMounts).toBe(1);
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			expect(child.disposed, "the orphan timer should accept the materialized virtual placement").toBe(false);
+		} finally {
+			owner.remove();
+		}
+	});
+
 	it("supports fluent instance breakdowns owned by the component", async () => {
 		const owner = mountedComponent("div");
 		const source = State(owner, "one");

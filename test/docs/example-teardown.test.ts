@@ -97,7 +97,7 @@ async function importExampleModule (exampleFileName: string): Promise<ImportedEx
 }
 
 describe("docs example teardown", () => {
-	/** Verifies the fishing simulator example can mount and dispose without throwing. */
+	/** Verifies the fishing simulator can restock its pond and dispose without throwing. */
 	it("tears down highly-accurate-fishing-simulator cleanly", async () => {
 		const { default: HighlyAccurateFishingSimulator, cleanup } = await importExampleModule("highly-accurate-fishing-simulator.ts");
 
@@ -107,6 +107,31 @@ describe("docs example teardown", () => {
 
 			expect(root.element.isConnected, "the fishing simulator example should mount").toBe(true);
 			await settleExampleLifecycle();
+
+			const fish = root.element.querySelector<HTMLButtonElement>('button[aria-label^="Catch "]');
+			expect(fish, "the pond should start with one catchable fish").not.toBeNull();
+			fish!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			fish!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			fish!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+			await settleExampleLifecycle();
+
+			const restock = Array.from(root.element.querySelectorAll<HTMLButtonElement>("button"))
+				.find((button) => button.textContent?.startsWith("Restock ("));
+			expect(restock, "three catches should make the Restock upgrade affordable").not.toBeUndefined();
+			restock!.click();
+			await settleExampleLifecycle();
+			const fishAfterRestock = root.element.querySelectorAll<HTMLButtonElement>('button[aria-label^="Catch "]');
+			expect(
+				fishAfterRestock,
+				"buying Restock should render a second fish",
+			).toHaveLength(2);
+			await new Promise<void>((resolve) => setTimeout(resolve, 50));
+			await settleExampleLifecycle();
+			expect(
+				fishAfterRestock[1].style.getPropertyValue("--fish-opacity"),
+				"the restocked fish should become visible after Mount",
+			).toBe("1");
+
 			await expectTeardownToStayQuiet(() => root.remove());
 		} finally {
 			await cleanup();
