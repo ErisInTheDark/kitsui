@@ -34,6 +34,7 @@ var __kitsui_factory__ = (() => {
   var index_exports = {};
   __export(index_exports, {
     AriaManipulator: () => AriaManipulator,
+    AsyncPending: () => AsyncPending,
     AttributeManipulator: () => AttributeManipulator,
     ClassManipulator: () => ClassManipulator,
     Component: () => Component,
@@ -84,15 +85,151 @@ var __kitsui_factory__ = (() => {
     whenOpen: () => whenOpen
   });
 
+  // src/utility/timer.ts
+  var maximumNativeTimeout = 2147483647;
+  var scheduledTimeouts = [];
+  var activeNativeTimeout = null;
+  var nextSequence = 0;
+  function compareTimeouts(left, right) {
+    return left.deadline - right.deadline || left.sequence - right.sequence;
+  }
+  function swapTimeouts(leftIndex, rightIndex) {
+    const left = scheduledTimeouts[leftIndex];
+    const right = scheduledTimeouts[rightIndex];
+    scheduledTimeouts[leftIndex] = right;
+    scheduledTimeouts[rightIndex] = left;
+    left.heapIndex = rightIndex;
+    right.heapIndex = leftIndex;
+  }
+  function bubbleUp(startIndex) {
+    let index = startIndex;
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      if (compareTimeouts(scheduledTimeouts[parentIndex], scheduledTimeouts[index]) <= 0) {
+        return;
+      }
+      swapTimeouts(parentIndex, index);
+      index = parentIndex;
+    }
+  }
+  function bubbleDown(startIndex) {
+    let index = startIndex;
+    while (true) {
+      const leftIndex = index * 2 + 1;
+      const rightIndex = leftIndex + 1;
+      let smallestIndex = index;
+      if (leftIndex < scheduledTimeouts.length && compareTimeouts(scheduledTimeouts[leftIndex], scheduledTimeouts[smallestIndex]) < 0) {
+        smallestIndex = leftIndex;
+      }
+      if (rightIndex < scheduledTimeouts.length && compareTimeouts(scheduledTimeouts[rightIndex], scheduledTimeouts[smallestIndex]) < 0) {
+        smallestIndex = rightIndex;
+      }
+      if (smallestIndex === index) {
+        return;
+      }
+      swapTimeouts(index, smallestIndex);
+      index = smallestIndex;
+    }
+  }
+  function removeTimeoutAt(index) {
+    const removed = scheduledTimeouts[index];
+    const replacement = scheduledTimeouts.pop();
+    removed.heapIndex = -1;
+    if (replacement === void 0 || replacement === removed) {
+      return removed;
+    }
+    scheduledTimeouts[index] = replacement;
+    replacement.heapIndex = index;
+    if (index > 0 && compareTimeouts(replacement, scheduledTimeouts[Math.floor((index - 1) / 2)]) < 0) {
+      bubbleUp(index);
+    } else {
+      bubbleDown(index);
+    }
+    return removed;
+  }
+  function clearNativeTimeout() {
+    if (activeNativeTimeout === null) {
+      return;
+    }
+    clearTimeout(activeNativeTimeout);
+    activeNativeTimeout = null;
+  }
+  function armNextTimeout() {
+    clearNativeTimeout();
+    const nextTimeout = scheduledTimeouts[0];
+    if (!nextTimeout) {
+      return;
+    }
+    const remaining = Math.max(0, nextTimeout.deadline - performance.now());
+    const delay = Math.min(maximumNativeTimeout, Math.ceil(remaining));
+    activeNativeTimeout = setTimeout(runDueTimeouts, delay);
+  }
+  function runDueTimeouts() {
+    activeNativeTimeout = null;
+    const currentTime = performance.now();
+    const callbacks = [];
+    while (scheduledTimeouts[0]?.deadline <= currentTime) {
+      const scheduledTimeout = removeTimeoutAt(0);
+      const callback = scheduledTimeout.callback;
+      scheduledTimeout.callback = null;
+      if (callback) {
+        callbacks.push(callback);
+      }
+    }
+    armNextTimeout();
+    for (const callback of callbacks) {
+      try {
+        callback();
+      } catch (error) {
+        queueMicrotask(() => {
+          throw error;
+        });
+      }
+    }
+  }
+  function scheduleTimeout(callback, milliseconds) {
+    if (typeof milliseconds !== "number" || !Number.isFinite(milliseconds) || milliseconds < 0) {
+      throw new RangeError("Timeout duration must be a finite non-negative number.");
+    }
+    const currentTime = performance.now();
+    const calculatedDeadline = currentTime + milliseconds;
+    const scheduledTimeout = {
+      callback,
+      deadline: Number.isFinite(calculatedDeadline) ? calculatedDeadline : Number.MAX_VALUE,
+      heapIndex: scheduledTimeouts.length,
+      sequence: nextSequence++
+    };
+    scheduledTimeouts.push(scheduledTimeout);
+    bubbleUp(scheduledTimeout.heapIndex);
+    if (scheduledTimeout.heapIndex === 0) {
+      armNextTimeout();
+    }
+    return {
+      cancel() {
+        if (scheduledTimeout.heapIndex < 0) {
+          return;
+        }
+        const wasNext = scheduledTimeout.heapIndex === 0;
+        scheduledTimeout.callback = null;
+        removeTimeoutAt(scheduledTimeout.heapIndex);
+        if (wasNext) {
+          armNextTimeout();
+        }
+      }
+    };
+  }
+
   // src/utility/timeoutPromise.ts
   function scheduleTimeoutPromise(callback) {
     let active = true;
-    let timeoutId = null;
+    let timeoutHandle = null;
     const timeoutPromise = new Promise((resolve) => {
-      timeoutId = setTimeout(resolve, 0);
+      timeoutHandle = scheduleTimeout(resolve, 0);
     });
     void timeoutPromise.then(() => {
-      timeoutId = null;
+      const scheduledTimeout = timeoutHandle;
+      timeoutHandle = null;
+      scheduledTimeout?.cancel();
       if (!active) {
         return;
       }
@@ -111,13 +248,55 @@ var __kitsui_factory__ = (() => {
           return;
         }
         active = false;
-        if (timeoutId === null) {
+        if (timeoutHandle === null) {
           return;
         }
-        clearTimeout(timeoutId);
-        timeoutId = null;
+        timeoutHandle.cancel();
+        timeoutHandle = null;
       }
     };
+  }
+
+  // src/utility/cleanup.ts
+  function runCleanupSteps(cleanupSteps) {
+    let firstError;
+    let failed = false;
+    for (const cleanupStep of cleanupSteps) {
+      try {
+        cleanupStep();
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          firstError = error;
+        }
+      }
+    }
+    if (failed) {
+      throw firstError;
+    }
+  }
+  function cleanupAndRethrow(error, cleanup) {
+    try {
+      cleanup();
+    } catch (cleanupError) {
+      let attached = false;
+      try {
+        if (error instanceof Error) {
+          if (error.cause === void 0) {
+            error.cause = cleanupError;
+            attached = error.cause === cleanupError;
+          }
+        }
+      } catch {
+      }
+      if (!attached) {
+        try {
+          console.error("Structural rollback cleanup failed.", cleanupError);
+        } catch {
+        }
+      }
+    }
+    throw error;
   }
 
   // src/state/State.ts
@@ -143,19 +322,26 @@ var __kitsui_factory__ = (() => {
     graph.scheduled = true;
     const flush = () => {
       graph.scheduled = false;
-      const pendingListeners = [...graph.pendingListeners];
+      const pendingDeliveries = [...graph.pendingListeners].map((record) => ({
+        equals: record.equals,
+        finalValue: record.pendingFinalValue,
+        force: record.forcePendingEmit,
+        originalValue: record.pendingOriginalValue,
+        record
+      }));
       graph.pendingListeners.clear();
-      for (const pendingListener of pendingListeners) {
-        pendingListener.pending = false;
-        if (!pendingListener.active) {
-          continue;
-        }
-        if (!pendingListener.forcePendingEmit && pendingListener.equals(pendingListener.pendingOriginalValue, pendingListener.pendingFinalValue)) {
-          continue;
-        }
-        pendingListener.forcePendingEmit = false;
-        pendingListener.listener(pendingListener.pendingFinalValue, pendingListener.pendingOriginalValue);
+      for (const { record } of pendingDeliveries) {
+        record.forcePendingEmit = false;
       }
+      runCleanupSteps(pendingDeliveries.map(({ equals, finalValue, force, originalValue, record }) => () => {
+        if (!record.active) {
+          return;
+        }
+        if (!force && equals(originalValue, finalValue)) {
+          return;
+        }
+        record.listener(finalValue, originalValue);
+      }));
     };
     const schedulerRef = globalThis;
     if (typeof schedulerRef.scheduler?.yield === "function") {
@@ -167,6 +353,7 @@ var __kitsui_factory__ = (() => {
   var OwnerClass = class {
     /** @hidden */
     constructor() {
+      __publicField(this, "abortController", null);
       __publicField(this, "cleanupFunctions", /* @__PURE__ */ new Set());
       __publicField(this, "disposingValue", false);
       __publicField(this, "disposedValue", false);
@@ -187,6 +374,20 @@ var __kitsui_factory__ = (() => {
       return this.disposingValue;
     }
     /**
+     * An abort signal for work scoped to this owner's lifetime.
+     * The signal is created lazily, keeps a stable identity, and aborts synchronously when the owner is disposed.
+     * @readonly
+     */
+    get signal() {
+      if (this.abortController === null) {
+        this.abortController = new AbortController();
+        if (this.disposedValue) {
+          this.abortController.abort();
+        }
+      }
+      return this.abortController.signal;
+    }
+    /**
      * Disposes this owner and invokes all registered cleanup functions.
      * Once disposed, an owner cannot be used again.
      * Subsequent calls to `dispose()` are no-ops.
@@ -197,16 +398,32 @@ var __kitsui_factory__ = (() => {
       }
       this.disposedValue = true;
       this.disposingValue = true;
+      let firstError;
+      let failed = false;
+      const settle = (callback) => {
+        try {
+          callback();
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            firstError = error;
+          }
+        }
+      };
       try {
-        this.beforeDispose();
+        settle(() => this.abortController?.abort());
+        settle(() => this.beforeDispose());
         const cleanupFunctions = [...this.cleanupFunctions];
         this.cleanupFunctions.clear();
         for (const cleanupFunction of cleanupFunctions) {
-          cleanupFunction();
+          settle(cleanupFunction);
         }
-        this.afterDispose();
+        settle(() => this.afterDispose());
       } finally {
         this.disposingValue = false;
+      }
+      if (failed) {
+        throw firstError;
       }
     }
     /**
@@ -293,6 +510,7 @@ var __kitsui_factory__ = (() => {
       __publicField(this, "immediateListeners", /* @__PURE__ */ new Set());
       /** @deprecated Use getQueuedListeners(this) */
       __publicField(this, "queuedListeners", /* @__PURE__ */ new Set());
+      __publicField(this, "notificationQueue", null);
       assertDefinedStateValue(initialValue);
       this.owner = owner;
       this.fixFunction = options.fix ?? ident;
@@ -354,28 +572,40 @@ var __kitsui_factory__ = (() => {
     commit(nextValue, forceNotify) {
       const previousValue = this.currentValue;
       this.currentValue = nextValue;
-      for (const listenerRecord of [...getImmediateListeners(this)]) {
-        if (!listenerRecord.active) {
-          continue;
-        }
-        listenerRecord.listener(this.currentValue, previousValue);
+      const notification = {
+        force: forceNotify,
+        immediateListeners: [...getImmediateListeners(this)],
+        previousValue,
+        value: nextValue
+      };
+      if (this.notificationQueue) {
+        this.notificationQueue.push(notification);
+        return this.currentValue;
       }
-      for (const listenerRecord of getQueuedListeners(this)) {
-        if (!listenerRecord.active) {
-          continue;
+      const notificationQueue = [notification];
+      this.notificationQueue = notificationQueue;
+      try {
+        for (const change of notificationQueue) {
+          for (const listenerRecord of change.immediateListeners) {
+            if (listenerRecord.active) listenerRecord.listener(change.value, change.previousValue);
+          }
+          for (const listenerRecord of getQueuedListeners(this)) {
+            if (!listenerRecord.active) continue;
+            if (!this.graph.pendingListeners.has(listenerRecord)) {
+              listenerRecord.forcePendingEmit = change.force;
+              listenerRecord.pendingOriginalValue = change.previousValue;
+              listenerRecord.pendingFinalValue = change.value;
+              listenerRecord.equals = getEqualityFunction(this);
+              this.graph.pendingListeners.add(listenerRecord);
+              scheduleGraphFlush(this.graph);
+              continue;
+            }
+            listenerRecord.forcePendingEmit || (listenerRecord.forcePendingEmit = change.force);
+            listenerRecord.pendingFinalValue = change.value;
+          }
         }
-        if (!listenerRecord.pending) {
-          listenerRecord.pending = true;
-          listenerRecord.forcePendingEmit = forceNotify;
-          listenerRecord.pendingOriginalValue = previousValue;
-          listenerRecord.pendingFinalValue = this.currentValue;
-          listenerRecord.equals = getEqualityFunction(this);
-          listenerRecord.graph.pendingListeners.add(listenerRecord);
-          scheduleGraphFlush(listenerRecord.graph);
-          continue;
-        }
-        listenerRecord.forcePendingEmit || (listenerRecord.forcePendingEmit = forceNotify);
-        listenerRecord.pendingFinalValue = this.currentValue;
+      } finally {
+        this.notificationQueue = null;
       }
       return this.currentValue;
     }
@@ -455,9 +685,7 @@ var __kitsui_factory__ = (() => {
         active: true,
         equals: getEqualityFunction(this),
         forcePendingEmit: false,
-        graph: this.graph,
         listener,
-        pending: false,
         pendingFinalValue: this.currentValue,
         pendingOriginalValue: this.currentValue
       };
@@ -467,10 +695,7 @@ var __kitsui_factory__ = (() => {
           return;
         }
         listenerRecord.active = false;
-        if (listenerRecord.pending) {
-          listenerRecord.pending = false;
-          this.graph.pendingListeners.delete(listenerRecord);
-        }
+        this.graph.pendingListeners.delete(listenerRecord);
         getQueuedListeners(this).delete(listenerRecord);
       };
     }
@@ -552,10 +777,7 @@ var __kitsui_factory__ = (() => {
       }
       for (const listenerRecord of getQueuedListeners(this)) {
         listenerRecord.active = false;
-        if (listenerRecord.pending) {
-          listenerRecord.pending = false;
-          this.graph.pendingListeners.delete(listenerRecord);
-        }
+        this.graph.pendingListeners.delete(listenerRecord);
       }
       getImmediateListeners(this).clear();
       getQueuedListeners(this).clear();
@@ -1357,6 +1579,683 @@ var __kitsui_factory__ = (() => {
     }
   };
 
+  // src/component/DOMTree.ts
+  var recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
+  var registrations = /* @__PURE__ */ new WeakMap();
+  function registerDOMTreeNode(node, owner) {
+    const registration = {
+      active: true,
+      owner: new WeakRef(owner)
+    };
+    registrations.set(node, registration);
+    return registration;
+  }
+  function unregisterDOMTreeNode(registration) {
+    registration.active = false;
+  }
+  function runPlacementCallbacks(placementNode, onPlaced) {
+    if (!isPlacementNodeLive(placementNode)) {
+      return;
+    }
+    onPlaced(placementNode.node);
+  }
+  function isRegistrationDisposed(registration) {
+    return !registration.active || registration.owner.deref()?.disposed !== false;
+  }
+  function isDisposedNode(node) {
+    const registration = registrations.get(node);
+    return registration ? isRegistrationDisposed(registration) : false;
+  }
+  function snapshotPlacementNode(node) {
+    return {
+      node,
+      registration: registrations.get(node) ?? null
+    };
+  }
+  function isPlacementNodeLive(placementNode) {
+    const currentRegistration = registrations.get(placementNode.node) ?? null;
+    if (currentRegistration !== placementNode.registration) {
+      return false;
+    }
+    return !currentRegistration || !isRegistrationDisposed(currentRegistration);
+  }
+  function placementTargetNode(placement) {
+    return placement.type === "append" || placement.type === "prepend" ? placement.parent : placement.reference;
+  }
+  function isDOMParent(value) {
+    return value !== null && typeof value.insertBefore === "function";
+  }
+  function physicalParentOf(node) {
+    return isDOMParent(node.parentNode) ? node.parentNode : null;
+  }
+  function physicalChildrenOf(parent) {
+    const children = [];
+    let child = parent.firstChild;
+    while (child) {
+      children.push(child);
+      child = child.nextSibling;
+    }
+    return children;
+  }
+  function physicalContains(node, candidate) {
+    let current = candidate;
+    const visited = /* @__PURE__ */ new Set();
+    while (current && !visited.has(current)) {
+      if (current === node) {
+        return true;
+      }
+      visited.add(current);
+      current = resolveComposedParent(current);
+    }
+    return false;
+  }
+  function isConsumableDocumentFragment(node) {
+    return node.nodeType === Node.DOCUMENT_FRAGMENT_NODE && !("host" in node);
+  }
+  function shadowHostOf(node) {
+    return node.nodeType === Node.DOCUMENT_FRAGMENT_NODE && "host" in node ? node.host : null;
+  }
+  function resolveComposedParent(node, parentOf = physicalParentOf) {
+    return parentOf(node) ?? shadowHostOf(node);
+  }
+  function physicalMove(parent, node, beforeNode) {
+    if (physicalContains(node, parent)) {
+      console.error(recursiveTreeErrorMessage);
+      return false;
+    }
+    try {
+      if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
+        parent.moveBefore(node, beforeNode);
+        return true;
+      }
+      parent.insertBefore(node, beforeNode);
+      return true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "HierarchyRequestError") {
+        console.error(recursiveTreeErrorMessage);
+        return false;
+      }
+      throw error;
+    }
+  }
+  function isPlacementTargetDisposed(placement, parentOf = physicalParentOf) {
+    let current = placement.type === "append" || placement.type === "prepend" ? placement.parent : placement.reference;
+    const visited = /* @__PURE__ */ new Set();
+    while (current && !visited.has(current)) {
+      if (isDisposedNode(current)) {
+        return true;
+      }
+      visited.add(current);
+      current = parentOf(current) ?? shadowHostOf(current);
+    }
+    return false;
+  }
+  var VirtualDOMTree = class {
+    constructor(operations, excludedPlacements = /* @__PURE__ */ new Set()) {
+      this.operations = operations;
+      this.excludedPlacements = excludedPlacements;
+      __publicField(this, "affectedParents", /* @__PURE__ */ new Set());
+      __publicField(this, "deferredPlacements", /* @__PURE__ */ new Set());
+      __publicField(this, "operationByNode", /* @__PURE__ */ new Map());
+      __publicField(this, "lists", /* @__PURE__ */ new Map());
+      __publicField(this, "virtualParents", /* @__PURE__ */ new Map());
+      this.replay();
+    }
+    childrenOf(parent) {
+      return this.initialiseParent(parent);
+    }
+    parentOf(node) {
+      return this.getVirtualParent(node);
+    }
+    contains(node, candidate) {
+      let current = candidate;
+      const visited = /* @__PURE__ */ new Set();
+      while (current && !visited.has(current)) {
+        if (current === node) {
+          return true;
+        }
+        visited.add(current);
+        current = resolveComposedParent(current, (candidateNode) => this.getVirtualParent(candidateNode));
+      }
+      return false;
+    }
+    isConnected(node) {
+      let current = node;
+      const visited = /* @__PURE__ */ new Set();
+      while (current && !visited.has(current)) {
+        visited.add(current);
+        const hadVirtualParent = this.virtualParents.has(current);
+        const parent = this.getVirtualParent(current);
+        if (parent) {
+          current = parent;
+          continue;
+        }
+        const shadowHost = shadowHostOf(current);
+        if (shadowHost) {
+          current = shadowHost;
+          continue;
+        }
+        return current.nodeType === Node.DOCUMENT_NODE || !hadVirtualParent && current.isConnected;
+      }
+      return false;
+    }
+    initialiseParent(parent) {
+      const existing = this.lists.get(parent);
+      if (existing) {
+        return existing;
+      }
+      const children = Array.from(parent.childNodes);
+      this.lists.set(parent, children);
+      for (const child of children) {
+        if (!this.virtualParents.has(child)) {
+          this.virtualParents.set(child, parent);
+        }
+      }
+      return children;
+    }
+    getVirtualParent(node) {
+      if (this.virtualParents.has(node)) {
+        return this.virtualParents.get(node) ?? null;
+      }
+      const parent = physicalParentOf(node);
+      this.virtualParents.set(node, parent);
+      if (parent) {
+        this.initialiseParent(parent);
+      }
+      return parent;
+    }
+    resolveDestination(placement) {
+      if (placement.type === "append") {
+        const children2 = this.initialiseParent(placement.parent);
+        return { index: children2.length, parent: placement.parent };
+      }
+      if (placement.type === "prepend") {
+        return { index: 0, parent: placement.parent };
+      }
+      const parent = this.getVirtualParent(placement.reference);
+      if (!parent) {
+        return null;
+      }
+      const children = this.initialiseParent(parent);
+      const referenceIndex = children.indexOf(placement.reference);
+      if (referenceIndex < 0) {
+        return null;
+      }
+      return {
+        index: placement.type === "before" ? referenceIndex : referenceIndex + 1,
+        parent
+      };
+    }
+    createsRecursiveTree(parent, node) {
+      return this.contains(node, parent);
+    }
+    removeVirtualNode(node) {
+      const parent = this.getVirtualParent(node);
+      if (!parent) {
+        return;
+      }
+      const children = this.initialiseParent(parent);
+      const index = children.indexOf(node);
+      if (index >= 0) {
+        children.splice(index, 1);
+        this.affectedParents.add(parent);
+      }
+      this.virtualParents.set(node, null);
+    }
+    replayPlacement(operation, operationIndex) {
+      const targetNode = placementTargetNode(operation.placement);
+      if (operation.targetRegistration && registrations.get(targetNode) !== operation.targetRegistration) {
+        return;
+      }
+      if (isPlacementTargetDisposed(operation.placement, (node) => this.getVirtualParent(node))) {
+        return;
+      }
+      const seenNodes = /* @__PURE__ */ new Set();
+      const placementNodes = operation.nodes.flatMap((placementNode) => {
+        if (!isPlacementNodeLive(placementNode)) {
+          return [];
+        }
+        if (!isConsumableDocumentFragment(placementNode.node)) {
+          return [placementNode];
+        }
+        return [...this.initialiseParent(placementNode.node)].map(snapshotPlacementNode).filter(isPlacementNodeLive);
+      }).filter((placementNode) => {
+        const latestOperation = this.operationByNode.get(placementNode.node);
+        return !latestOperation || latestOperation.operationIndex <= operationIndex;
+      }).filter((placementNode) => {
+        if (seenNodes.has(placementNode.node)) {
+          return false;
+        }
+        seenNodes.add(placementNode.node);
+        return true;
+      });
+      const nodes = placementNodes.map((placementNode) => placementNode.node);
+      if (nodes.length === 0) {
+        return;
+      }
+      const reference = operation.placement.type === "before" || operation.placement.type === "after" ? operation.placement.reference : null;
+      if (reference && this.getVirtualParent(reference) === null) {
+        this.deferredPlacements.add(operation);
+        return;
+      }
+      const destinationBeforeRemoval = this.resolveDestination(operation.placement);
+      if (!destinationBeforeRemoval) {
+        return;
+      }
+      if (reference !== null && nodes.includes(reference)) {
+        const withoutReference = placementNodes.filter((placementNode) => placementNode.node !== reference);
+        if (withoutReference.length > 0) {
+          this.replayPlacement({ ...operation, nodes: withoutReference }, operationIndex);
+        }
+        return;
+      }
+      const validPlacementNodes = placementNodes.filter((placementNode) => {
+        if (!this.createsRecursiveTree(destinationBeforeRemoval.parent, placementNode.node)) {
+          return true;
+        }
+        if (!operation.reportedRecursiveNodes.has(placementNode.node)) {
+          operation.reportedRecursiveNodes.add(placementNode.node);
+          console.error(recursiveTreeErrorMessage);
+        }
+        return false;
+      });
+      const validNodes = validPlacementNodes.map((placementNode) => placementNode.node);
+      for (const node of validNodes) {
+        this.removeVirtualNode(node);
+      }
+      const destination = this.resolveDestination(operation.placement);
+      if (!destination) {
+        return;
+      }
+      const children = this.initialiseParent(destination.parent);
+      children.splice(destination.index, 0, ...validNodes);
+      for (const placementNode of validPlacementNodes) {
+        const node = placementNode.node;
+        this.virtualParents.set(node, destination.parent);
+        this.operationByNode.set(node, { onPlaced: operation.onPlaced, operationIndex, placementNode });
+      }
+      this.affectedParents.add(destination.parent);
+    }
+    replay() {
+      for (const [operationIndex, operation] of this.operations.entries()) {
+        this.apply(operation, operationIndex);
+      }
+      this.settleDeferredPlacements();
+    }
+    settleDeferredPlacements() {
+      let pending = [...this.deferredPlacements];
+      while (pending.length > 0) {
+        this.deferredPlacements.clear();
+        let progressed = false;
+        for (const operation of pending) {
+          const placement = operation.placement;
+          if ((placement.type === "before" || placement.type === "after") && this.getVirtualParent(placement.reference) !== null) {
+            this.replayPlacement(operation, this.operations.indexOf(operation));
+            progressed = true;
+          } else {
+            this.deferredPlacements.add(operation);
+          }
+        }
+        if (!progressed) {
+          return;
+        }
+        pending = [...this.deferredPlacements];
+      }
+    }
+    applyIncremental(operation, operationIndex) {
+      this.apply(operation, operationIndex);
+      this.settleDeferredPlacements();
+    }
+    apply(operation, operationIndex = this.operations.length) {
+      if (operation.type === "remove") {
+        const latestOperation = this.operationByNode.get(operation.node);
+        this.operationByNode.set(operation.node, {
+          onPlaced: latestOperation?.onPlaced ?? null,
+          operationIndex,
+          placementNode: latestOperation?.placementNode ?? snapshotPlacementNode(operation.node)
+        });
+        this.removeVirtualNode(operation.node);
+        return;
+      }
+      if (!this.excludedPlacements.has(operation)) {
+        this.replayPlacement(operation, operationIndex);
+      }
+    }
+  };
+  var DOMTreeTransactionContext = class {
+    constructor() {
+      __publicField(this, "operations", []);
+      __publicField(this, "tree", new VirtualDOMTree(this.operations));
+    }
+    add(operation) {
+      const operationIndex = this.operations.length;
+      this.operations.push(operation);
+      this.tree.applyIncremental(operation, operationIndex);
+    }
+  };
+  var DOMTreeTransactionScope = class {
+    constructor(parent, context) {
+      this.parent = parent;
+      this.context = context;
+      __publicField(this, "active", true);
+    }
+    add(operation) {
+      this.context.add(operation);
+    }
+    commit() {
+      if (!this.active) {
+        return;
+      }
+      if (activeScopes.at(-1) !== this) {
+        throw new Error("DOM tree transactions must close in stack order.");
+      }
+      this.active = false;
+      activeScopes.pop();
+      if (this.parent) {
+        return;
+      }
+      commitOperations(this.context.operations, createVirtualTree(this.context.operations));
+    }
+  };
+  var activeScopes = [];
+  function currentScope() {
+    return activeScopes.at(-1) ?? null;
+  }
+  function currentTree() {
+    return currentScope()?.context.tree ?? null;
+  }
+  function createPlacementOperation(nodes, placement, onPlaced) {
+    return {
+      nodes: nodes.map(snapshotPlacementNode),
+      onPlaced,
+      placement,
+      reportedRecursiveNodes: /* @__PURE__ */ new Set(),
+      targetRegistration: registrations.get(placementTargetNode(placement)) ?? null,
+      type: "place"
+    };
+  }
+  function createVirtualTree(operations) {
+    const excludedPlacements = /* @__PURE__ */ new Set();
+    while (true) {
+      const tree = new VirtualDOMTree(operations, excludedPlacements);
+      let changed = false;
+      for (const operation of operations) {
+        if (operation.type !== "place" || excludedPlacements.has(operation)) {
+          continue;
+        }
+        if (operation.placement.type !== "before" && operation.placement.type !== "after") {
+          continue;
+        }
+        const reference = operation.placement.reference;
+        if (operation.targetRegistration !== null && registrations.get(reference) !== operation.targetRegistration || isDisposedNode(reference) || tree.parentOf(reference) === null) {
+          excludedPlacements.add(operation);
+          changed = true;
+        }
+      }
+      if (!changed) {
+        return tree;
+      }
+    }
+  }
+  function placePhysically(nodes, placement, onPlaced) {
+    if (isPlacementTargetDisposed(placement)) {
+      return;
+    }
+    const parent = placement.type === "append" || placement.type === "prepend" ? placement.parent : physicalParentOf(placement.reference);
+    if (!parent) {
+      return;
+    }
+    const seen = /* @__PURE__ */ new Set();
+    const placementNodes = nodes.flatMap((node) => isConsumableDocumentFragment(node) ? Array.from(node.childNodes) : [node]).map(snapshotPlacementNode).filter(isPlacementNodeLive).filter(({ node }) => {
+      if (seen.has(node)) return false;
+      seen.add(node);
+      return placement.type !== "before" && placement.type !== "after" || node !== placement.reference;
+    }).filter(({ node }) => {
+      if (!physicalContains(node, parent)) return true;
+      console.error(recursiveTreeErrorMessage);
+      return false;
+    });
+    if (placementNodes.length === 0) return;
+    const nodeSet = new Set(placementNodes.map(({ node }) => node));
+    const current = physicalChildrenOf(parent);
+    const remaining = current.filter((node) => !nodeSet.has(node));
+    let insertionIndex;
+    if (placement.type === "append") insertionIndex = remaining.length;
+    else if (placement.type === "prepend") insertionIndex = 0;
+    else {
+      const referenceIndex = remaining.indexOf(placement.reference);
+      if (referenceIndex < 0) return;
+      insertionIndex = placement.type === "before" ? referenceIndex : referenceIndex + 1;
+    }
+    const anchor = remaining[insertionIndex] ?? null;
+    const desired = [...remaining.slice(0, insertionIndex), ...placementNodes.map(({ node }) => node), ...remaining.slice(insertionIndex)];
+    const alreadySatisfied = current.length === desired.length && current.every((node, index) => node === desired[index]);
+    const placedNodes = [];
+    for (const placementNode of placementNodes) {
+      const node = placementNode.node;
+      if (alreadySatisfied || physicalMove(parent, node, anchor)) {
+        placedNodes.push(placementNode);
+      }
+    }
+    runCleanupSteps(placedNodes.map((placementNode) => () => {
+      if (physicalParentOf(placementNode.node) === parent) {
+        runPlacementCallbacks(placementNode, onPlaced);
+      }
+    }));
+  }
+  function removeImmediately(node) {
+    if (!node.parentNode) {
+      return;
+    }
+    node.parentNode.removeChild(node);
+  }
+  function commitOperations(operations, tree = createVirtualTree(operations)) {
+    if (operations.length === 0) {
+      return;
+    }
+    const failedMoves = /* @__PURE__ */ new Set();
+    const plans = [...tree.affectedParents].map((parent) => {
+      const current = Array.from(parent.childNodes);
+      const desired = tree.childrenOf(parent).filter((node) => !isDisposedNode(node));
+      return {
+        current,
+        desired,
+        parent,
+        retained: longestRetainedSubsequence(current, desired, tree.operationByNode)
+      };
+    });
+    for (const plan of plans) {
+      let anchor = null;
+      for (let index = plan.desired.length - 1; index >= 0; index -= 1) {
+        const node = plan.desired[index];
+        if (!tree.operationByNode.has(node)) {
+          anchor = node;
+          continue;
+        }
+        if (plan.retained.has(node) && node.parentNode === plan.parent) {
+          anchor = node;
+          continue;
+        }
+        if (node.parentNode === plan.parent && node.nextSibling === anchor) {
+          anchor = node;
+          continue;
+        }
+        if (physicalMove(plan.parent, node, anchor)) {
+          failedMoves.delete(node);
+          anchor = node;
+        } else {
+          failedMoves.add(node);
+        }
+      }
+      for (const node of plan.current) {
+        if (tree.operationByNode.has(node) && tree.parentOf(node) === null && node.parentNode === plan.parent) {
+          node.parentNode?.removeChild(node);
+        }
+      }
+    }
+    const effectivePlacements = [...tree.operationByNode.values()].filter((placement) => placement.onPlaced !== null).sort((left, right) => left.operationIndex - right.operationIndex);
+    runCleanupSteps(effectivePlacements.map((placement) => () => {
+      const node = placement.placementNode.node;
+      const parent = tree.parentOf(node);
+      if (!parent || failedMoves.has(node) || physicalParentOf(node) !== parent || !isPlacementNodeLive(placement.placementNode)) {
+        return;
+      }
+      runPlacementCallbacks(placement.placementNode, placement.onPlaced);
+    }));
+  }
+  function longestIncreasingNodes(entries) {
+    const tails = [];
+    const previous = new Array(entries.length).fill(-1);
+    for (let index2 = 0; index2 < entries.length; index2 += 1) {
+      let low = 0;
+      let high = tails.length;
+      while (low < high) {
+        const middle = low + high >> 1;
+        if (entries[tails[middle]].currentIndex < entries[index2].currentIndex) {
+          low = middle + 1;
+        } else {
+          high = middle;
+        }
+      }
+      if (low > 0) {
+        previous[index2] = tails[low - 1];
+      }
+      tails[low] = index2;
+    }
+    const retained = /* @__PURE__ */ new Set();
+    if (tails.length === 0) {
+      return retained;
+    }
+    let index = tails[tails.length - 1];
+    while (index >= 0) {
+      retained.add(entries[index].node);
+      index = previous[index];
+    }
+    return retained;
+  }
+  function longestRetainedSubsequence(current, desired, movable) {
+    const desiredNodes = new Set(desired);
+    const retained = new Set(current.filter((node) => !movable.has(node) && desiredNodes.has(node)));
+    const currentIndexes = new Map(current.map((node, index) => [node, index]));
+    const currentSegments = /* @__PURE__ */ new Map();
+    let segment = 0;
+    for (const node of current) {
+      if (!movable.has(node) && desiredNodes.has(node)) {
+        segment += 1;
+        continue;
+      }
+      if (movable.has(node)) {
+        currentSegments.set(node, segment);
+      }
+    }
+    const entriesBySegment = /* @__PURE__ */ new Map();
+    segment = 0;
+    for (const node of desired) {
+      if (!movable.has(node) && retained.has(node)) {
+        segment += 1;
+        continue;
+      }
+      const currentIndex = currentIndexes.get(node);
+      if (currentIndex === void 0 || currentSegments.get(node) !== segment) {
+        continue;
+      }
+      const entries = entriesBySegment.get(segment) ?? [];
+      entries.push({ currentIndex, node });
+      entriesBySegment.set(segment, entries);
+    }
+    for (const entries of entriesBySegment.values()) {
+      for (const node of longestIncreasingNodes(entries)) {
+        retained.add(node);
+      }
+    }
+    return retained;
+  }
+  function beginDOMTreeTransaction() {
+    const parent = currentScope();
+    const scope = new DOMTreeTransactionScope(parent, parent?.context ?? new DOMTreeTransactionContext());
+    activeScopes.push(scope);
+    return scope;
+  }
+  var DOMTree = {
+    get active() {
+      return activeScopes.length > 0;
+    },
+    parentOf(node) {
+      const tree = currentTree();
+      return tree ? tree.parentOf(node) : physicalParentOf(node);
+    },
+    composedParentOf(node) {
+      const tree = currentTree();
+      return resolveComposedParent(node, (candidate) => tree ? tree.parentOf(candidate) : physicalParentOf(candidate));
+    },
+    childrenOf(parent) {
+      return [...currentTree()?.childrenOf(parent) ?? Array.from(parent.childNodes)];
+    },
+    firstChildOf(parent) {
+      return this.childrenOf(parent)[0] ?? null;
+    },
+    nextSiblingOf(node) {
+      const parent = this.parentOf(node);
+      if (!parent) {
+        return null;
+      }
+      const children = this.childrenOf(parent);
+      const index = children.indexOf(node);
+      return index < 0 ? null : children[index + 1] ?? null;
+    },
+    contains(node, candidate) {
+      return currentTree()?.contains(node, candidate) ?? physicalContains(node, candidate);
+    },
+    isConnected(node) {
+      return currentTree()?.isConnected(node) ?? node.isConnected;
+    },
+    canPlace(nodes, placement) {
+      const tree = currentTree();
+      if (isPlacementTargetDisposed(placement, (node) => tree ? tree.parentOf(node) : physicalParentOf(node))) return false;
+      const parent = placement.type === "append" || placement.type === "prepend" ? placement.parent : tree?.parentOf(placement.reference) ?? physicalParentOf(placement.reference);
+      if (!parent) return false;
+      for (const node of nodes) {
+        if (this.contains(node, parent)) {
+          console.error(recursiveTreeErrorMessage);
+          return false;
+        }
+      }
+      return true;
+    },
+    place(nodes, placement, onPlaced = () => {
+    }) {
+      const liveNodes = nodes.filter((node) => !isDisposedNode(node));
+      if (liveNodes.length === 0) {
+        return;
+      }
+      const operation = createPlacementOperation(liveNodes, placement, onPlaced);
+      const scope = currentScope();
+      if (scope) {
+        scope.add(operation);
+        return;
+      }
+      placePhysically(liveNodes, placement, onPlaced);
+    },
+    remove(node) {
+      const scope = currentScope();
+      if (scope) {
+        scope.add({ node, type: "remove" });
+        return;
+      }
+      removeImmediately(node);
+    },
+    physical: {
+      parentOf: physicalParentOf,
+      childrenOf(parent) {
+        return Array.from(parent.childNodes);
+      },
+      place: placePhysically,
+      remove(node) {
+        removeImmediately(node);
+      }
+    }
+  };
+
   // src/component/GenericClaimManipulator.ts
   var noop4 = () => {
   };
@@ -1387,17 +2286,60 @@ var __kitsui_factory__ = (() => {
      */
     registerClaim(id, claim) {
       this.ensureActive();
+      if (claim.disposed) {
+        throw new Error("Disposed owners cannot be modified.");
+      }
       if (id === null) {
         const record2 = this.createClaimRecord(id, claim);
         this.anonymousClaims.add(record2);
         this.trackClaimant(record2);
+        try {
+          record2.activate();
+        } catch (error) {
+          cleanupAndRethrow(error, record2.cleanup);
+        }
+        if (this.anonymousClaims.has(record2)) {
+          this.onClaimsChanged();
+        }
         return;
       }
       const record = this.createClaimRecord(id, claim);
       const previousClaim = this.keyedClaims.get(id);
       this.keyedClaims.set(id, record);
       this.trackClaimant(record);
+      try {
+        record.activate();
+      } catch (error) {
+        if (previousClaim) {
+          this.keyedClaims.set(id, previousClaim);
+        } else {
+          this.keyedClaims.delete(id);
+        }
+        cleanupAndRethrow(error, record.cleanup);
+      }
+      const recordSurvivedActivation = this.keyedClaims.get(id) === record;
       previousClaim?.cleanup();
+      if (recordSurvivedActivation) {
+        this.onClaimsChanged();
+      }
+    }
+    /** Returns the claimant registered in a keyed slot, if any. */
+    getRegisteredClaimant(id) {
+      return this.keyedClaims.get(id)?.claimant ?? null;
+    }
+    /** Returns whether the claimant has an anonymous registration. */
+    hasAnonymousClaim(claimant) {
+      return [...this.claimsByClaimant.get(claimant) ?? []].some((record) => record.id === null);
+    }
+    /** Returns every registered claimant in keyed-then-anonymous order. */
+    getRegisteredClaimants() {
+      return [
+        ...this.keyedClaims.values(),
+        ...this.anonymousClaims
+      ].map((record) => record.claimant);
+    }
+    /** Runs after the registered claim set changes. */
+    onClaimsChanged(_disposedClaimantRemoved = false) {
     }
     deregisterClaim(idOrClaimant, claimant) {
       this.ensureActive();
@@ -1429,6 +2371,7 @@ var __kitsui_factory__ = (() => {
           this.keyedClaims.delete(id);
         }
         this.untrackClaimant(record);
+        this.onClaimsChanged(record.claimant.disposed);
       };
       record = isBooleanStateClaim(claim) ? this.createStateClaimRecord(id, claim, releaseClaimRecord) : this.createOwnerClaimRecord(id, claim, releaseClaimRecord);
       return record;
@@ -1438,9 +2381,10 @@ var __kitsui_factory__ = (() => {
         id,
         claimant: claim,
         active: false,
+        activate: noop4,
         cleanup: noop4
       };
-      let active = true;
+      let active = false;
       let releaseOwner = noop4;
       let releaseClaim = noop4;
       const cleanup = () => {
@@ -1448,15 +2392,31 @@ var __kitsui_factory__ = (() => {
           return;
         }
         active = false;
-        this.setClaimActive(record, false);
-        onCleanup();
-        releaseOwner();
-        releaseClaim();
+        runCleanupSteps([
+          () => this.setClaimActive(record, false),
+          onCleanup,
+          releaseOwner,
+          releaseClaim
+        ]);
       };
       record.cleanup = cleanup;
-      releaseOwner = this.owner.onCleanup(cleanup);
-      this.setClaimActive(record, true);
-      releaseClaim = claim.onCleanup(cleanup);
+      record.activate = () => {
+        if (active) {
+          return;
+        }
+        active = true;
+        releaseOwner = this.owner.onCleanup(cleanup);
+        if (!active) {
+          releaseOwner();
+          return;
+        }
+        releaseClaim = claim.onCleanup(cleanup);
+        if (!active) {
+          releaseClaim();
+          return;
+        }
+        this.setClaimActive(record, true);
+      };
       return record;
     }
     createStateClaimRecord(id, claim, onCleanup) {
@@ -1464,9 +2424,10 @@ var __kitsui_factory__ = (() => {
         id,
         claimant: claim,
         active: false,
+        activate: noop4,
         cleanup: noop4
       };
-      let active = true;
+      let active = false;
       let releaseOwner = noop4;
       let releaseClaim = noop4;
       let releaseClaimOwner = noop4;
@@ -1475,34 +2436,50 @@ var __kitsui_factory__ = (() => {
           return;
         }
         active = false;
-        this.setClaimActive(record, false);
-        onCleanup();
-        releaseOwner();
-        releaseClaim();
-        releaseClaimOwner();
+        runCleanupSteps([
+          () => this.setClaimActive(record, false),
+          onCleanup,
+          releaseOwner,
+          releaseClaim,
+          releaseClaimOwner
+        ]);
       };
       record.cleanup = cleanup;
-      releaseOwner = this.owner.onCleanup(cleanup);
-      this.setClaimActive(record, claim.value);
-      releaseClaimOwner = claim.onCleanup(cleanup);
-      releaseClaim = claim.subscribe(this.owner, (value) => {
-        if (!active) {
+      record.activate = () => {
+        if (active) {
           return;
         }
-        this.setClaimActive(record, value);
-      });
+        active = true;
+        releaseOwner = this.owner.onCleanup(cleanup);
+        if (!active) {
+          releaseOwner();
+          return;
+        }
+        releaseClaimOwner = claim.onCleanup(cleanup);
+        if (!active) {
+          releaseClaimOwner();
+          return;
+        }
+        releaseClaim = claim.subscribe(this.owner, (value) => {
+          if (!active) {
+            return;
+          }
+          this.setClaimActive(record, value);
+        });
+        if (!active) {
+          releaseClaim();
+          return;
+        }
+        this.setClaimActive(record, claim.value);
+      };
       return record;
     }
     cleanupMatchingClaims(records, predicate) {
       if (!records) {
         return;
       }
-      for (const record of [...records]) {
-        if (predicate && !predicate(record)) {
-          continue;
-        }
-        record.cleanup();
-      }
+      const matchingRecords = [...records].filter((record) => !predicate || predicate(record));
+      runCleanupSteps(matchingRecords.map((record) => record.cleanup));
     }
     trackClaimant(record) {
       let records = this.claimsByClaimant.get(record.claimant);
@@ -1548,18 +2525,10 @@ var __kitsui_factory__ = (() => {
   };
 
   // src/component/OwnerManipulator.ts
-  var noop5 = () => {
-  };
   var OwnerManipulator = class extends GenericClaimManipulator {
     constructor(owner, refreshManagement) {
       super(owner);
       this.refreshManagement = refreshManagement;
-      __publicField(this, "anonymousEntries", /* @__PURE__ */ new Map());
-      __publicField(this, "entriesByOwner", /* @__PURE__ */ new Map());
-      __publicField(this, "keyedEntries", /* @__PURE__ */ new Map());
-      owner.onCleanup(() => {
-        this.clearEntries();
-      });
     }
     /**
      * Adds an explicit owner claim to the host.
@@ -1568,68 +2537,36 @@ var __kitsui_factory__ = (() => {
      * @param owner Explicit owner to register.
      * @param id Optional keyed claim slot.
      * @returns The owning host for fluent chaining.
+     * @throws If the host attempts to own itself.
      */
     add(owner, id = null) {
-      if (id === null) {
-        if (this.anonymousEntries.has(owner)) {
-          return this.owner;
-        }
-      } else {
-        const existingEntry = this.keyedEntries.get(id);
-        if (existingEntry?.owner === owner) {
-          return this.owner;
-        }
-        if (existingEntry) {
-          this.unregisterEntry(existingEntry, true);
-        }
+      if (this.owner.disposed || owner.disposed) {
+        throw new Error("Disposed owners cannot be modified.");
       }
-      const entry = {
-        active: true,
-        id,
-        owner,
-        releaseLifecycle: noop5
-      };
-      entry.releaseLifecycle = owner.onCleanup(() => {
-        if (!entry.active) {
-          return;
+      if (owner === this.owner) {
+        throw new Error("An owner cannot own itself.");
+      }
+      if (id === null) {
+        if (this.hasAnonymousClaim(owner)) {
+          return this.owner;
         }
-        this.unregisterEntry(entry, true);
-        if (this.getAll().length === 0) {
-          this.owner.remove();
-        }
-      });
-      this.trackEntry(entry);
+      } else if (this.getRegisteredClaimant(id) === owner) {
+        return this.owner;
+      }
       this.registerClaim(id, owner);
-      this.refreshManagement();
       return this.owner;
     }
     remove(idOrOwner, owner) {
       if (owner !== void 0) {
-        if (idOrOwner === null) {
-          const anonymousEntry = this.anonymousEntries.get(owner);
-          if (anonymousEntry) {
-            this.unregisterEntry(anonymousEntry, true);
-          }
-          return this.owner;
-        }
-        const keyedEntry = this.keyedEntries.get(idOrOwner);
-        if (keyedEntry?.owner === owner) {
-          this.unregisterEntry(keyedEntry, true);
-        }
+        this.deregisterClaim(idOrOwner, owner);
         return this.owner;
       }
       if (typeof idOrOwner === "string") {
-        const keyedEntry = this.keyedEntries.get(idOrOwner);
-        if (keyedEntry) {
-          this.unregisterEntry(keyedEntry, true);
-        }
+        this.deregisterClaim(idOrOwner);
         return this.owner;
       }
       if (idOrOwner !== null) {
-        const entries = this.entriesByOwner.get(idOrOwner);
-        for (const entry of [...entries ?? []]) {
-          this.unregisterEntry(entry, true);
-        }
+        this.deregisterClaim(idOrOwner);
       }
       return this.owner;
     }
@@ -1639,77 +2576,101 @@ var __kitsui_factory__ = (() => {
      * @returns One explicit owner or null when no owners are registered.
      */
     get() {
-      for (const entry of this.keyedEntries.values()) {
-        return entry.owner;
-      }
-      for (const entry of this.anonymousEntries.values()) {
-        return entry.owner;
-      }
-      return null;
+      return this.getRegisteredClaimants()[0] ?? null;
     }
     /**
      * Returns every currently registered explicit owner without duplicates.
      * @returns All explicit owners currently managing the host.
      */
     getAll() {
-      return [...new Set([
-        ...this.keyedEntries.values(),
-        ...this.anonymousEntries.values()
-      ].map((entry) => entry.owner))];
+      return [...new Set(this.getRegisteredClaimants())];
     }
-    clearEntries() {
-      for (const entry of [
-        ...this.keyedEntries.values(),
-        ...this.anonymousEntries.values()
-      ]) {
-        this.untrackEntry(entry);
-        entry.active = false;
-        entry.releaseLifecycle();
-      }
-    }
-    trackEntry(entry) {
-      if (entry.id === null) {
-        this.anonymousEntries.set(entry.owner, entry);
-      } else {
-        this.keyedEntries.set(entry.id, entry);
-      }
-      let entries = this.entriesByOwner.get(entry.owner);
-      if (!entries) {
-        entries = /* @__PURE__ */ new Set();
-        this.entriesByOwner.set(entry.owner, entries);
-      }
-      entries.add(entry);
-    }
-    untrackEntry(entry) {
-      if (entry.id === null) {
-        if (this.anonymousEntries.get(entry.owner) === entry) {
-          this.anonymousEntries.delete(entry.owner);
-        }
-      } else if (this.keyedEntries.get(entry.id) === entry) {
-        this.keyedEntries.delete(entry.id);
-      }
-      const ownerEntries = this.entriesByOwner.get(entry.owner);
-      if (!ownerEntries) {
-        return;
-      }
-      ownerEntries.delete(entry);
-      if (ownerEntries.size === 0) {
-        this.entriesByOwner.delete(entry.owner);
-      }
-    }
-    unregisterEntry(entry, deregisterClaim) {
-      if (!entry.active) {
-        return;
-      }
-      entry.active = false;
-      this.untrackEntry(entry);
-      entry.releaseLifecycle();
-      if (deregisterClaim) {
-        this.deregisterClaim(entry.id, entry.owner);
-      }
+    onClaimsChanged(disposedOwnerRemoved = false) {
       this.refreshManagement();
+      if (disposedOwnerRemoved && this.getAll().length === 0 && !this.owner.disposed) {
+        this.owner.remove();
+      }
     }
   };
+
+  // src/component/PlacementAuthority.ts
+  var authorities = /* @__PURE__ */ new WeakMap();
+  var authoringGenerations = /* @__PURE__ */ new WeakMap();
+  var nextAuthoringGeneration = 0;
+  function releaseRecord(record, preservePosition) {
+    if (record.active) {
+      record.active = false;
+      record.preservePosition = preservePosition;
+      if (authorities.get(record.node) === record) {
+        authorities.delete(record.node);
+      }
+    }
+    const cleanup = record.cleanup;
+    if (cleanup) {
+      record.cleanup = null;
+      cleanup(record.preservePosition);
+    }
+  }
+  function installPlacementAuthority(node, owner, generation) {
+    const previous = authorities.get(node);
+    const record = {
+      active: true,
+      cleanup: null,
+      cleanupAssigned: false,
+      node,
+      owner,
+      preservePosition: true
+    };
+    authoringGenerations.set(node, generation);
+    authorities.set(node, record);
+    previous && releaseRecord(previous, true);
+    return {
+      owner,
+      node,
+      isCurrent: () => record.active && authorities.get(node) === record,
+      relinquish: () => {
+        if (!record.active) return;
+        record.active = false;
+        if (authorities.get(node) === record) authorities.delete(node);
+        record.cleanup = null;
+      },
+      release: (preservePosition = false) => releaseRecord(record, preservePosition),
+      setCleanup: (cleanup) => {
+        if (record.cleanupAssigned) {
+          throw new Error("Placement authority cleanup can only be assigned once.");
+        }
+        record.cleanupAssigned = true;
+        record.cleanup = cleanup;
+        if (!record.active || authorities.get(node) !== record) {
+          releaseRecord(record, true);
+        }
+      }
+    };
+  }
+  function createPlacementAuthorityAuthor() {
+    const generation = ++nextAuthoringGeneration;
+    return {
+      claim: (node, owner = null) => {
+        if ((authoringGenerations.get(node) ?? 0) > generation) {
+          return null;
+        }
+        return installPlacementAuthority(node, owner, generation);
+      }
+    };
+  }
+  function replacePlacementAuthority(node, owner = null) {
+    return installPlacementAuthority(node, owner, ++nextAuthoringGeneration);
+  }
+  function releasePlacementAuthority(node, preservePosition = true) {
+    const authority = authorities.get(node);
+    if (authority) {
+      releaseRecord(authority, preservePosition);
+    }
+  }
+  function placementAuthorityOwner(node) {
+    const authority = authorities.get(node);
+    return authority?.active ? authority.owner : null;
+  }
 
   // src/component/Marker.ts
   var orphanedMarkerErrorMessage = "Markers must be connected to the document or have a managed owner before the next tick.";
@@ -1784,7 +2745,7 @@ var __kitsui_factory__ = (() => {
     return ownerNode === null;
   }
   function isManagedNode(node, visitedOwners = /* @__PURE__ */ new Set()) {
-    if (node.isConnected) {
+    if (DOMTree.isConnected(node)) {
       return true;
     }
     let current = node;
@@ -1793,7 +2754,7 @@ var __kitsui_factory__ = (() => {
       if (wrappedOwner && isManagedOwner(wrappedOwner, visitedOwners)) {
         return true;
       }
-      current = current.parentNode;
+      current = DOMTree.composedParentOf(current);
     }
     return false;
   }
@@ -1806,11 +2767,14 @@ var __kitsui_factory__ = (() => {
       super();
       /** The underlying DOM comment node that this marker wraps. */
       __publicField(this, "node");
+      __publicField(this, "domTreeRegistration");
+      __publicField(this, "useHooks", /* @__PURE__ */ new Set());
       __publicField(this, "mounted", false);
       __publicField(this, "orphanCheckId", null);
       installNodeMarkerAccessor();
       this.node = document.createComment(id);
       markers.set(this.node, new WeakRef(this));
+      this.domTreeRegistration = registerDOMTreeNode(this.node, this);
       this.refreshOrphanCheck();
     }
     /** Lazily creates the marker's event manipulator for mount and dispose lifecycle events. */
@@ -1850,27 +2814,41 @@ var __kitsui_factory__ = (() => {
      * @returns This marker for chaining.
      */
     use(onMount, onDispose) {
-      let disposeCleanup;
-      this.event.owned.on.Mount(() => {
-        disposeCleanup = onMount();
-      });
-      this.event.owned.on.Dispose(() => {
-        disposeCleanup?.();
-        onDispose?.();
-        disposeCleanup = void 0;
-        onDispose = void 0;
+      this.ensureActive();
+      this.useHooks.add({
+        onMount,
+        onDispose,
+        cleanup: void 0,
+        disposePending: false,
+        mounting: false,
+        settled: false
       });
       return this;
     }
     beforeDispose() {
-      this.node.dispatchEvent(new CustomEvent("Dispose"));
-      this.clearOrphanCheck();
-      if (getLiveMarker(this.node) === this) {
-        markers.delete(this.node);
-      }
+      const useHooks = [...this.useHooks];
+      this.useHooks.clear();
+      runCleanupSteps([
+        () => this.node.dispatchEvent(new CustomEvent("Dispose")),
+        () => releasePlacementAuthority(this.node, true),
+        ...useHooks.map((hook) => () => {
+          if (hook.mounting) {
+            hook.disposePending = true;
+            return;
+          }
+          this.settleUseHook(hook);
+        }),
+        () => this.clearOrphanCheck(),
+        () => {
+          if (getLiveMarker(this.node) === this) {
+            markers.delete(this.node);
+          }
+        },
+        () => unregisterDOMTreeNode(this.domTreeRegistration)
+      ]);
     }
     afterDispose() {
-      this.node.remove();
+      DOMTree.remove(this.node);
     }
     /** @internal */
     dispatchMount() {
@@ -1878,7 +2856,43 @@ var __kitsui_factory__ = (() => {
         return;
       }
       this.mounted = true;
-      this.node.dispatchEvent(new CustomEvent("Mount"));
+      const useHooks = [...this.useHooks];
+      runCleanupSteps([
+        () => this.node.dispatchEvent(new CustomEvent("Mount")),
+        ...useHooks.map((hook) => () => {
+          if (this.disposed) {
+            return;
+          }
+          hook.mounting = true;
+          let cleanup;
+          runCleanupSteps([
+            () => {
+              cleanup = hook.onMount();
+            },
+            () => {
+              hook.mounting = false;
+              hook.cleanup = cleanup;
+              if (this.disposed || hook.disposePending) {
+                this.settleUseHook(hook);
+              }
+            }
+          ]);
+        })
+      ]);
+    }
+    settleUseHook(hook) {
+      if (hook.settled) {
+        return;
+      }
+      hook.settled = true;
+      const cleanup = hook.cleanup;
+      const onDispose = hook.onDispose;
+      hook.cleanup = void 0;
+      hook.onDispose = void 0;
+      runCleanupSteps([
+        () => cleanup?.(),
+        () => onDispose?.()
+      ]);
     }
     ensureActive() {
       if (this.disposed) {
@@ -1906,12 +2920,26 @@ var __kitsui_factory__ = (() => {
         if (this.disposed) {
           return;
         }
+        this.refreshPlacementOwner();
         if (this.isManaged()) {
           this.dispatchMount();
           return;
         }
         throw new Error(orphanedMarkerErrorMessage);
       });
+    }
+    /** @internal Updates Kitsui-derived placement ownership from the current virtual tree. */
+    refreshPlacementOwner() {
+      let current = DOMTree.parentOf(this.node);
+      while (current) {
+        const owner = getWrappedNodeOwner(current);
+        if (owner && owner !== this) {
+          this.owner.add(owner, "placement");
+          return;
+        }
+        current = DOMTree.composedParentOf(current);
+      }
+      this.owner.remove("placement");
     }
     isManaged() {
       if (isManagedNode(this.node)) {
@@ -1933,7 +2961,14 @@ var __kitsui_factory__ = (() => {
       const marker = new MarkerClass(id);
       marker.event.owned.on.Mount(() => {
         const cleanup = definition.build(marker, ...args);
-        if (cleanup) marker.event.owned.on.Dispose(() => cleanup?.());
+        if (!cleanup) {
+          return;
+        }
+        if (marker.disposed) {
+          cleanup();
+          return;
+        }
+        marker.event.owned.on.Dispose(cleanup);
       });
       return marker;
     };
@@ -2552,7 +3587,7 @@ ${innerRules}
   }
 
   // src/component/ClassManipulator.ts
-  var noop6 = () => {
+  var noop5 = () => {
   };
   function isStyleInputState(value) {
     return value instanceof State;
@@ -2732,7 +3767,7 @@ ${innerRules}
       }
       this.replaceDeterminer(style, () => {
         this.element.classList.add(style.className);
-        return noop6;
+        return noop5;
       });
     }
     installRemoveInput(style) {
@@ -2747,7 +3782,7 @@ ${innerRules}
       }
       this.replaceDeterminer(style, () => {
         this.element.classList.remove(style.className);
-        return noop6;
+        return noop5;
       });
     }
     installStateDrivenStyles(selectionState, getPresent, options = {}) {
@@ -2778,8 +3813,8 @@ ${innerRules}
             continue;
           }
           const entry = {
-            apply: noop6,
-            cleanup: noop6
+            apply: noop5,
+            cleanup: noop5
           };
           const determinerCleanup = this.replaceDeterminer(style, (applyIfCurrent) => {
             entry.apply = () => {
@@ -2809,7 +3844,7 @@ ${innerRules}
         for (const entry of entries.values()) {
           entry.apply();
         }
-      }) ?? noop6;
+      }) ?? noop5;
       syncSelection(selectionState.value);
       return () => {
         if (!active) {
@@ -2853,8 +3888,22 @@ ${innerRules}
     }
   };
 
+  // src/component/ComponentComposition.ts
+  var componentBuilders = /* @__PURE__ */ new WeakMap();
+  function markComponentBuilder(component, builder2) {
+    let builders = componentBuilders.get(component);
+    if (!builders) {
+      builders = /* @__PURE__ */ new Set();
+      componentBuilders.set(component, builders);
+    }
+    builders.add(builder2);
+  }
+  function hasComponentBuilder(component, builder2) {
+    return componentBuilders.get(component)?.has(builder2) ?? false;
+  }
+
   // src/component/StyleManipulator.ts
-  var noop7 = () => {
+  var noop6 = () => {
   };
   function isStateSource2(value) {
     return value instanceof State;
@@ -2900,8 +3949,8 @@ ${innerRules}
       const layer = {
         active: true,
         properties: /* @__PURE__ */ new Map(),
-        releaseDefinition: noop7,
-        releaseSource: noop7
+        releaseDefinition: noop6,
+        releaseSource: noop6
       };
       this.layers.push(layer);
       const applyDefinition = (definition) => {
@@ -2922,13 +3971,13 @@ ${innerRules}
     }
     installDefinition(layer, definition) {
       if (!definition) {
-        return noop7;
+        return noop6;
       }
       const cleanups = [];
       for (const [propertyName, input] of Object.entries(definition)) {
         const valueSource = toStyleValueSource(input);
         const property = {
-          cleanup: noop7,
+          cleanup: noop6,
           value: valueSource.value
         };
         layer.properties.set(propertyName, property);
@@ -2950,7 +3999,7 @@ ${innerRules}
     }
     releaseLayerProperties(layer) {
       layer.releaseDefinition();
-      layer.releaseDefinition = noop7;
+      layer.releaseDefinition = noop6;
       const propertyNames = new Set(layer.properties.keys());
       layer.properties.clear();
       for (const propertyName of propertyNames) {
@@ -2963,7 +4012,7 @@ ${innerRules}
       }
       layer.active = false;
       layer.releaseSource();
-      layer.releaseSource = noop7;
+      layer.releaseSource = noop6;
       this.releaseLayerProperties(layer);
     }
     writeResolvedProperty(propertyName) {
@@ -2998,7 +4047,7 @@ ${innerRules}
   };
 
   // src/component/GenericPropertyManipulator.ts
-  var noop8 = () => {
+  var noop7 = () => {
   };
   var GenericPropertyManipulator = class {
     constructor(owner) {
@@ -3048,7 +4097,7 @@ ${innerRules}
       this.determiner?.cleanup();
       const token = /* @__PURE__ */ Symbol("property");
       let active = true;
-      let cleanup = noop8;
+      let cleanup = noop7;
       const applyIfCurrent = (value) => {
         if (this.determiner?.token !== token) {
           return;
@@ -3114,57 +4163,92 @@ ${innerRules}
     }
   };
 
-  // src/component/ComponentComposition.ts
-  var componentBuilders = /* @__PURE__ */ new WeakMap();
-  function markComponentBuilder(component, builder2) {
-    let builders = componentBuilders.get(component);
-    if (!builders) {
-      builders = /* @__PURE__ */ new Set();
-      componentBuilders.set(component, builders);
-    }
-    builders.add(builder2);
-  }
-  function hasComponentBuilder(component, builder2) {
-    return componentBuilders.get(component)?.has(builder2) ?? false;
-  }
-
   // src/component/Component.ts
-  var noop9 = () => {
+  var noop8 = () => {
   };
   var orphanedComponentErrorMessage = "Components must be connected to the document or have a managed owner before the next tick.";
-  var recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
+  var shadowPlacementOwnerClaim = "kitsui:shadow-placement";
   var elementComponents = /* @__PURE__ */ new WeakMap();
   var componentOwnerResolvers = /* @__PURE__ */ new Set();
-  var hiddenManagedOwners = /* @__PURE__ */ new WeakMap();
   var componentAccessorInstalled = false;
-  function isMoveParent(value) {
-    return value !== null && typeof value.insertBefore === "function";
+  function createStatefulChildController() {
+    let cleanup = () => {
+    };
+    const controller = {
+      active: true,
+      author: createPlacementAuthorityAuthor(),
+      authorities: /* @__PURE__ */ new Map(),
+      cleanup: (preservePosition = false) => {
+        if (!controller.active) return;
+        controller.active = false;
+        cleanup(preservePosition);
+      },
+      setCleanup: (nextCleanup) => {
+        cleanup = nextCleanup;
+        if (!controller.active) nextCleanup(true);
+      },
+      onSuppressed: null
+    };
+    return controller;
   }
-  function wouldCreateRecursiveTree(parent, node) {
-    return node === parent || node.contains(parent);
+  function claimStatefulChildComponentSelection(components, owner, token) {
+    const controlledComponents = [];
+    for (const component of components) {
+      if (!token.active) break;
+      if (token.authorities.get(component.element)?.isCurrent()) {
+        controlledComponents.push(component);
+        continue;
+      }
+      const authority = token.author.claim(component.element, owner);
+      if (!authority) {
+        token.onSuppressed?.(component);
+        continue;
+      }
+      token.authorities.set(component.element, authority);
+      authority.setCleanup((preservePosition) => {
+        if (token.authorities.get(component.element) !== authority) return;
+        token.authorities.delete(component.element);
+        if (token.onSuppressed) token.onSuppressed(component);
+        else token.cleanup(preservePosition);
+      });
+      if (!authority.isCurrent()) continue;
+      component["refreshOrphanCheck"]();
+      controlledComponents.push(component);
+    }
+    return controlledComponents;
   }
-  function moveNode(parent, node, beforeNode) {
-    if (wouldCreateRecursiveTree(parent, node)) {
-      console.error(recursiveTreeErrorMessage);
-      return false;
+  function claimStatefulNode(node, owner, token) {
+    if (!token.active || token.authorities.get(node)?.isCurrent()) return;
+    const authority = token.author.claim(node, owner);
+    if (!authority) {
+      token.cleanup(true);
+      return;
     }
-    try {
-      if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
-        parent.moveBefore(node, beforeNode);
-        return true;
-      }
-      parent.insertBefore(node, beforeNode);
-      return true;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "HierarchyRequestError") {
-        console.error(recursiveTreeErrorMessage);
-        return false;
-      }
-      throw error;
-    }
+    token.authorities.set(node, authority);
+    authority.setCleanup((preservePosition) => {
+      if (token.authorities.get(node) !== authority) return;
+      token.authorities.delete(node);
+      token.cleanup(preservePosition);
+    });
+  }
+  function releaseStatefulNode(node, token) {
+    const authority = token.authorities.get(node);
+    if (!authority) return;
+    authority.relinquish();
+    token.authorities.delete(node);
+  }
+  function releaseStatefulChildController(component, token) {
+    releaseStatefulNode(component.element, token);
+    component["refreshOrphanCheck"]();
   }
   function createStorageElement(documentRef) {
     return documentRef.createElement("kitsui-storage");
+  }
+  function moveKnownComponent(component, parent, beforeNode, onMoved = noop8) {
+    const placement = beforeNode ? { type: "before", reference: beforeNode } : { type: "append", parent };
+    DOMTree.place([component.element], placement, () => {
+      onMoved(component);
+    });
   }
   function getLiveComponent(element) {
     const component = elementComponents.get(element)?.deref();
@@ -3211,67 +4295,152 @@ ${innerRules}
   function isChildIterable(value) {
     return typeof value === "object" && value !== null && !(value instanceof Node) && !(value instanceof ComponentClass) && !(value instanceof State) && Symbol.iterator in value;
   }
-  function registerComponentOwnerResolver(resolver) {
-    componentOwnerResolvers.add(resolver);
-    return () => {
-      componentOwnerResolvers.delete(resolver);
-    };
+  function refreshPlacedNode(node) {
+    const component = node.component;
+    component?.["refreshPlacementOwner"]();
+    component?.["refreshOrphanCheck"]();
+    const marker = node.marker;
+    marker?.["refreshPlacementOwner"]();
+    marker?.["refreshOrphanCheck"]();
   }
-  function ownerResolvesForComponent(owner) {
+  function dispatchPlacedNodeMount(node) {
+    node.component?.["dispatchMount"]();
+    node.marker?.["dispatchMount"]();
+  }
+  function snapshotDirectInsertedNodes(node) {
+    return node.nodeType === Node.DOCUMENT_FRAGMENT_NODE && !("host" in node) ? Array.from(node.childNodes) : [node];
+  }
+  function ownerResolvesForComponent(owner, visitedComponents = /* @__PURE__ */ new Set()) {
     if (!owner || owner.disposed) {
       return false;
     }
     if (owner instanceof ComponentClass) {
-      return owner["isManaged"]();
+      return owner["isManaged"](visitedComponents);
     }
     return true;
   }
-  function componentHasExternalManager(component, ignoredOwner) {
-    if (component.owner.getAll().some((owner) => owner !== ignoredOwner && ownerResolvesForComponent(owner))) {
-      return true;
-    }
-    const hiddenManagedOwner = hiddenManagedOwners.get(component) ?? null;
-    if (hiddenManagedOwner !== ignoredOwner && ownerResolvesForComponent(hiddenManagedOwner)) {
-      return true;
-    }
-    let current = component.element.parentNode;
+  function resolveExternalComponentManager(component, ignoredOwner, physicalOwnershipBoundary) {
+    const visitedComponents = /* @__PURE__ */ new Set([component]);
+    let current = DOMTree.composedParentOf(component.element);
     while (current) {
-      const wrappedOwner = getWrappedNodeOwner2(current);
-      if (wrappedOwner !== ignoredOwner && ownerResolvesForComponent(wrappedOwner)) {
-        return true;
+      if (current === physicalOwnershipBoundary) {
+        break;
       }
-      current = current.parentNode;
+      const wrappedOwner = getWrappedNodeOwner2(current);
+      if (wrappedOwner !== ignoredOwner && ownerResolvesForComponent(wrappedOwner, visitedComponents)) {
+        return { kind: "physical", owner: wrappedOwner, resolverManaged: false };
+      }
+      current = DOMTree.composedParentOf(current);
+    }
+    const explicitOwner = component.owner.getAll().find((owner) => owner !== ignoredOwner && ownerResolvesForComponent(owner, visitedComponents));
+    if (explicitOwner) {
+      return { kind: "other", owner: explicitOwner, resolverManaged: false };
+    }
+    const statefulChildOwner = placementAuthorityOwner(component.element);
+    if (statefulChildOwner !== ignoredOwner && ownerResolvesForComponent(statefulChildOwner ?? null, visitedComponents)) {
+      return { kind: "other", owner: statefulChildOwner, resolverManaged: false };
     }
     for (const resolver of componentOwnerResolvers) {
       const resolvedOwner = resolver(component);
-      if (resolvedOwner !== ignoredOwner && ownerResolvesForComponent(resolvedOwner)) {
-        return true;
+      if (resolvedOwner !== ignoredOwner && ownerResolvesForComponent(resolvedOwner, visitedComponents)) {
+        return { kind: "other", owner: resolvedOwner, resolverManaged: true };
       }
     }
-    return false;
+    return null;
   }
   function retainManagedComponent(component, action) {
     if (action !== "detach") {
       return;
     }
-    component.element.parentNode?.removeChild(component.element);
+    DOMTree.remove(component.element);
     component["refreshOrphanCheck"]();
+  }
+  function managedChildNodes(node) {
+    const childNodes = new Set(isDOMParent(node) ? DOMTree.childrenOf(node) : Array.from(node.childNodes));
+    if (node instanceof HTMLElement && node.shadowRoot) {
+      for (const childNode of DOMTree.childrenOf(node.shadowRoot)) {
+        childNodes.add(childNode);
+      }
+    }
+    return [...childNodes];
+  }
+  function pendingManagedChildNodes(node, settledNodes, includeDetachedPhysicalChildren) {
+    const pendingNodes = [];
+    const visitedNodes = /* @__PURE__ */ new Set();
+    const visit = (parent, includeDetachedChildren = false) => {
+      const childNodes = new Set(managedChildNodes(parent));
+      if (includeDetachedChildren && isDOMParent(parent)) {
+        for (const childNode of DOMTree.physical.childrenOf(parent)) {
+          if (DOMTree.parentOf(childNode) === null) {
+            childNodes.add(childNode);
+          }
+        }
+      }
+      for (const childNode of childNodes) {
+        if (visitedNodes.has(childNode)) {
+          continue;
+        }
+        visitedNodes.add(childNode);
+        if (!settledNodes.has(childNode)) {
+          pendingNodes.push(childNode);
+          continue;
+        }
+        const component = childNode instanceof HTMLElement ? getLiveComponent(childNode) : void 0;
+        if (!component || component.disposed) {
+          visit(childNode);
+        }
+      }
+    };
+    visit(node, includeDetachedPhysicalChildren);
+    return pendingNodes;
+  }
+  function* managedChildCleanupSteps(node, options, includeDetachedPhysicalChildren = false) {
+    const settledNodes = /* @__PURE__ */ new Set();
+    while (true) {
+      const pendingNodes = pendingManagedChildNodes(node, settledNodes, includeDetachedPhysicalChildren);
+      if (pendingNodes.length === 0) {
+        return;
+      }
+      for (const childNode of pendingNodes) {
+        settledNodes.add(childNode);
+        yield () => disposeManagedNode(childNode, options);
+      }
+    }
   }
   function disposeManagedNode(node, options = {}) {
     if (node instanceof HTMLElement) {
       const component = getLiveComponent(node);
       if (component && !component.disposed) {
-        if (options.ignoredOwner && componentHasExternalManager(component, options.ignoredOwner)) {
-          retainManagedComponent(component, options.retainedComponentAction ?? "leave");
+        const externalManager = options.ignoredOwner && resolveExternalComponentManager(
+          component,
+          options.ignoredOwner,
+          options.physicalOwnershipBoundary
+        );
+        if (externalManager) {
+          const retainedAction = externalManager.kind === "physical" ? options.retainedPhysicalComponentAction ?? options.retainedComponentAction ?? "leave" : options.retainedComponentAction ?? "leave";
+          retainManagedComponent(component, retainedAction);
+          if (externalManager.resolverManaged) {
+            component["bindRetainedResolverOwner"](externalManager.owner);
+          }
           return;
         }
         component.remove();
         return;
       }
     }
-    for (const childNode of Array.from(node.childNodes)) {
-      disposeManagedNode(childNode, options);
+    runCleanupSteps(managedChildCleanupSteps(node, options));
+  }
+  function releaseStatefulChildComponent(component, owner, token, physicalOwnershipBoundary) {
+    releaseStatefulChildController(component, token);
+    if (component.disposed) {
+      return;
     }
+    disposeManagedNode(component.element, {
+      ignoredOwner: owner,
+      physicalOwnershipBoundary,
+      retainedComponentAction: "detach",
+      retainedPhysicalComponentAction: "leave"
+    });
   }
   var ComponentClass = class _ComponentClass extends Owner {
     constructor(tagNameOrElement) {
@@ -3280,16 +4449,19 @@ ${innerRules}
        * The underlying DOM element managed by this component.
        */
       __publicField(this, "element");
+      __publicField(this, "domTreeRegistration");
       __publicField(this, "structuralCleanups", /* @__PURE__ */ new Set());
       __publicField(this, "mounted", false);
-      __publicField(this, "onBeforeMove", null);
       __publicField(this, "orphanCheckId", null);
+      __publicField(this, "retainedResolverOwner", null);
+      __publicField(this, "releaseRetainedResolverOwner", noop8);
       installNodeComponentAccessor();
       this.element = typeof tagNameOrElement === "string" ? document.createElement(tagNameOrElement) : tagNameOrElement;
       if (getLiveComponent(this.element)) {
         throw new Error("This node already has a component. Use node.component to retrieve it.");
       }
       elementComponents.set(this.element, new WeakRef(this));
+      this.domTreeRegistration = registerDOMTreeNode(this.element, this);
       this.refreshOrphanCheck();
     }
     /**
@@ -3401,20 +4573,27 @@ ${innerRules}
      */
     append(...children) {
       this.ensureActive();
-      for (const child of this.expandChildren(children)) {
+      const preparedChildren = this.prepareComponentChildren(this.expandChildren(children), false);
+      this.processPreparedChildren(preparedChildren, (prepared) => {
+        const { child } = prepared;
+        if (this.disposed) {
+          this.disposePreparedChild(prepared);
+          return;
+        }
         if (isComponentSelectionState(child)) {
           this.attachStatefulChildren(child, {
             getContainer: () => this.element,
             getReferenceNode: () => null
-          });
-          continue;
+          }, prepared.controller, prepared.controlledComponents);
+          return;
         }
-        const moved = moveNode(this.element, this.resolveNode(child), null);
-        if (moved && child instanceof _ComponentClass) {
-          child.refreshOrphanCheck();
-          child.dispatchMount();
-        }
-      }
+        const node = this.resolveNode(child);
+        const insertedNodes = snapshotDirectInsertedNodes(node);
+        if (!DOMTree.canPlace(insertedNodes, { type: "append", parent: this.element })) return;
+        for (const insertedNode of insertedNodes) replacePlacementAuthority(insertedNode);
+        DOMTree.place([node], { type: "append", parent: this.element }, dispatchPlacedNodeMount);
+        for (const insertedNode of insertedNodes) refreshPlacedNode(insertedNode);
+      });
       return this;
     }
     /**
@@ -3426,21 +4605,36 @@ ${innerRules}
      */
     prepend(...children) {
       this.ensureActive();
-      const referenceNode = this.element.firstChild;
-      for (const child of this.expandChildren(children)) {
+      const preparedChildren = this.prepareComponentChildren(this.expandChildren(children), false);
+      let referenceNode = DOMTree.firstChildOf(this.element);
+      this.processPreparedChildren(preparedChildren, (prepared) => {
+        const { child } = prepared;
+        if (this.disposed) {
+          this.disposePreparedChild(prepared);
+          return;
+        }
+        if (referenceNode && DOMTree.parentOf(referenceNode) !== this.element) {
+          referenceNode = DOMTree.firstChildOf(this.element);
+        }
         if (isComponentSelectionState(child)) {
           this.attachStatefulChildren(child, {
             getContainer: () => this.element,
             getReferenceNode: () => referenceNode
-          });
-          continue;
+          }, prepared.controller, prepared.controlledComponents);
+          return;
         }
-        const moved = moveNode(this.element, this.resolveNode(child), referenceNode);
-        if (moved && child instanceof _ComponentClass) {
-          child.refreshOrphanCheck();
-          child.dispatchMount();
+        const node = this.resolveNode(child);
+        const placement = referenceNode ? { type: "before", reference: referenceNode } : { type: "append", parent: this.element };
+        const insertedNodes = snapshotDirectInsertedNodes(node);
+        if (!DOMTree.canPlace(insertedNodes, placement)) return;
+        for (const insertedNode of insertedNodes) replacePlacementAuthority(insertedNode);
+        DOMTree.place([node], placement, dispatchPlacedNodeMount);
+        for (const insertedNode of insertedNodes) refreshPlacedNode(insertedNode);
+        const lastInsertedNode = insertedNodes[insertedNodes.length - 1];
+        if (lastInsertedNode && DOMTree.parentOf(lastInsertedNode) === this.element) {
+          referenceNode = DOMTree.nextSiblingOf(lastInsertedNode);
         }
-      }
+      });
       return this;
     }
     /**
@@ -3457,25 +4651,32 @@ ${innerRules}
       if (insertables.length === 0) {
         return this;
       }
-      const parentNode = this.element.parentNode;
-      if (!isMoveParent(parentNode)) {
+      const parentNode = DOMTree.parentOf(this.element);
+      if (!isDOMParent(parentNode)) {
         throw new Error("Insert target was not found.");
       }
       const orderedInsertables = where === "before" ? insertables : [...insertables].reverse();
-      for (const node of orderedInsertables) {
+      const preparedInsertables = this.prepareComponentChildren(orderedInsertables, false);
+      this.processPreparedChildren(preparedInsertables, (prepared) => {
+        const { child: node } = prepared;
+        if (this.disposed) {
+          this.disposePreparedChild(prepared);
+          return;
+        }
         if (isComponentSelectionState(node)) {
           this.attachStatefulChildren(node, {
-            getContainer: () => this.element.parentNode,
-            getReferenceNode: () => where === "before" ? this.element : this.element.nextSibling
-          });
-          continue;
+            getContainer: () => DOMTree.parentOf(this.element),
+            getReferenceNode: () => where === "before" ? this.element : DOMTree.nextSiblingOf(this.element)
+          }, prepared.controller, prepared.controlledComponents);
+          return;
         }
-        const moved = moveNode(parentNode, this.resolveNode(node), where === "before" ? this.element : this.element.nextSibling);
-        if (moved && node instanceof _ComponentClass) {
-          node.refreshOrphanCheck();
-          node.dispatchMount();
-        }
-      }
+        const resolvedNode = this.resolveNode(node);
+        const insertedNodes = snapshotDirectInsertedNodes(resolvedNode);
+        if (!DOMTree.canPlace(insertedNodes, { type: where, reference: this.element })) return;
+        for (const insertedNode of insertedNodes) replacePlacementAuthority(insertedNode);
+        DOMTree.place([resolvedNode], { type: where, reference: this.element }, dispatchPlacedNodeMount);
+        for (const insertedNode of insertedNodes) refreshPlacedNode(insertedNode);
+      });
       return this;
     }
     /**
@@ -3487,19 +4688,25 @@ ${innerRules}
      */
     appendWhen(state2, ...nodes) {
       this.ensureActive();
-      for (const node of this.expandChildren(nodes)) {
+      const preparedNodes = this.prepareComponentChildren(this.expandConditionalChildren(nodes), true);
+      this.processPreparedChildren(preparedNodes, (prepared) => {
+        const { child: node } = prepared;
+        if (this.disposed) {
+          this.disposePreparedChild(prepared);
+          return;
+        }
         if (isComponentSelectionState(node)) {
           this.attachConditionalSelectionState(state2, node, {
             getContainer: () => this.element,
             getReferenceNode: () => null
-          });
-          continue;
+          }, prepared.controller, prepared.controlledComponents);
+          return;
         }
         this.attachConditionalNode(state2, node, {
           getContainer: () => this.element,
           getReferenceNode: () => null
-        });
-      }
+        }, prepared.controller);
+      });
       return this;
     }
     /**
@@ -3511,20 +4718,26 @@ ${innerRules}
      */
     prependWhen(state2, ...nodes) {
       this.ensureActive();
-      const referenceNode = this.element.firstChild;
-      for (const node of this.expandChildren(nodes)) {
+      const referenceNode = DOMTree.firstChildOf(this.element);
+      const preparedNodes = this.prepareComponentChildren(this.expandConditionalChildren(nodes), true);
+      this.processPreparedChildren(preparedNodes, (prepared) => {
+        const { child: node } = prepared;
+        if (this.disposed) {
+          this.disposePreparedChild(prepared);
+          return;
+        }
         if (isComponentSelectionState(node)) {
           this.attachConditionalSelectionState(state2, node, {
             getContainer: () => this.element,
             getReferenceNode: () => referenceNode
-          });
-          continue;
+          }, prepared.controller, prepared.controlledComponents);
+          return;
         }
         this.attachConditionalNode(state2, node, {
           getContainer: () => this.element,
           getReferenceNode: () => referenceNode
-        });
-      }
+        }, prepared.controller);
+      });
       return this;
     }
     /**
@@ -3537,31 +4750,47 @@ ${innerRules}
      */
     insertWhen(state2, where, ...nodes) {
       this.ensureActive();
-      const insertables = this.expandChildren(nodes);
+      const insertables = this.expandConditionalChildren(nodes);
       const orderedInsertables = where === "before" ? insertables : [...insertables].reverse();
-      for (const node of orderedInsertables) {
+      const preparedInsertables = this.prepareComponentChildren(orderedInsertables, true);
+      this.processPreparedChildren(preparedInsertables, (prepared) => {
+        const { child: node } = prepared;
+        if (this.disposed) {
+          this.disposePreparedChild(prepared);
+          return;
+        }
         if (isComponentSelectionState(node)) {
           this.attachConditionalSelectionState(state2, node, {
-            getContainer: () => this.element.parentNode,
-            getReferenceNode: () => where === "before" ? this.element : this.element.nextSibling
-          });
-          continue;
+            getContainer: () => DOMTree.parentOf(this.element),
+            getReferenceNode: () => where === "before" ? this.element : DOMTree.nextSiblingOf(this.element)
+          }, prepared.controller, prepared.controlledComponents);
+          return;
         }
         this.attachConditionalNode(state2, node, {
-          getContainer: () => this.element.parentNode,
-          getReferenceNode: () => where === "before" ? this.element : this.element.nextSibling
-        });
-      }
+          getContainer: () => DOMTree.parentOf(this.element),
+          getReferenceNode: () => where === "before" ? this.element : DOMTree.nextSiblingOf(this.element)
+        }, prepared.controller);
+      });
       return this;
     }
-    attachConditionalSelectionState(visibleState, selectionState, options) {
+    attachConditionalSelectionState(visibleState, selectionState, options, controller, initialComponents) {
       const marker = Marker("kitsui:conditional-stateful").owner.add(this);
       const storage = createStorageElement(this.element.ownerDocument);
       let active = true;
+      let rendering = false;
       let markerWasInserted = false;
       let renderedComponents = [];
+      let releaseVisibleSubscription = noop8;
+      let releaseSelectionSubscription = noop8;
       const retainedHiddenComponents = /* @__PURE__ */ new Set();
+      const getPhysicalOwnershipBoundary = () => DOMTree.parentOf(marker.node);
+      controller.onSuppressed = (component) => {
+        renderedComponents = renderedComponents.filter((rendered) => rendered !== component);
+        retainedHiddenComponents.delete(component);
+      };
+      renderedComponents = claimStatefulChildComponentSelection(initialComponents, this, controller);
       const cleanupRenderedComponents = (nextComponents = /* @__PURE__ */ new Set(), mode = "dispose") => {
+        const cleanupSteps = [];
         for (const component of renderedComponents) {
           if (nextComponents.has(component)) {
             retainedHiddenComponents.delete(component);
@@ -3569,94 +4798,164 @@ ${innerRules}
           }
           if (mode === "dispose") {
             retainedHiddenComponents.delete(component);
-            component.remove();
+            cleanupSteps.push(() => releaseStatefulChildComponent(component, this, controller, getPhysicalOwnershipBoundary()));
+            continue;
+          }
+          if (component.disposed) {
+            releaseStatefulChildController(component, controller);
             continue;
           }
           retainedHiddenComponents.add(component);
+          moveKnownComponent(component, storage, null);
         }
-        renderedComponents = renderedComponents.filter((component) => nextComponents.has(component));
+        renderedComponents = renderedComponents.filter((component) => nextComponents.has(component) && !component.disposed);
+        runCleanupSteps(cleanupSteps);
       };
       const releaseRetainedHiddenComponents = (nextComponents) => {
+        const cleanupSteps = [];
         for (const component of [...retainedHiddenComponents]) {
           if (nextComponents.has(component)) {
             continue;
           }
           retainedHiddenComponents.delete(component);
-          component.element.parentNode?.removeChild(component.element);
-          component.refreshOrphanCheck();
+          cleanupSteps.push(() => releaseStatefulChildComponent(component, this, controller, getPhysicalOwnershipBoundary()));
         }
+        runCleanupSteps(cleanupSteps);
+      };
+      const forgetDisposedComponent = (component) => {
+        releaseStatefulChildController(component, controller);
+        retainedHiddenComponents.delete(component);
+        renderedComponents = renderedComponents.filter((rendered) => rendered !== component);
+      };
+      const releaseUntrackedClaims = (components) => {
+        const trackedComponents = /* @__PURE__ */ new Set([...renderedComponents, ...retainedHiddenComponents]);
+        runCleanupSteps(components.filter((component) => !trackedComponents.has(component)).map((component) => () => releaseStatefulChildController(component, controller)));
       };
       const render = () => {
-        if (!active) {
+        if (!active || rendering) {
           return;
         }
-        const nextComponents = this.resolveComponentSelection(selectionState.value);
-        const nextComponentSet = new Set(nextComponents);
-        const container = options.getContainer();
-        if (!isMoveParent(container)) {
-          if (markerWasInserted) {
-            this.remove();
-            return;
-          }
-          cleanupRenderedComponents(nextComponentSet, visibleState.value ? "dispose" : "retain");
-          if (visibleState.value) {
-            releaseRetainedHiddenComponents(nextComponentSet);
-          }
-          for (const component of nextComponents) {
-            retainedHiddenComponents.delete(component);
-            component.ensureActive();
-            component.onBeforeMove?.();
-            moveNode(storage, component.element, null);
-          }
-          renderedComponents = nextComponents;
-          return;
-        }
-        if (markerWasInserted && marker.node.parentNode !== container) {
-          this.remove();
-          return;
-        }
-        if (marker.node.parentNode !== container) {
-          moveNode(container, marker.node, options.getReferenceNode());
-          markerWasInserted = true;
-        }
-        cleanupRenderedComponents(nextComponentSet, visibleState.value ? "dispose" : "retain");
-        if (visibleState.value) {
-          releaseRetainedHiddenComponents(nextComponentSet);
-          for (const component of nextComponents) {
-            retainedHiddenComponents.delete(component);
-            component.ensureActive();
-            component.onBeforeMove?.();
-            const moved = moveNode(container, component.element, marker.node);
-            if (moved) {
-              component.refreshOrphanCheck();
-              component.dispatchMount();
+        rendering = true;
+        try {
+          const nextComponents = claimStatefulChildComponentSelection(
+            this.resolveComponentSelection(selectionState.value),
+            this,
+            controller
+          );
+          if (!active || !controller.active) return;
+          const nextComponentSet = new Set(nextComponents);
+          try {
+            const container = options.getContainer();
+            if (!isDOMParent(container)) {
+              if (markerWasInserted) {
+                this.remove();
+                return;
+              }
+              const cleanupMode2 = visibleState.value ? "dispose" : "retain";
+              cleanupRenderedComponents(nextComponentSet, cleanupMode2);
+              if (!active) {
+                return;
+              }
+              if (visibleState.value) {
+                releaseRetainedHiddenComponents(nextComponentSet);
+              }
+              renderedComponents = [...nextComponents];
+              for (const component of nextComponents) {
+                if (!active) {
+                  return;
+                }
+                if (component.disposed) {
+                  forgetDisposedComponent(component);
+                  continue;
+                }
+                retainedHiddenComponents.delete(component);
+                moveKnownComponent(component, storage, null);
+              }
+              return;
             }
+            if (markerWasInserted && DOMTree.parentOf(marker.node) !== container) {
+              this.remove();
+              return;
+            }
+            if (DOMTree.parentOf(marker.node) !== container) {
+              const reference = options.getReferenceNode();
+              DOMTree.place([marker.node], reference ? { type: "before", reference } : { type: "append", parent: container }, () => {
+                markerWasInserted = true;
+              });
+            }
+            const cleanupMode = visibleState.value ? "dispose" : "retain";
+            cleanupRenderedComponents(nextComponentSet, cleanupMode);
+            if (!active) {
+              return;
+            }
+            if (visibleState.value) {
+              releaseRetainedHiddenComponents(nextComponentSet);
+            }
+            renderedComponents = [...nextComponents];
+            if (visibleState.value) {
+              for (const component of nextComponents) {
+                if (!active) {
+                  return;
+                }
+                if (component.disposed) {
+                  forgetDisposedComponent(component);
+                  continue;
+                }
+                retainedHiddenComponents.delete(component);
+                moveKnownComponent(component, container, marker.node, (movedComponent) => {
+                  movedComponent.refreshOrphanCheck();
+                  movedComponent.dispatchMount();
+                });
+              }
+            } else {
+              for (const component of nextComponents) {
+                if (!active) {
+                  return;
+                }
+                if (component.disposed) {
+                  forgetDisposedComponent(component);
+                  continue;
+                }
+                retainedHiddenComponents.delete(component);
+                moveKnownComponent(component, storage, null);
+              }
+            }
+          } catch (error) {
+            cleanupAndRethrow(error, () => releaseUntrackedClaims(nextComponents));
           }
-        } else {
-          for (const component of nextComponents) {
-            retainedHiddenComponents.delete(component);
-            component.ensureActive();
-            component.onBeforeMove?.();
-            moveNode(storage, component.element, null);
-          }
+        } finally {
+          rendering = false;
         }
-        renderedComponents = nextComponents;
       };
-      const cleanup = this.trackStructuralCleanup(() => {
+      const cleanup = this.trackStructuralCleanup((preservePosition = false) => {
+        const cleanupComponents = /* @__PURE__ */ new Set([...renderedComponents, ...retainedHiddenComponents]);
         active = false;
-        releaseVisibleSubscription();
-        releaseSelectionSubscription();
-        cleanupRenderedComponents();
-        for (const component of retainedHiddenComponents) {
-          component.remove();
-        }
+        renderedComponents = [];
         retainedHiddenComponents.clear();
-        marker.remove();
-        storage.remove();
+        runCleanupSteps([
+          releaseVisibleSubscription,
+          releaseSelectionSubscription,
+          ...[...cleanupComponents].map((component) => () => preservePosition ? releaseStatefulChildController(component, controller) : releaseStatefulChildComponent(component, this, controller, getPhysicalOwnershipBoundary())),
+          () => marker.remove(),
+          () => DOMTree.remove(storage)
+        ]);
       });
-      const releaseVisibleSubscription = visibleState.subscribe(this, render);
-      const releaseSelectionSubscription = selectionState.subscribe(this, render);
-      render();
+      controller.setCleanup(cleanup);
+      try {
+        releaseVisibleSubscription = visibleState.subscribe(this, render);
+        if (!active) {
+          releaseVisibleSubscription();
+          return cleanup;
+        }
+        releaseSelectionSubscription = selectionState.subscribe(this, render);
+        if (!active) {
+          releaseSelectionSubscription();
+          return cleanup;
+        }
+        render();
+      } catch (error) {
+        cleanupAndRethrow(error, cleanup);
+      }
       return cleanup;
     }
     /**
@@ -3665,14 +4964,14 @@ ${innerRules}
      */
     clear() {
       this.ensureActive();
-      this.releaseStructuralCleanups();
-      for (const childNode of Array.from(this.element.childNodes)) {
-        disposeManagedNode(childNode, {
+      runCleanupSteps([
+        () => this.releaseStructuralCleanups(),
+        () => runCleanupSteps(managedChildCleanupSteps(this.element, {
           ignoredOwner: this,
           retainedComponentAction: "detach"
-        });
-      }
-      this.element.replaceChildren();
+        })),
+        () => runCleanupSteps(DOMTree.childrenOf(this.element).map((childNode) => () => DOMTree.remove(childNode)))
+      ]);
       return this;
     }
     use(setupOrState, ...params) {
@@ -3725,23 +5024,28 @@ ${innerRules}
       this.element.dispatchEvent(new CustomEvent("Mount"));
     }
     beforeDispose() {
-      this.element.dispatchEvent(new CustomEvent("Dispose"));
-      this.clearOrphanCheck();
-      this.releaseStructuralCleanups();
-      if (getLiveComponent(this.element) === this) {
-        elementComponents.delete(this.element);
-      }
+      runCleanupSteps([
+        () => this.element.dispatchEvent(new CustomEvent("Dispose")),
+        () => releasePlacementAuthority(this.element, true),
+        () => this.clearOrphanCheck(),
+        () => this.releaseStructuralCleanups(),
+        this.releaseRetainedResolverOwner,
+        () => unregisterDOMTreeNode(this.domTreeRegistration)
+      ]);
     }
     afterDispose() {
-      this.element.remove();
-      const disposeImplicitChildren = (node) => {
-        disposeManagedNode(node, {
-          ignoredOwner: this,
-          retainedComponentAction: "leave"
-        });
-      };
-      for (const childNode of Array.from(this.element.childNodes)) {
-        disposeImplicitChildren(childNode);
+      try {
+        runCleanupSteps([
+          () => DOMTree.remove(this.element),
+          () => runCleanupSteps(managedChildCleanupSteps(this.element, {
+            ignoredOwner: this,
+            retainedComponentAction: "leave"
+          }, true))
+        ]);
+      } finally {
+        if (getLiveComponent(this.element) === this) {
+          elementComponents.delete(this.element);
+        }
       }
     }
     ensureActive() {
@@ -3769,11 +5073,76 @@ ${innerRules}
         if (this.disposed) {
           return;
         }
+        this.refreshPlacementOwner();
         if (this.isManaged()) {
           this.dispatchMount();
           return;
         }
         throw new Error(orphanedComponentErrorMessage);
+      });
+    }
+    refreshPlacementOwner() {
+      let current = DOMTree.parentOf(this.element);
+      let crossedShadowBoundary = false;
+      while (current) {
+        if (current instanceof HTMLElement) {
+          const owner = current.component;
+          if (owner && owner !== this) {
+            if (crossedShadowBoundary) this.owner.add(owner, shadowPlacementOwnerClaim);
+            else this.owner.remove(shadowPlacementOwnerClaim);
+            return;
+          }
+        }
+        const parent = DOMTree.parentOf(current);
+        if (parent) {
+          current = parent;
+          continue;
+        }
+        const composedParent = DOMTree.composedParentOf(current);
+        if (!composedParent) break;
+        crossedShadowBoundary = true;
+        current = composedParent;
+      }
+      this.owner.remove(shadowPlacementOwnerClaim);
+    }
+    bindRetainedResolverOwner(owner) {
+      if (this.disposed || this.retainedResolverOwner === owner) {
+        return;
+      }
+      this.releaseRetainedResolverOwner();
+      this.retainedResolverOwner = owner;
+      let active = true;
+      let releaseComponent = noop8;
+      let releaseOwner = noop8;
+      const release = () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        if (this.retainedResolverOwner === owner) {
+          this.retainedResolverOwner = null;
+          this.releaseRetainedResolverOwner = noop8;
+        }
+        releaseComponent();
+        releaseOwner();
+      };
+      this.releaseRetainedResolverOwner = release;
+      releaseComponent = this.onCleanup(release);
+      releaseOwner = owner.onCleanup(() => {
+        release();
+        if (this.disposed) {
+          return;
+        }
+        for (const resolver of componentOwnerResolvers) {
+          const nextOwner = resolver(this);
+          if (ownerResolvesForComponent(nextOwner)) {
+            this.bindRetainedResolverOwner(nextOwner);
+            return;
+          }
+        }
+        if (!this.isManaged()) {
+          this.remove();
+        }
       });
     }
     disposeIfUnmanagedAfterPlacementCleanup() {
@@ -3787,6 +5156,7 @@ ${innerRules}
         if (this.disposed) {
           return;
         }
+        this.refreshPlacementOwner();
         if (this.isManaged()) {
           this.dispatchMount();
           return;
@@ -3794,32 +5164,36 @@ ${innerRules}
         this.remove();
       });
     }
-    isManaged() {
-      if (this.element.isConnected) {
+    isManaged(visitedComponents = /* @__PURE__ */ new Set()) {
+      if (DOMTree.isConnected(this.element)) {
         return true;
       }
-      if (this.owner.getAll().some((owner) => this.ownerResolves(owner))) {
+      if (visitedComponents.has(this)) {
+        return false;
+      }
+      visitedComponents.add(this);
+      if (this.owner.getAll().some((owner) => this.ownerResolves(owner, visitedComponents))) {
         return true;
       }
-      if (this.ownerResolves(hiddenManagedOwners.get(this) ?? null)) {
+      if (this.ownerResolves(placementAuthorityOwner(this.element), visitedComponents)) {
         return true;
       }
-      let current = this.element.parentNode;
+      let current = DOMTree.composedParentOf(this.element);
       while (current) {
-        if (this.ownerResolves(getWrappedNodeOwner2(current))) {
+        if (this.ownerResolves(getWrappedNodeOwner2(current), visitedComponents)) {
           return true;
         }
-        current = current.parentNode;
+        current = DOMTree.composedParentOf(current);
       }
       for (const resolver of componentOwnerResolvers) {
-        if (this.ownerResolves(resolver(this))) {
+        if (this.ownerResolves(resolver(this), visitedComponents)) {
           return true;
         }
       }
       return false;
     }
-    ownerResolves(owner) {
-      return ownerResolvesForComponent(owner);
+    ownerResolves(owner, visitedComponents) {
+      return ownerResolvesForComponent(owner, visitedComponents);
     }
     resolveNode(child) {
       if (!child && child !== "") {
@@ -3830,7 +5204,6 @@ ${innerRules}
       }
       if (child instanceof _ComponentClass) {
         child.ensureActive();
-        child.onBeforeMove?.();
         return child.element;
       }
       return child;
@@ -3858,17 +5231,84 @@ ${innerRules}
       }
       return expanded;
     }
+    expandConditionalChildren(children) {
+      return this.expandChildren(children).flatMap((child) => {
+        if (child instanceof Node && child.nodeType === Node.DOCUMENT_FRAGMENT_NODE && !("host" in child)) {
+          return Array.from(child.childNodes);
+        }
+        return [child];
+      });
+    }
+    processPreparedChildren(preparedChildren, process) {
+      for (const preparedChild of preparedChildren) {
+        process(preparedChild);
+      }
+    }
+    prepareComponentChildren(children, controlDirectComponents) {
+      const prepared = children.map((child) => {
+        if (isComponentSelectionState(child)) {
+          return {
+            child,
+            controller: createStatefulChildController(),
+            controlledComponents: this.resolveComponentSelection(child.value)
+          };
+        }
+        if (controlDirectComponents) {
+          return {
+            child,
+            controller: createStatefulChildController(),
+            controlledComponents: child instanceof _ComponentClass ? [child] : []
+          };
+        }
+        return { child, controller: null, controlledComponents: [] };
+      });
+      return prepared;
+    }
+    disposePreparedChild(prepared) {
+      const settledComponents = /* @__PURE__ */ new Set();
+      if (prepared.controller) {
+        for (let index = 0; index < prepared.controlledComponents.length; index += 1) {
+          const component = prepared.controlledComponents[index];
+          settledComponents.add(component);
+          try {
+            releaseStatefulChildComponent(component, this, prepared.controller);
+          } catch (error) {
+            const pendingClaimReleases = prepared.controlledComponents.slice(index + 1).map((pending) => () => releaseStatefulChildController(pending, prepared.controller));
+            cleanupAndRethrow(error, () => runCleanupSteps(pendingClaimReleases));
+          }
+        }
+      }
+      const cleanupSteps = [];
+      const { child } = prepared;
+      if (isComponentSelectionState(child)) {
+        cleanupSteps.push(() => runCleanupSteps(this.resolveComponentSelection(child.value).filter((component) => !settledComponents.has(component)).map((component) => () => disposeManagedNode(component.element, { ignoredOwner: this }))));
+        runCleanupSteps(cleanupSteps);
+        return;
+      }
+      if (child instanceof _ComponentClass) {
+        if (!settledComponents.has(child)) {
+          cleanupSteps.push(() => disposeManagedNode(child.element, { ignoredOwner: this }));
+        }
+        runCleanupSteps(cleanupSteps);
+        return;
+      }
+      const node = this.resolveNode(child);
+      cleanupSteps.push(() => runCleanupSteps([
+        () => disposeManagedNode(node, { ignoredOwner: this }),
+        () => DOMTree.remove(node)
+      ]));
+      runCleanupSteps(cleanupSteps);
+    }
     trackStructuralCleanup(cleanup) {
       let active = true;
-      let releaseOwnerCleanup = noop9;
-      const trackedCleanup = () => {
+      let releaseOwnerCleanup = noop8;
+      const trackedCleanup = (preservePosition = false) => {
         if (!active) {
           return;
         }
         active = false;
         this.structuralCleanups.delete(trackedCleanup);
-        releaseOwnerCleanup();
-        cleanup();
+        runCleanupSteps([releaseOwnerCleanup, () => cleanup(preservePosition)]);
       };
       this.structuralCleanups.add(trackedCleanup);
       releaseOwnerCleanup = this.onCleanup(trackedCleanup);
@@ -3876,38 +5316,34 @@ ${innerRules}
     }
     releaseStructuralCleanups() {
       const structuralCleanups = [...this.structuralCleanups];
-      for (const structuralCleanup of structuralCleanups) {
-        structuralCleanup();
-      }
+      runCleanupSteps(structuralCleanups);
     }
-    attachConditionalNode(state2, node, options) {
+    attachConditionalNode(state2, node, options, controller) {
       if (!node && node !== "") {
-        return noop9;
+        return noop8;
       }
+      const childComponent = node instanceof _ComponentClass ? node : null;
       const resolvedNode = this.resolveNode(node);
+      claimStatefulNode(resolvedNode, this, controller);
+      if (!controller.active) return noop8;
+      const initialContainer = options.getContainer();
+      if (isDOMParent(initialContainer) && DOMTree.contains(resolvedNode, initialContainer)) {
+        console.error(recursiveTreeErrorMessage);
+        releaseStatefulNode(resolvedNode, controller);
+        return noop8;
+      }
       const placeholder = Marker("kitsui:conditional").owner.add(this);
       const storage = createStorageElement(this.element.ownerDocument);
-      const childComponent = node instanceof _ComponentClass ? node : null;
       let active = true;
-      let releaseChildCleanup = noop9;
+      let releaseChildCleanup = noop8;
       let placeholderWasInserted = false;
-      const setHiddenManagedOwner = (owner) => {
-        if (!childComponent || childComponent.owner.get() !== null) {
-          return;
-        }
-        if (owner) {
-          hiddenManagedOwners.set(childComponent, owner);
-        } else {
-          hiddenManagedOwners.delete(childComponent);
-        }
-        childComponent.refreshOrphanCheck();
-      };
+      let stateCleanup = noop8;
       const getSafeReferenceNode = (container) => {
         const referenceNode = options.getReferenceNode();
         if (!referenceNode) {
           return null;
         }
-        return referenceNode.parentNode === container ? referenceNode : null;
+        return DOMTree.parentOf(referenceNode) === container ? referenceNode : null;
       };
       const removeOwnerForMissingMarker = () => {
         if (!active) {
@@ -3917,18 +5353,20 @@ ${innerRules}
       };
       const ensurePlaceholder = () => {
         const container = options.getContainer();
-        if (!isMoveParent(container)) {
+        if (!isDOMParent(container)) {
           if (placeholderWasInserted) {
             removeOwnerForMissingMarker();
           }
           return null;
         }
         if (!placeholderWasInserted) {
-          moveNode(container, placeholder.node, getSafeReferenceNode(container));
-          placeholderWasInserted = true;
+          const reference = getSafeReferenceNode(container);
+          DOMTree.place([placeholder.node], reference ? { type: "before", reference } : { type: "append", parent: container }, () => {
+            placeholderWasInserted = true;
+          });
           return container;
         }
-        if (placeholder.node.parentNode !== container) {
+        if (DOMTree.parentOf(placeholder.node) !== container) {
           removeOwnerForMissingMarker();
           return null;
         }
@@ -3938,8 +5376,8 @@ ${innerRules}
         if (!active) {
           return;
         }
-        const initialContainer = options.getContainer();
-        if (isMoveParent(initialContainer) && wouldCreateRecursiveTree(initialContainer, resolvedNode)) {
+        const initialContainer2 = options.getContainer();
+        if (isDOMParent(initialContainer2) && DOMTree.contains(resolvedNode, initialContainer2)) {
           console.error(recursiveTreeErrorMessage);
           return;
         }
@@ -3948,23 +5386,28 @@ ${innerRules}
           return;
         }
         if (!container) {
-          setHiddenManagedOwner(this);
-          moveNode(storage, resolvedNode, null);
+          if (childComponent) {
+            moveKnownComponent(childComponent, storage, null);
+          } else {
+            DOMTree.place([resolvedNode], { type: "append", parent: storage });
+          }
           return;
         }
-        setHiddenManagedOwner(null);
-        const moved = moveNode(container, resolvedNode, placeholder.node);
-        if (moved) {
-          childComponent?.refreshOrphanCheck();
-          childComponent?.dispatchMount();
+        if (childComponent) {
+          moveKnownComponent(childComponent, container, placeholder.node, (movedComponent) => {
+            movedComponent.refreshOrphanCheck();
+            movedComponent.dispatchMount();
+          });
+        } else {
+          DOMTree.place([resolvedNode], { type: "before", reference: placeholder.node });
         }
       };
       const placeHidden = () => {
         if (!active) {
           return;
         }
-        const initialContainer = options.getContainer();
-        if (isMoveParent(initialContainer) && wouldCreateRecursiveTree(initialContainer, resolvedNode)) {
+        const initialContainer2 = options.getContainer();
+        if (isDOMParent(initialContainer2) && DOMTree.contains(resolvedNode, initialContainer2)) {
           console.error(recursiveTreeErrorMessage);
           return;
         }
@@ -3973,114 +5416,173 @@ ${innerRules}
           return;
         }
         if (!container) {
-          setHiddenManagedOwner(this);
-          if (resolvedNode.parentNode !== storage) {
-            moveNode(storage, resolvedNode, null);
+          if (DOMTree.parentOf(resolvedNode) !== storage) {
+            if (childComponent) {
+              moveKnownComponent(childComponent, storage, null);
+            } else {
+              DOMTree.place([resolvedNode], { type: "append", parent: storage });
+            }
           }
           return;
         }
-        if (resolvedNode.parentNode !== storage) {
-          setHiddenManagedOwner(this);
-          moveNode(storage, resolvedNode, null);
+        if (DOMTree.parentOf(resolvedNode) !== storage) {
+          if (childComponent) {
+            moveKnownComponent(childComponent, storage, null);
+          } else {
+            DOMTree.place([resolvedNode], { type: "append", parent: storage });
+          }
         }
       };
-      const cleanup = this.trackStructuralCleanup(() => {
+      const cleanup = this.trackStructuralCleanup((preservePosition = false) => {
+        const physicalOwnershipBoundary = DOMTree.parentOf(placeholder.node);
         active = false;
-        stateCleanup();
-        releaseChildCleanup();
-        setHiddenManagedOwner(null);
-        placeholder.remove();
-        storage.remove();
-        if (childComponent) {
-          const explicitOwners = childComponent.owner.getAll();
-          if (explicitOwners.some((owner) => owner !== this)) {
-            childComponent.element.parentNode?.removeChild(childComponent.element);
-            childComponent.refreshOrphanCheck();
-            return;
+        runCleanupSteps([
+          stateCleanup,
+          releaseChildCleanup,
+          () => placeholder.remove(),
+          () => DOMTree.remove(storage),
+          childComponent ? () => preservePosition ? releaseStatefulChildController(childComponent, controller) : releaseStatefulChildComponent(childComponent, this, controller, physicalOwnershipBoundary) : () => {
+            releaseStatefulNode(resolvedNode, controller);
+            if (!preservePosition) DOMTree.remove(resolvedNode);
           }
-          childComponent.remove();
-          return;
-        }
-        resolvedNode.parentNode?.removeChild(resolvedNode);
+        ]);
       });
+      controller.setCleanup(cleanup);
       if (childComponent) {
         releaseChildCleanup = childComponent.onCleanup(cleanup);
       }
-      const stateCleanup = state2.subscribe(this, (nextVisible) => {
-        if (nextVisible) {
-          placeVisible();
-          return;
+      try {
+        stateCleanup = state2.subscribe(this, (nextVisible) => {
+          if (nextVisible) {
+            placeVisible();
+            return;
+          }
+          placeHidden();
+        });
+        if (!active) {
+          stateCleanup();
+          return cleanup;
         }
-        placeHidden();
-      });
-      if (state2.value) {
-        placeVisible();
-      } else {
-        placeHidden();
+        if (state2.value) {
+          placeVisible();
+        } else {
+          placeHidden();
+        }
+      } catch (error) {
+        cleanupAndRethrow(error, cleanup);
       }
       return cleanup;
     }
-    attachStatefulChildren(state2, options) {
+    attachStatefulChildren(state2, options, controller, initialComponents) {
       const marker = Marker("kitsui:stateful-child").owner.add(this);
-      const storage = createStorageElement(this.element.ownerDocument);
       let active = true;
+      let rendering = false;
       let renderedComponents = [];
       let markerWasInserted = false;
+      let stateCleanup = noop8;
+      const getPhysicalOwnershipBoundary = () => DOMTree.parentOf(marker.node);
+      controller.onSuppressed = (component) => {
+        renderedComponents = renderedComponents.filter((rendered) => rendered !== component);
+      };
+      renderedComponents = claimStatefulChildComponentSelection(initialComponents, this, controller);
       const cleanupRenderedComponents = (nextComponents = /* @__PURE__ */ new Set()) => {
+        const cleanupSteps = [];
         for (const component of renderedComponents) {
           if (nextComponents.has(component)) {
             continue;
           }
-          component.remove();
+          cleanupSteps.push(() => releaseStatefulChildComponent(component, this, controller, getPhysicalOwnershipBoundary()));
         }
-        renderedComponents = renderedComponents.filter((component) => nextComponents.has(component));
+        renderedComponents = renderedComponents.filter((component) => nextComponents.has(component) && !component.disposed);
+        runCleanupSteps(cleanupSteps);
+      };
+      const forgetDisposedComponent = (component) => {
+        releaseStatefulChildController(component, controller);
+        renderedComponents = renderedComponents.filter((rendered) => rendered !== component);
+      };
+      const releaseUntrackedClaims = (components) => {
+        const trackedComponents = new Set(renderedComponents);
+        runCleanupSteps(components.filter((component) => !trackedComponents.has(component)).map((component) => () => releaseStatefulChildController(component, controller)));
       };
       const renderSelection = (selection) => {
-        if (!active) {
+        if (!active || rendering) {
           return;
         }
-        const nextComponents = this.resolveComponentSelection(selection);
-        const nextComponentSet = new Set(nextComponents);
-        const container = options.getContainer();
-        if (!isMoveParent(container)) {
-          if (markerWasInserted) {
-            this.remove();
-            return;
+        rendering = true;
+        try {
+          const nextComponents = claimStatefulChildComponentSelection(
+            this.resolveComponentSelection(selection),
+            this,
+            controller
+          );
+          if (!active || !controller.active) return;
+          const nextComponentSet = new Set(nextComponents);
+          try {
+            const container = options.getContainer();
+            if (!isDOMParent(container)) {
+              if (markerWasInserted) {
+                this.remove();
+                return;
+              }
+              cleanupRenderedComponents();
+              return;
+            }
+            if (markerWasInserted && DOMTree.parentOf(marker.node) !== container) {
+              this.remove();
+              return;
+            }
+            if (DOMTree.parentOf(marker.node) !== container) {
+              const reference = options.getReferenceNode();
+              DOMTree.place([marker.node], reference ? { type: "before", reference } : { type: "append", parent: container }, () => {
+                markerWasInserted = true;
+              });
+            }
+            cleanupRenderedComponents(nextComponentSet);
+            if (!active) {
+              return;
+            }
+            renderedComponents = [...nextComponents];
+            for (const component of nextComponents) {
+              if (!active) {
+                return;
+              }
+              if (component.disposed) {
+                forgetDisposedComponent(component);
+                continue;
+              }
+              moveKnownComponent(component, container, marker.node, (movedComponent) => {
+                movedComponent.refreshOrphanCheck();
+                movedComponent.dispatchMount();
+              });
+            }
+          } catch (error) {
+            cleanupAndRethrow(error, () => releaseUntrackedClaims(nextComponents));
           }
-          cleanupRenderedComponents();
-          return;
+        } finally {
+          rendering = false;
         }
-        if (markerWasInserted && marker.node.parentNode !== container) {
-          this.remove();
-          return;
-        }
-        if (marker.node.parentNode !== container) {
-          moveNode(container, marker.node, options.getReferenceNode());
-          markerWasInserted = true;
-        }
-        cleanupRenderedComponents(nextComponentSet);
-        for (const component of nextComponents) {
-          component.ensureActive();
-          component.onBeforeMove?.();
-          const moved = moveNode(container, component.element, marker.node);
-          if (moved) {
-            component.refreshOrphanCheck();
-            component.dispatchMount();
-          }
-        }
-        renderedComponents = nextComponents;
       };
-      const cleanup = this.trackStructuralCleanup(() => {
+      const cleanup = this.trackStructuralCleanup((preservePosition = false) => {
+        const cleanupComponents = [...renderedComponents];
+        renderedComponents = [];
         active = false;
-        stateCleanup();
-        cleanupRenderedComponents();
-        marker.remove();
-        storage.remove();
+        runCleanupSteps([
+          stateCleanup,
+          ...cleanupComponents.map((component) => () => preservePosition ? releaseStatefulChildController(component, controller) : releaseStatefulChildComponent(component, this, controller, getPhysicalOwnershipBoundary())),
+          () => marker.remove()
+        ]);
       });
-      const stateCleanup = state2.subscribe(this, (selection) => {
-        renderSelection(selection);
-      });
-      renderSelection(state2.value);
+      controller.setCleanup(cleanup);
+      try {
+        stateCleanup = state2.subscribe(this, renderSelection);
+        if (!active) {
+          stateCleanup();
+          return cleanup;
+        }
+        renderSelection(state2.value);
+      } catch (error) {
+        cleanupAndRethrow(error, cleanup);
+      }
       return cleanup;
     }
     resolveComponentSelection(selection) {
@@ -4088,7 +5590,7 @@ ${innerRules}
         return [];
       }
       if (selection instanceof _ComponentClass) {
-        return [selection];
+        return selection.disposed ? [] : [selection];
       }
       if (typeof selection !== "object" || !(Symbol.iterator in selection)) {
         throw new TypeError("Unsupported component selection.");
@@ -4101,6 +5603,9 @@ ${innerRules}
         }
         if (!(item instanceof _ComponentClass)) {
           throw new TypeError("Unsupported component selection item.");
+        }
+        if (item.disposed) {
+          continue;
         }
         if (seen.has(item)) {
           throw new Error("Component selections cannot contain the same component more than once.");
@@ -4149,7 +5654,7 @@ ${innerRules}
   };
 
   // src/component/extensions/breakdownExtension.ts
-  var noop10 = () => {
+  var noop9 = () => {
   };
   var createOwnedState = State;
   var componentClass = null;
@@ -4172,10 +5677,13 @@ ${innerRules}
     if (!(component instanceof getComponentClass())) {
       throw new TypeError("Component.Breakdown part builders must return a Component.");
     }
+    if (component.disposed) {
+      throw new Error("Component.Breakdown part builders must return an active Component.");
+    }
     if (component.owner.get() !== null) {
       throw new Error("Component.Breakdown part builders must return an ownerless Component.");
     }
-    if (component.element.parentNode !== null) {
+    if (DOMTree.parentOf(component.element) !== null) {
       throw new Error("Component.Breakdown part builders must return an unplaced Component.");
     }
     return component;
@@ -4206,26 +5714,28 @@ ${innerRules}
       let latestValue = state2.value;
       let rendering = false;
       let rerenderQueued = false;
-      let releaseOwnerCleanup = noop10;
-      let releaseStateSubscription = noop10;
+      let releaseOwnerCleanup = noop9;
+      let releaseStateSubscription = noop9;
       const removePart = (key, record = parts.get(key)) => {
         if (!record || parts.get(key) !== record) {
           return;
         }
         parts.delete(key);
-        record.state?.dispose();
-        record.component.remove();
+        runCleanupSteps([
+          () => record.state?.dispose(),
+          () => record.component.remove()
+        ]);
       };
       const cleanup = () => {
         if (!active) {
           return;
         }
         active = false;
-        releaseOwnerCleanup();
-        releaseStateSubscription();
-        for (const [key, record] of [...parts]) {
-          removePart(key, record);
-        }
+        runCleanupSteps([
+          releaseOwnerCleanup,
+          releaseStateSubscription,
+          ...[...parts].map(([key, record]) => () => removePart(key, record))
+        ]);
       };
       const render = () => {
         if (!active) {
@@ -4241,60 +5751,87 @@ ${innerRules}
             rerenderQueued = false;
             const currentValue = latestValue;
             const seenKeys = /* @__PURE__ */ new Set();
-            const Part = (key, valueOrBuild, maybeBuild) => {
-              if (!isBreakdownKey(key)) {
-                throw new TypeError("Component.Breakdown part keys must be strings, numbers, or symbols.");
-              }
-              const isStateless = maybeBuild === void 0;
-              const build = isStateless ? valueOrBuild : maybeBuild;
-              if (typeof build !== "function") {
-                throw new TypeError("Component.Breakdown parts require a builder function.");
-              }
-              seenKeys.add(key);
-              const existing = parts.get(key);
-              if (existing) {
-                if (!isStateless) {
-                  existing.state?.set(valueOrBuild);
+            const treeTransaction = beginDOMTreeTransaction();
+            let renderError;
+            let renderFailed = false;
+            try {
+              const Part = (key, valueOrBuild, maybeBuild) => {
+                if (!isBreakdownKey(key)) {
+                  throw new TypeError("Component.Breakdown part keys must be strings, numbers, or symbols.");
                 }
-                return existing.component;
-              }
-              let component;
-              let partState;
-              try {
-                if (isStateless) {
-                  component = validateCreatedPartComponent(build());
-                } else {
-                  partState = createOwnedState(owner, valueOrBuild);
-                  component = validateCreatedPartComponent(build(partState));
+                const isStateless = maybeBuild === void 0;
+                const build = isStateless ? valueOrBuild : maybeBuild;
+                if (typeof build !== "function") {
+                  throw new TypeError("Component.Breakdown parts require a builder function.");
                 }
-              } catch (error) {
-                partState?.dispose();
-                throw error;
-              }
-              component.owner.add(owner);
-              const record = {
-                component,
-                state: partState
+                seenKeys.add(key);
+                const existing = parts.get(key);
+                if (existing) {
+                  if (!isStateless) {
+                    existing.state?.set(valueOrBuild);
+                  }
+                  return existing.component;
+                }
+                let component;
+                let partState;
+                try {
+                  if (isStateless) {
+                    component = validateCreatedPartComponent(build());
+                  } else {
+                    partState = createOwnedState(owner, valueOrBuild);
+                    component = validateCreatedPartComponent(build(partState));
+                  }
+                } catch (error) {
+                  cleanupAndRethrow(error, () => partState?.dispose());
+                }
+                try {
+                  component.owner.add(owner);
+                  const record = {
+                    component,
+                    state: partState
+                  };
+                  parts.set(key, record);
+                  const releaseComponentCleanup = component.onCleanup(() => {
+                    if (parts.get(key) !== record) {
+                      return;
+                    }
+                    parts.delete(key);
+                    partState?.dispose();
+                  });
+                  partState?.onCleanup(() => {
+                    releaseComponentCleanup();
+                  });
+                } catch (error) {
+                  const pendingRecord = parts.get(key);
+                  if (pendingRecord?.component === component) {
+                    parts.delete(key);
+                  }
+                  cleanupAndRethrow(error, () => runCleanupSteps([
+                    () => partState?.dispose(),
+                    () => component.remove()
+                  ]));
+                }
+                return component;
               };
-              parts.set(key, record);
-              const releaseComponentCleanup = component.onCleanup(() => {
-                if (parts.get(key) !== record) {
-                  return;
-                }
-                parts.delete(key);
-                partState?.dispose();
-              });
-              partState?.onCleanup(() => {
-                releaseComponentCleanup();
-              });
-              return component;
-            };
-            breakdown(Part, currentValue);
-            for (const [key, record] of [...parts]) {
-              if (seenKeys.has(key)) {
-                continue;
+              breakdown(Part, currentValue);
+              runCleanupSteps([...parts].filter(([key]) => !seenKeys.has(key)).map(([key, record]) => () => removePart(key, record)));
+            } catch (error) {
+              renderFailed = true;
+              renderError = error;
+            }
+            try {
+              treeTransaction.commit();
+            } catch (commitError) {
+              if (!renderFailed) {
+                throw commitError;
               }
-              removePart(key, record);
+              try {
+                console.error("Breakdown transaction commit failed after render cleanup.", commitError);
+              } catch {
+              }
+            }
+            if (renderFailed) {
+              throw renderError;
             }
           } while (active && rerenderQueued);
         } finally {
@@ -4364,46 +5901,14 @@ ${innerRules}
   }
 
   // src/component/extensions/placeExtension.ts
-  var noop11 = () => {
+  var noop10 = () => {
   };
-  var PlacementLifecycleOwner = class extends Owner {
-    // Uses Owner's default lifecycle hooks.
-  };
-  var placementControllers = /* @__PURE__ */ new WeakMap();
-  var placementOwners = /* @__PURE__ */ new WeakMap();
   var placementLifecycleOwners = /* @__PURE__ */ new WeakMap();
-  var recursiveTreeErrorMessage2 = "Cannot move a node into itself or one of its descendants.";
   var componentClass2 = null;
   var patched3 = false;
   function getComponentClass2() {
     componentClass2 ?? (componentClass2 = Component.extend());
     return componentClass2;
-  }
-  function isMoveParent2(value) {
-    return value !== null && typeof value.insertBefore === "function";
-  }
-  function wouldCreateRecursiveTree2(parent, node) {
-    return node === parent || node.contains(parent);
-  }
-  function moveNode2(parent, node, beforeNode) {
-    if (wouldCreateRecursiveTree2(parent, node)) {
-      console.error(recursiveTreeErrorMessage2);
-      return false;
-    }
-    try {
-      if (typeof parent.moveBefore === "function" && parent.isConnected && node.isConnected) {
-        parent.moveBefore(node, beforeNode);
-        return true;
-      }
-      parent.insertBefore(node, beforeNode);
-      return true;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "HierarchyRequestError") {
-        console.error(recursiveTreeErrorMessage2);
-        return false;
-      }
-      throw error;
-    }
   }
   function createStorageElement2(documentRef) {
     return documentRef.createElement("kitsui-storage");
@@ -4416,41 +5921,21 @@ ${innerRules}
   function isComponent2(value) {
     return value instanceof getComponentClass2();
   }
-  function clearPlacement(component) {
-    placementControllers.get(component)?.();
+  function isPlaceState(value) {
+    return typeof value === "object" && value !== null && "value" in value && typeof value.subscribe === "function";
   }
   function getPlacementLifecycleOwner(component) {
     const existingOwner = placementLifecycleOwners.get(component);
     if (existingOwner) {
       return existingOwner;
     }
-    const owner = new PlacementLifecycleOwner();
+    const owner = Owner();
     placementLifecycleOwners.set(component, owner);
     component.onCleanup(() => {
       placementLifecycleOwners.delete(component);
       owner.dispose();
     });
     return owner;
-  }
-  function setPlacementController(component, cleanup) {
-    clearPlacement(component);
-    let active = true;
-    let releaseDisposeCleanup = noop11;
-    const trackedCleanup = () => {
-      if (!active) {
-        return;
-      }
-      active = false;
-      if (placementControllers.get(component) === trackedCleanup) {
-        placementControllers.delete(component);
-      }
-      releaseDisposeCleanup();
-      placementOwners.delete(component);
-      cleanup();
-    };
-    releaseDisposeCleanup = component.onCleanup(trackedCleanup);
-    placementControllers.set(component, trackedCleanup);
-    return trackedCleanup;
   }
   var PlaceClass = class {
     constructor(owner, marker) {
@@ -4514,7 +5999,7 @@ ${innerRules}
       ensureActive3(target);
       return target.element;
     }
-    if (isMoveParent2(target)) {
+    if (isDOMParent(target)) {
       return target;
     }
     throw new Error("Insert target was not found.");
@@ -4528,7 +6013,17 @@ ${innerRules}
           return component;
         }
       }
-      current = current.parentNode;
+      const parent = DOMTree.parentOf(current);
+      if (parent) {
+        current = parent;
+        continue;
+      }
+      const composedParent = DOMTree.composedParentOf(current);
+      if (composedParent) {
+        current = composedParent;
+        continue;
+      }
+      return null;
     }
     return null;
   }
@@ -4536,17 +6031,17 @@ ${innerRules}
     if (!component) {
       return null;
     }
-    return component.owner.get() ?? placementOwners.get(component) ?? null;
+    return component.owner.get() ?? placementAuthorityOwner(component.element);
   }
   function resolvePlacementOwner(target, component) {
     if (!target) {
       return null;
     }
     if (isComponent2(target)) {
-      return target === component ? resolveOwnPlacementOwner(component) : resolveOwnPlacementOwner(target);
+      return target === component ? resolveOwnPlacementOwner(component) : target;
     }
     if (target instanceof Marker) {
-      return target.owner.get() ?? resolveNearestWrappedAncestor(target.node) ?? null;
+      return target;
     }
     if (target instanceof PlaceClass) {
       return target.owner;
@@ -4563,6 +6058,16 @@ ${innerRules}
     }
     return resolvePlacementOwner(target, component);
   }
+  function resolveConditionalPlacementOwner(target, component) {
+    if (isComponent2(target)) {
+      return target === component ? component.owner.get() : target;
+    }
+    if (target instanceof Marker || target instanceof PlaceClass || !target) {
+      return resolvePlacementOwner(target, component);
+    }
+    const owner = resolveNearestWrappedAncestor(target);
+    return owner === component ? component.owner.get() : owner;
+  }
   function toPlaceSource(state2, place) {
     const placeState = State(place.owner, state2.value ? place : null);
     state2.subscribe(place.marker, (value) => {
@@ -4570,101 +6075,190 @@ ${innerRules}
     });
     return placeState;
   }
-  function placeComponent(component, parent, beforeNode) {
-    component["onBeforeMove"]?.();
-    clearPlacement(component);
-    const moved = moveNode2(parent, component.element, beforeNode);
-    if (!moved) {
-      return;
-    }
-    component["refreshOrphanCheck"]();
-    component["dispatchMount"]();
+  function movePlacedComponent(component, placement, onMoved) {
+    DOMTree.place([component.element], placement, () => onMoved(component));
   }
-  function placeMarker(marker, parent, beforeNode) {
-    const moved = moveNode2(parent, marker.node, beforeNode);
-    if (!moved) {
-      return;
-    }
+  function reconcileComponentPlacementOwner(component) {
+    component["refreshPlacementOwner"]();
+  }
+  function reconcileMarkerPlacementOwner(marker, owner) {
+    if (owner) marker.owner.add(owner, "placement");
+    else marker.owner.remove("placement");
+  }
+  function placeComponent(component, placement) {
+    if (!DOMTree.canPlace([component.element], placement)) return;
+    replacePlacementAuthority(component.element);
+    movePlacedComponent(component, placement, (movedComponent) => {
+      reconcileComponentPlacementOwner(movedComponent);
+      movedComponent["refreshOrphanCheck"]();
+      movedComponent["dispatchMount"]();
+    });
+    reconcileComponentPlacementOwner(component);
+    component["refreshOrphanCheck"]();
+  }
+  function placeMarker(marker, placement, resolveOwner) {
+    const authority = replacePlacementAuthority(marker.node, resolveOwner());
+    DOMTree.place([marker.node], placement, () => {
+      if (!authority.isCurrent()) return;
+      reconcileMarkerPlacementOwner(marker, resolveOwner());
+      marker["refreshOrphanCheck"]();
+      marker["dispatchMount"]();
+    });
+    if (marker.disposed) return;
+    reconcileMarkerPlacementOwner(marker, resolveOwner());
     marker["refreshOrphanCheck"]();
-    marker["dispatchMount"]();
+  }
+  function controlPlacement(component, placementOwner, placeState, places, authority) {
+    const storage = createStorageElement2(component.element.ownerDocument);
+    let releaseOwnerCleanup = noop10;
+    let releaseStateCleanup = noop10;
+    let controllerActive = true;
+    const cleanup = (preservePosition = false) => {
+      if (!controllerActive) return;
+      controllerActive = false;
+      runCleanupSteps([
+        releaseOwnerCleanup,
+        releaseStateCleanup,
+        () => {
+          if (!preservePosition && isDOMParent(storage)) {
+            movePlacedComponent(component, { type: "append", parent: storage }, () => {
+            });
+          }
+        },
+        ...[...places].map((place) => () => place.remove()),
+        () => DOMTree.remove(storage),
+        () => component["disposeIfUnmanagedAfterPlacementCleanup"]()
+      ]);
+    };
+    authority.setCleanup(cleanup);
+    const syncPlace = (place) => {
+      if (!authority.isCurrent()) return;
+      if (!place) {
+        movePlacedComponent(component, { type: "append", parent: storage }, () => {
+        });
+        component["refreshOrphanCheck"]();
+        return;
+      }
+      const parentNode = DOMTree.parentOf(place.marker.node);
+      if (!isDOMParent(parentNode)) {
+        console.error("Placement marker was removed. Treating placement as null.");
+        movePlacedComponent(component, { type: "append", parent: storage }, () => {
+        });
+        component["refreshOrphanCheck"]();
+        return;
+      }
+      if (DOMTree.contains(component.element, parentNode)) {
+        console.error(recursiveTreeErrorMessage);
+        return;
+      }
+      movePlacedComponent(component, { type: "before", reference: place.marker.node }, (movedComponent) => {
+        movedComponent["dispatchMount"]();
+      });
+      reconcileComponentPlacementOwner(component);
+      component["refreshOrphanCheck"]();
+    };
+    try {
+      releaseOwnerCleanup = placementOwner.onCleanup(() => authority.release(false));
+    } catch (error) {
+      cleanupAndRethrow(error, () => runCleanupSteps([
+        cleanup,
+        () => {
+          if (component.element.parentNode === storage) {
+            DOMTree.remove(component.element);
+          }
+        }
+      ]));
+    }
+    if (!controllerActive) {
+      return component;
+    }
+    try {
+      releaseStateCleanup = placeState.subscribe(component, syncPlace);
+      if (!controllerActive) {
+        releaseStateCleanup();
+        return component;
+      }
+      syncPlace(placeState.value);
+    } catch (error) {
+      cleanupAndRethrow(error, cleanup);
+    }
+    return component;
+  }
+  function controlConditionalPlacement(component, state2, placement, resolveOwner) {
+    ensureActive3(component);
+    const fallbackOwner = getPlacementLifecycleOwner(component);
+    const marker = Marker("kitsui:place").owner.add(fallbackOwner, "conditional-place");
+    const authority = replacePlacementAuthority(component.element, marker);
+    placeMarker(marker, placement, () => {
+      const owner = resolveOwner();
+      if (owner) {
+        marker.owner.remove("conditional-place");
+      }
+      return owner;
+    });
+    const place = new PlaceClass(marker, marker);
+    return controlPlacement(component, marker, toPlaceSource(state2, place), /* @__PURE__ */ new Set([place]), authority);
   }
   function placeExtension() {
     if (patched3) {
       return;
     }
     patched3 = true;
-    registerComponentOwnerResolver((component) => {
-      return placementOwners.get(component) ?? null;
-    });
     const ComponentClass2 = getComponentClass2();
     const MarkerClass2 = Marker.extend();
     const prototype = ComponentClass2.prototype;
     const markerPrototype = MarkerClass2.prototype;
     markerPrototype.appendTo = function appendTo(target) {
-      const resolvedOwner = resolvePlacementContainerOwner(target);
-      if (resolvedOwner) {
-        this.owner.add(resolvedOwner, "placement");
-      } else {
-        this.owner.remove("placement");
-      }
       const container = resolvePlacementContainer(target);
-      placeMarker(this, container, null);
+      placeMarker(this, { type: "append", parent: container }, () => resolvePlacementContainerOwner(target));
       return this;
     };
     markerPrototype.prependTo = function prependTo(target) {
-      const resolvedOwner = resolvePlacementContainerOwner(target);
-      if (resolvedOwner) {
-        this.owner.add(resolvedOwner, "placement");
-      } else {
-        this.owner.remove("placement");
-      }
       const container = resolvePlacementContainer(target);
-      placeMarker(this, container, container.firstChild);
+      placeMarker(this, { type: "prepend", parent: container }, () => resolvePlacementContainerOwner(target));
       return this;
     };
     markerPrototype.insertTo = function insertTo(where, target) {
-      const resolvedOwner = resolvePlacementOwner(target);
-      if (resolvedOwner) {
-        this.owner.add(resolvedOwner, "placement");
-      } else {
-        this.owner.remove("placement");
-      }
       const referenceNode = resolvePlacementReferenceNode(target);
       if (!referenceNode) {
         return this;
       }
-      const parentNode = referenceNode.parentNode;
-      if (!isMoveParent2(parentNode)) {
+      const parentNode = DOMTree.parentOf(referenceNode);
+      if (!isDOMParent(parentNode)) {
         throw new Error("Insert target was not found.");
       }
-      placeMarker(this, parentNode, where === "before" ? referenceNode : referenceNode.nextSibling);
+      placeMarker(this, { type: where, reference: referenceNode }, () => resolvePlacementOwner(target));
       return this;
     };
     prototype.appendTo = function appendTo(target) {
       ensureActive3(this);
       const container = resolvePlacementContainer(target);
-      placeComponent(this, container, null);
+      placeComponent(this, { type: "append", parent: container });
       return this;
     };
     prototype.appendToWhen = function appendToWhen(state2, target) {
-      const targetOwner = resolvePlacementContainerOwner(target, this) ?? getPlacementLifecycleOwner(this);
-      return this.place(targetOwner, (Place) => {
-        const place = Place().appendTo(target);
-        return toPlaceSource(state2, place);
-      });
+      const container = resolvePlacementContainer(target);
+      return controlConditionalPlacement(
+        this,
+        state2,
+        { type: "append", parent: container },
+        () => resolveConditionalPlacementOwner(target, this)
+      );
     };
     prototype.prependTo = function prependTo(target) {
       ensureActive3(this);
       const container = resolvePlacementContainer(target);
-      placeComponent(this, container, container.firstChild);
+      placeComponent(this, { type: "prepend", parent: container });
       return this;
     };
     prototype.prependToWhen = function prependToWhen(state2, target) {
-      const targetOwner = resolvePlacementContainerOwner(target, this) ?? getPlacementLifecycleOwner(this);
-      return this.place(targetOwner, (Place) => {
-        const place = Place().prependTo(target);
-        return toPlaceSource(state2, place);
-      });
+      const container = resolvePlacementContainer(target);
+      return controlConditionalPlacement(
+        this,
+        state2,
+        { type: "prepend", parent: container },
+        () => resolveConditionalPlacementOwner(target, this)
+      );
     };
     prototype.insertTo = function insertTo(where, target) {
       ensureActive3(this);
@@ -4672,84 +6266,64 @@ ${innerRules}
       if (!referenceNode) {
         return this;
       }
-      const parentNode = referenceNode.parentNode;
-      if (!isMoveParent2(parentNode)) {
+      const parentNode = DOMTree.parentOf(referenceNode);
+      if (!isDOMParent(parentNode)) {
         throw new Error("Insert target was not found.");
       }
-      placeComponent(this, parentNode, where === "before" ? referenceNode : referenceNode.nextSibling);
+      placeComponent(this, { type: where, reference: referenceNode });
       return this;
     };
     prototype.insertToWhen = function insertToWhen(state2, where, target) {
-      const targetOwner = resolvePlacementOwner(target, this) ?? getPlacementLifecycleOwner(this);
-      return this.place(targetOwner, (Place) => {
-        const place = Place().insertTo(where, target);
-        return toPlaceSource(state2, place);
-      });
+      const referenceNode = resolvePlacementReferenceNode(target);
+      if (!referenceNode) {
+        const fallbackOwner = getPlacementLifecycleOwner(this);
+        return this.place(fallbackOwner, (Place) => toPlaceSource(state2, Place()));
+      }
+      const parentNode = DOMTree.parentOf(referenceNode);
+      if (!isDOMParent(parentNode)) {
+        throw new Error("Insert target was not found.");
+      }
+      return controlConditionalPlacement(
+        this,
+        state2,
+        { type: where, reference: referenceNode },
+        () => resolveConditionalPlacementOwner(target, this)
+      );
     };
     prototype.place = function place(owner, placer) {
       ensureActive3(this);
       const placementOwner = owner === this ? getPlacementLifecycleOwner(this) : owner;
-      placementOwners.set(this, placementOwner);
-      const documentRef = this.element.ownerDocument;
-      const storage = createStorageElement2(documentRef);
+      const authority = replacePlacementAuthority(this.element, placementOwner);
       const places = /* @__PURE__ */ new Set();
       const Place = function Place2() {
-        const place2 = new PlaceClass(placementOwner, Marker("kitsui:place").owner.add(placementOwner, "place"));
+        const marker = Marker("kitsui:place");
+        try {
+          marker.owner.add(placementOwner, "place");
+        } catch (error) {
+          cleanupAndRethrow(error, () => marker.remove());
+        }
+        const place2 = new PlaceClass(placementOwner, marker);
         places.add(place2);
         return place2;
       };
       Place.prototype = PlaceClass.prototype;
-      const placeState = placer(Place);
-      let releaseOwnerCleanup = noop11;
-      let releaseStateCleanup = noop11;
-      let blockedByRecursivePlacement = false;
-      const cleanup = setPlacementController(this, () => {
-        releaseOwnerCleanup();
-        releaseStateCleanup();
-        this["onBeforeMove"] = null;
-        if (isMoveParent2(storage)) {
-          moveNode2(storage, this.element, null);
+      const cleanupPlaces = () => runCleanupSteps([...places].map((place2) => () => place2.remove()));
+      let placeState;
+      try {
+        const placerResult = placer(Place);
+        if (!isPlaceState(placerResult)) {
+          throw new TypeError("Component.place placer must return a State<Place | null>.");
         }
-        for (const place2 of places) {
-          place2.remove();
-        }
-        storage.remove();
-        this["disposeIfUnmanagedAfterPlacementCleanup"]();
-      });
-      this["onBeforeMove"] = () => clearPlacement(this);
-      const syncPlace = (place2) => {
-        if (!place2) {
-          if (blockedByRecursivePlacement) {
-            return;
-          }
-          moveNode2(storage, this.element, null);
-          return;
-        }
-        const parentNode = place2.marker.node.parentNode;
-        if (!isMoveParent2(parentNode)) {
-          console.error("Placement marker was removed. Treating placement as null.");
-          moveNode2(storage, this.element, null);
-          return;
-        }
-        if (wouldCreateRecursiveTree2(parentNode, this.element)) {
-          console.error(recursiveTreeErrorMessage2);
-          blockedByRecursivePlacement = true;
-          return;
-        }
-        blockedByRecursivePlacement = false;
-        const moved = moveNode2(parentNode, this.element, place2.marker.node);
-        if (!moved) {
-          return;
-        }
-        this["refreshOrphanCheck"]();
-        this["dispatchMount"]();
-      };
-      releaseStateCleanup = placeState.subscribe(this, (place2) => {
-        syncPlace(place2);
-      });
-      syncPlace(placeState.value);
-      releaseOwnerCleanup = placementOwner.onCleanup(cleanup);
-      return this;
+        placeState = placerResult;
+        ensureActive3(this);
+      } catch (error) {
+        cleanupAndRethrow(error, () => runCleanupSteps([cleanupPlaces, () => authority.release(true)]));
+      }
+      try {
+        return controlPlacement(this, placementOwner, placeState, places, authority);
+      } catch (error) {
+        cleanupAndRethrow(error, cleanupPlaces);
+      }
     };
   }
 
@@ -4838,6 +6412,9 @@ ${innerRules}
   }
 
   // src/state/extensions/mappingExtension.ts
+  var AsyncPending = Object.freeze({
+    type: "pending"
+  });
   var truthyStates = /* @__PURE__ */ new WeakMap();
   var falsyStates = /* @__PURE__ */ new WeakMap();
   var createOwnedState2 = State;
@@ -4865,6 +6442,83 @@ ${innerRules}
       mapped.set(mapValue(source.value, source.value));
     };
     return mapped;
+  }
+  function createAsyncMappingState(source, owner, mapper) {
+    const graphOptions = {
+      graph: source.getGraph()
+    };
+    const asyncState = createOwnedState2(owner, AsyncPending, graphOptions);
+    const lastSettled = createOwnedState2(asyncState, null, graphOptions);
+    Object.defineProperty(asyncState, "lastSettled", {
+      configurable: false,
+      enumerable: false,
+      value: lastSettled,
+      writable: false
+    });
+    let generation = 0;
+    let activeController = null;
+    const evaluate = (value) => {
+      if (asyncState.disposed) {
+        return;
+      }
+      const currentGeneration = ++generation;
+      activeController?.abort();
+      const operationController = new AbortController();
+      activeController = operationController;
+      const signal = AbortSignal.any([
+        asyncState.signal,
+        operationController.signal
+      ]);
+      asyncState.set(AsyncPending);
+      const acceptsSettlement = () => currentGeneration === generation && activeController === operationController && !signal.aborted && !asyncState.disposed;
+      void Promise.resolve().then(() => {
+        if (!acceptsSettlement()) {
+          return void 0;
+        }
+        return mapper(value, signal);
+      }).then((mappedValue) => {
+        if (!acceptsSettlement()) {
+          return;
+        }
+        activeController = null;
+        const settled = {
+          type: "resolved",
+          value: mappedValue
+        };
+        asyncState.set(settled);
+        if (!lastSettled.disposed) {
+          lastSettled.set(settled);
+        }
+      }, (error) => {
+        if (!acceptsSettlement()) {
+          return;
+        }
+        activeController = null;
+        const settled = {
+          error,
+          type: "rejected"
+        };
+        asyncState.set(settled);
+        if (!lastSettled.disposed) {
+          lastSettled.set(settled);
+        }
+      });
+    };
+    const releaseSourceSubscription = source.subscribe(asyncState, (value) => {
+      evaluate(value);
+    });
+    const releaseSourceCleanup = source.onCleanup(() => {
+      asyncState.dispose();
+    });
+    asyncState.onCleanup(() => {
+      generation++;
+      activeController?.abort();
+      activeController = null;
+      releaseSourceCleanup();
+      releaseSourceSubscription();
+    });
+    evaluate(source.value);
+    return asyncState;
   }
   function createComparisonState(source, compareValue, compare) {
     const comparator = compareValue instanceof State ? compareValue : null;
@@ -4894,6 +6548,9 @@ ${innerRules}
         return createMappedState(this, ownerOrMapValue, maybeMapValueOrOptions, maybeOptions);
       }
       return createMappedState(this, null, ownerOrMapValue, maybeMapValueOrOptions);
+    };
+    prototype.mapAsync = function mapAsync(owner, mapper) {
+      return createAsyncMappingState(this, owner, mapper);
     };
     Object.defineProperty(prototype, "truthy", {
       configurable: true,
@@ -4935,8 +6592,114 @@ ${innerRules}
     };
   }
 
+  // src/state/extensions/temporalExtension.ts
+  var createOwnerlessState2 = State;
+  var patched6 = false;
+  function validateDuration(milliseconds) {
+    if (typeof milliseconds !== "number" || !Number.isFinite(milliseconds) || milliseconds < 0) {
+      throw new RangeError("State duration must be a finite non-negative number.");
+    }
+  }
+  function createDebouncedState(source, milliseconds) {
+    validateDuration(milliseconds);
+    const debounced = createOwnerlessState2(source.value, {
+      graph: source.getGraph()
+    });
+    let latestValue = source.value;
+    let timeoutHandle = null;
+    const releaseImplicitOwnerPropagation = debounced._registerImplicitOwnerDependent?.(source) ?? (() => void 0);
+    const releaseSourceSubscription = source.subscribe(debounced, (value) => {
+      if (milliseconds === 0) {
+        debounced.set(value);
+        return;
+      }
+      latestValue = value;
+      timeoutHandle?.cancel();
+      timeoutHandle = scheduleTimeout(() => {
+        timeoutHandle = null;
+        if (!debounced.disposed) {
+          debounced.set(latestValue);
+        }
+      }, milliseconds);
+    });
+    const releaseSourceCleanup = source.onCleanup(() => {
+      debounced.dispose();
+    });
+    debounced.onCleanup(() => {
+      timeoutHandle?.cancel();
+      timeoutHandle = null;
+      latestValue = debounced.value;
+      releaseImplicitOwnerPropagation();
+      releaseSourceCleanup();
+      releaseSourceSubscription();
+    });
+    return debounced;
+  }
+  function createThrottledState(source, milliseconds) {
+    validateDuration(milliseconds);
+    const throttled = createOwnerlessState2(source.value, {
+      graph: source.getGraph()
+    });
+    let timeoutHandle = null;
+    let trailingValue = source.value;
+    let hasTrailingValue = false;
+    const beginInterval = () => {
+      timeoutHandle = scheduleTimeout(() => {
+        timeoutHandle = null;
+        if (throttled.disposed || !hasTrailingValue) {
+          return;
+        }
+        const nextValue = trailingValue;
+        hasTrailingValue = false;
+        throttled.set(nextValue);
+        beginInterval();
+      }, milliseconds);
+    };
+    const releaseImplicitOwnerPropagation = throttled._registerImplicitOwnerDependent?.(source) ?? (() => void 0);
+    const releaseSourceSubscription = source.subscribe(throttled, (value) => {
+      if (milliseconds === 0) {
+        throttled.set(value);
+        return;
+      }
+      if (timeoutHandle === null) {
+        throttled.set(value);
+        beginInterval();
+        return;
+      }
+      trailingValue = value;
+      hasTrailingValue = true;
+    });
+    const releaseSourceCleanup = source.onCleanup(() => {
+      throttled.dispose();
+    });
+    throttled.onCleanup(() => {
+      timeoutHandle?.cancel();
+      timeoutHandle = null;
+      hasTrailingValue = false;
+      trailingValue = throttled.value;
+      releaseImplicitOwnerPropagation();
+      releaseSourceCleanup();
+      releaseSourceSubscription();
+    });
+    return throttled;
+  }
+  function temporalExtension() {
+    if (patched6) {
+      return;
+    }
+    patched6 = true;
+    const StateClass2 = State.extend();
+    const prototype = StateClass2.prototype;
+    prototype.debounce = function debounce(milliseconds) {
+      return createDebouncedState(this, milliseconds);
+    };
+    prototype.throttle = function throttle(milliseconds) {
+      return createThrottledState(this, milliseconds);
+    };
+  }
+
   // src/component/Draggable.ts
-  var noop12 = () => {
+  var noop11 = () => {
   };
   var dragEventOptions = {
     bubbles: true,
@@ -4977,7 +6740,7 @@ ${innerRules}
     return value instanceof Component.extend();
   }
   function isUnplacedOwnerlessComponent(component) {
-    return component.owner.get() === null && component.element.parentNode === null;
+    return component.owner.get() === null && DOMTree.parentOf(component.element) === null;
   }
   function eachElement(root, callback) {
     callback(root);
@@ -5028,14 +6791,14 @@ ${innerRules}
     return component;
   }
   function defaultPointerInput(component, receiver) {
-    let releaseTracking = noop12;
+    let releaseTracking = noop11;
     const releaseCurrentTracking = () => {
       releaseTracking();
-      releaseTracking = noop12;
+      releaseTracking = noop11;
     };
     const releaseCurrentTrackingWithoutCapture = () => {
       releaseTracking(false);
-      releaseTracking = noop12;
+      releaseTracking = noop11;
     };
     const handlePointerDown = (event) => {
       if (event.button !== 0) {
@@ -5153,8 +6916,8 @@ ${innerRules}
       __publicField(this, "position");
       __publicField(this, "preview");
       __publicField(this, "activePreview", null);
-      __publicField(this, "cleanupDisposeEvent", noop12);
-      __publicField(this, "cleanupInput", noop12);
+      __publicField(this, "cleanupDisposeEvent", noop11);
+      __publicField(this, "cleanupInput", noop11);
       __publicField(this, "disposedValue", false);
       __publicField(this, "startContext", null);
       this.phase = createOwnedState3(component, "idle");
@@ -5168,7 +6931,7 @@ ${innerRules}
         active.set(phase === "dragging");
         pending.set(phase === "pending");
       });
-      this.cleanupInput = (options.input ?? defaultPointerInput)(component, this.createReceiver()) ?? noop12;
+      this.cleanupInput = (options.input ?? defaultPointerInput)(component, this.createReceiver()) ?? noop11;
       const handleDispose = () => {
         this.cancelWith({});
       };
@@ -5189,14 +6952,14 @@ ${innerRules}
       }
       this.disposedValue = true;
       this.cleanupDisposeEvent();
-      this.cleanupDisposeEvent = noop12;
+      this.cleanupDisposeEvent = noop11;
       if (!this.phase.disposed && !this.position.disposed) {
         this.cancelWith({});
       } else {
         this.releaseActiveDrag();
       }
       this.cleanupInput();
-      this.cleanupInput = noop12;
+      this.cleanupInput = noop11;
     }
     end() {
       this.endWith({});
@@ -5397,7 +7160,12 @@ ${innerRules}
       preview.element.style.top = "0px";
       preview.element.style.width = `${context.rect.width}px`;
       preview.element.style.zIndex = "2147483647";
-      this.component.element.ownerDocument.body.append(preview.element);
+      DOMTree.physical.place(
+        [preview.element],
+        { type: "append", parent: this.component.element.ownerDocument.body },
+        () => {
+        }
+      );
       this.activePreview = {
         component: preview,
         localPosition: context.localPosition
@@ -5438,7 +7206,7 @@ ${innerRules}
   };
 
   // src/component/DropTarget.ts
-  var noop13 = () => {
+  var noop12 = () => {
   };
   var targetsByDocument = /* @__PURE__ */ new WeakMap();
   var documentCleanups = /* @__PURE__ */ new WeakMap();
@@ -5548,7 +7316,7 @@ ${innerRules}
           return controller;
         }
       }
-      current = current.parentNode;
+      current = DOMTree.physical.parentOf(current);
     }
     return null;
   }
@@ -5622,7 +7390,7 @@ ${innerRules}
       __publicField(this, "accepting");
       __publicField(this, "draggable");
       __publicField(this, "hovering");
-      __publicField(this, "cleanupRegistration", noop13);
+      __publicField(this, "cleanupRegistration", noop12);
       __publicField(this, "disposedValue", false);
       this.accepting = State(component, false);
       this.draggable = State(component, null);
@@ -5657,7 +7425,7 @@ ${innerRules}
       }
       this.disposedValue = true;
       this.cleanupRegistration();
-      this.cleanupRegistration = noop13;
+      this.cleanupRegistration = noop12;
     }
     setAccepting(accepting) {
       if (this.accepting.disposed) {
@@ -5699,7 +7467,7 @@ ${innerRules}
   };
 
   // src/component/Sortable.ts
-  var noop14 = () => {
+  var noop13 = () => {
   };
   var createOwnedState4 = State;
   var sortablesByDocument = /* @__PURE__ */ new WeakMap();
@@ -5715,7 +7483,7 @@ ${innerRules}
     return value instanceof Component.extend();
   }
   function isUnplacedOwnerlessComponent2(component) {
-    return component.owner.get() === null && component.element.parentNode === null;
+    return component.owner.get() === null && DOMTree.parentOf(component.element) === null;
   }
   function validateRenderedComponent(component, message) {
     if (!isComponent4(component)) {
@@ -5748,7 +7516,7 @@ ${innerRules}
           return controller;
         }
       }
-      current = current.parentNode;
+      current = DOMTree.physical.parentOf(current);
     }
     return null;
   }
@@ -5807,11 +7575,11 @@ ${innerRules}
       __publicField(this, "phase");
       __publicField(this, "preview");
       __publicField(this, "recordsByKey", /* @__PURE__ */ new Map());
-      __publicField(this, "cleanupDisposeEvent", noop14);
+      __publicField(this, "cleanupDisposeEvent", noop13);
       __publicField(this, "currentOrder", []);
       __publicField(this, "disposedValue", false);
       __publicField(this, "previewOrder", []);
-      __publicField(this, "releaseSourceSubscription", noop14);
+      __publicField(this, "releaseSourceSubscription", noop13);
       const initial = isStateLike2(input) ? input.value : input;
       this.items = createOwnedState4(component, []);
       this.preview = createOwnedState4(component, []);
@@ -5871,7 +7639,7 @@ ${innerRules}
         this.cancelDragSession(session);
       }
       this.cleanupDisposeEvent();
-      this.cleanupDisposeEvent = noop14;
+      this.cleanupDisposeEvent = noop13;
       this.releaseSourceSubscription();
       sortableRegistryFor(this.component.element.ownerDocument).delete(this);
       for (const record of [...this.recordsByKey.values()]) {
@@ -5900,7 +7668,7 @@ ${innerRules}
       this.preview.set(valuesFromRecords(this.recordsByKey, this.previewOrder));
       this.placePlaceholder(this, session.targetIndex);
       this.handleDragMove(detail);
-      record.component.element.remove();
+      DOMTree.physical.remove(record.component.element);
     }
     handleDragMove(detail) {
       const session = activeSessionForSortable(this);
@@ -6016,7 +7784,9 @@ ${innerRules}
       }
     }
     suspendPlaceholder(session) {
-      session.placeholder?.element.remove();
+      if (session.placeholder) {
+        DOMTree.physical.remove(session.placeholder.element);
+      }
     }
     commitSession(session) {
       if (session.target !== this) {
@@ -6177,7 +7947,12 @@ ${innerRules}
       }
       const referenceRecord = target.recordAtInsertionIndex(session, index);
       const referenceNode = referenceRecord?.component.element ?? null;
-      target.component.element.insertBefore(placeholder.element, referenceNode);
+      DOMTree.physical.place(
+        [placeholder.element],
+        referenceNode ? { type: "before", reference: referenceNode } : { type: "append", parent: target.component.element },
+        () => {
+        }
+      );
     }
     baseOrderForSession(session) {
       const order = [...this.currentOrder];
@@ -6373,6 +8148,7 @@ ${innerRules}
   placeExtension();
   groupExtension();
   mappingExtension();
+  temporalExtension();
   return __toCommonJS(index_exports);
 })();
 

@@ -414,10 +414,12 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
      * The underlying DOM element managed by this component.
      */
     readonly element: ELEMENT;
+    private readonly domTreeRegistration;
     private readonly structuralCleanups;
     private mounted;
-    private onBeforeMove;
     private orphanCheckId;
+    private retainedResolverOwner;
+    private releaseRetainedResolverOwner;
     constructor(tagNameOrElement: string | HTMLElement);
     /**
      * Lazily creates and memoizes a ClassManipulator for adding/removing CSS classes.
@@ -540,11 +542,17 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
     private ensureActive;
     private clearOrphanCheck;
     private refreshOrphanCheck;
+    private refreshPlacementOwner;
+    private bindRetainedResolverOwner;
     private disposeIfUnmanagedAfterPlacementCleanup;
     private isManaged;
     private ownerResolves;
     private resolveNode;
     private expandChildren;
+    private expandConditionalChildren;
+    private processPreparedChildren;
+    private prepareComponentChildren;
+    private disposePreparedChild;
     private trackStructuralCleanup;
     private releaseStructuralCleanups;
     private attachConditionalNode;
@@ -856,90 +864,6 @@ type PlaceConstructor = {
 
 export type PlacerFunction = (Place: PlaceConstructor) => State.Readonly<Place | null>;
 
-export interface ComponentExtensions {
-        /**
-         * Appends this component to the end of the target component or DOM parent.
-         * Sets this component's owner to the target component, or the nearest wrapped ancestor for raw DOM parents.
-         * @param target The target component or DOM parent.
-         * @returns This component for chaining.
-         * @throws If this or the target component is disposed.
-         */
-        appendTo(target: PlacementContainer): this;
-        /**
-         * Conditionally appends this component based on a boolean state.
-         * Automatically removes the component when the state becomes false.
-         * @param state The boolean state that controls visibility.
-         * @param target The target component or DOM parent.
-         * @returns This component for chaining.
-         */
-        appendToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
-        /**
-         * Prepends this component to the start of the target component or DOM parent.
-         * Sets this component's owner to the target component, or the nearest wrapped ancestor for raw DOM parents.
-         * @param target The target component or DOM parent.
-         * @returns This component for chaining.
-         * @throws If this or the target component is disposed.
-         */
-        prependTo(target: PlacementContainer): this;
-        /**
-         * Conditionally prepends this component based on a boolean state.
-         * Automatically removes the component when the state becomes false.
-         * @param state The boolean state that controls visibility.
-         * @param target The target component or DOM parent.
-         * @returns This component for chaining.
-         */
-        prependToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
-        /**
-         * Inserts this component before or after a reference node, component, or place.
-         * Sets the owner based on the target's owner if applicable.
-         * @param where \"before\" or \"after\" the target.
-         * @param target The reference node, component, place, or null.
-         * @returns This component for chaining.
-         * @throws If this component is disposed or target's parent is not a valid insert location.
-         */
-        insertTo(where: InsertWhere, target: PlacementTarget): this;
-        /**
-         * Conditionally inserts this component based on a boolean state.
-         * Automatically removes the component when the state becomes false.
-         * @param state The boolean state that controls visibility.
-         * @param where \"before\" or \"after\" the target.
-         * @param target The reference node, component, place, or null.
-         * @returns This component for chaining.
-         */
-        insertToWhen(state: State.Readonly<boolean>, where: InsertWhere, target: PlacementTarget): this;
-        /**
-         * Manually controls component placement with a reactive placer function.
-         * The placer receives a Place constructor and returns State<Place | null> that controls where the component is inserted.
-         * @param owner The owner who manages the placement lifecycle.
-         * @param placer A function that produces State<Place | null> determining the component's location.
-         * @returns This component for chaining.
-         * @throws If this component is disposed.
-         */
-        place(owner: Owner, placer: PlacerFunction): this;
-    }
-
-export interface MarkerExtensions {
-        /**
-         * Appends this marker to the end of the target component or DOM parent.
-         * @param target The target component or DOM parent.
-         * @returns This marker for chaining.
-         */
-        appendTo(target: PlacementContainer): this;
-        /**
-         * Prepends this marker to the start of the target component or DOM parent.
-         * @param target The target component or DOM parent.
-         * @returns This marker for chaining.
-         */
-        prependTo(target: PlacementContainer): this;
-        /**
-         * Inserts this marker relative to another target.
-         * @param where Whether to insert before or after the target.
-         * @param target The component, marker, place, or DOM node to insert around.
-         * @returns This marker for chaining.
-         */
-        insertTo(where: InsertWhere, target: PlacementTarget): this;
-    }
-
 type PlacementContainer = Component | PlacementParent;
 
 class PlaceClass {
@@ -997,6 +921,14 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
      * @param claim Owner or boolean state contributing the claim.
      */
     protected registerClaim(id: string | null, claim: Claimant): void;
+    /** Returns the claimant registered in a keyed slot, if any. */
+    protected getRegisteredClaimant(id: string): Claimant | null;
+    /** Returns whether the claimant has an anonymous registration. */
+    protected hasAnonymousClaim(claimant: Claimant): boolean;
+    /** Returns every registered claimant in keyed-then-anonymous order. */
+    protected getRegisteredClaimants(): Claimant[];
+    /** Runs after the registered claim set changes. */
+    protected onClaimsChanged(_disposedClaimantRemoved?: boolean): void;
     /**
      * Deregisters claims by claimant, by keyed id, or by the `(id, claimant)` composite used during registration.
      * When `id` is null, the composite form removes all anonymous claims currently registered for that claimant.
@@ -1106,6 +1038,8 @@ type MarkerConstructor = {
 class MarkerClass extends Owner {
     /** The underlying DOM comment node that this marker wraps. */
     readonly node: Comment;
+    private readonly domTreeRegistration;
+    private readonly useHooks;
     private mounted;
     private orphanCheckId;
     /**
@@ -1130,10 +1064,13 @@ class MarkerClass extends Owner {
     protected afterDispose(): void;
     /** @internal */
     private dispatchMount;
+    private settleUseHook;
     private ensureActive;
     private clearOrphanCheck;
     /** @internal */
     refreshOrphanCheck(): void;
+    /** @internal Updates Kitsui-derived placement ownership from the current virtual tree. */
+    private refreshPlacementOwner;
     private isManaged;
 }
 
@@ -1148,9 +1085,6 @@ export class OwnerManipulator<HOST extends Owner & {
     remove(): void;
 }> extends GenericClaimManipulator<HOST> {
     private readonly refreshManagement;
-    private readonly anonymousEntries;
-    private readonly entriesByOwner;
-    private readonly keyedEntries;
     constructor(owner: HOST, refreshManagement: () => void);
     /**
      * Adds an explicit owner claim to the host.
@@ -1159,6 +1093,7 @@ export class OwnerManipulator<HOST extends Owner & {
      * @param owner Explicit owner to register.
      * @param id Optional keyed claim slot.
      * @returns The owning host for fluent chaining.
+     * @throws If the host attempts to own itself.
      */
     add(owner: Owner, id?: string | null): HOST;
     /**
@@ -1192,10 +1127,7 @@ export class OwnerManipulator<HOST extends Owner & {
      * @returns All explicit owners currently managing the host.
      */
     getAll(): Owner[];
-    private clearEntries;
-    private trackEntry;
-    private untrackEntry;
-    private unregisterEntry;
+    protected onClaimsChanged(disposedOwnerRemoved?: boolean): void;
 }
 
 export type StyleValue = string | number;
@@ -1635,6 +1567,34 @@ type Nullish = null;
 
 export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
 
+export const AsyncPending: Readonly<{
+    readonly type: "pending";
+}>;
+
+export type AsyncPending = typeof AsyncPending;
+
+export interface AsyncResolved<T> {
+    readonly type: "resolved";
+    readonly value: T;
+}
+
+export interface AsyncRejected<E> {
+    readonly type: "rejected";
+    readonly error: E;
+}
+
+export type AsyncResult<T, E> = AsyncPending | AsyncResolved<T> | AsyncRejected<E>;
+
+export type AsyncSettled<T, E> = AsyncResolved<T> | AsyncRejected<E>;
+
+export interface AsyncState<T, E> extends State.Readonly<AsyncResult<T, E>> {
+    /**
+     * The latest accepted resolved or rejected result, or `null` before the first settlement.
+     * Starting a newer evaluation does not clear this State.
+     */
+    readonly lastSettled: State.Readonly<AsyncSettled<T, E> | null>;
+}
+
 interface RecomputableState<T> extends State.Readonly<T> {
     /**
      * Recomputes the current value of the state by reapplying all mapping and transformation functions.
@@ -1642,59 +1602,6 @@ interface RecomputableState<T> extends State.Readonly<T> {
      */
     recompute(): void;
 }
-
-export interface StateExtensions<T> {
-        /**
-         * Creates a new ownerless state containing the mapped value of this state.
-         * The mapped state subscribes to changes in the source and automatically updates.
-         * The mapped state must gain an owner before the next tick.
-         * @param mapValue Function that transforms each value from the source state.
-         * @param options Optional state configuration for the mapped state.
-         * @returns A new ownerless state with the transformed values.
-         */
-        map<TMapped>(mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
-        /**
-         * Creates a new state containing the mapped value of this state.
-         * The mapped state subscribes to changes in the source and automatically updates.
-         * @param owner The owner responsible for managing the mapped state's lifecycle.
-         * @param mapValue Function that transforms each value from the source state.
-         * @param options Optional state configuration for the mapped state.
-         * @returns A new state with the transformed values.
-         */
-        map<TMapped>(owner: Owner, mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
-        /**
-         * A boolean state indicating whether the current value is truthy.
-         * The value is memoized per state instance for efficiency.
-         */
-        readonly truthy: RecomputableState<boolean>;
-        /**
-         * A boolean state indicating whether the current value is falsy.
-         * The value is memoized per state instance for efficiency.
-         */
-        readonly falsy: RecomputableState<boolean>;
-        /**
-         * Returns a state that falls back to a computed value when this state is null.
-         * Otherwise, returns the original value.
-         * @param getValue Function invoked to compute the fallback value when needed.
-         * @param options Optional state configuration for the derived state.
-         * @returns A new state with the original or fallback value.
-         */
-        or<TFallback>(getValue: () => TFallback, options?: StateOptions<Exclude<T, Nullish> | TFallback>): RecomputableState<Exclude<T, Nullish> | TFallback>;
-        /**
-         * Returns a boolean state that is true when this state equals the provided value or state.
-         * Uses strict equality (===) for comparison.
-         * @param compareValue The value or state to compare against the current state value.
-         * @returns A new state that is true when the values are strictly equal, false otherwise.
-         */
-        equals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
-        /**
-         * Returns a boolean state that is true when this state does not equal the provided value or state.
-         * Uses strict inequality (!==) for comparison.
-         * @param compareValue The value or state to compare against the current state value.
-         * @returns A new state that is true when the values are not strictly equal, false otherwise.
-         */
-        notEquals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
-    }
 
 export type CleanupFunction = () => void;
 
@@ -1734,6 +1641,7 @@ interface StateStaticExtensions {
 }
 
 export namespace State {
+    /** Public readonly-looking state surface for derived or internally-owned state values. */
     interface Readonly<T> extends StateExtensions<T> {
         readonly disposed: boolean;
         readonly value: T;
@@ -1760,9 +1668,7 @@ interface StateGraph {
 interface QueuedStateListenerRecord<T> {
     active: boolean;
     forcePendingEmit: boolean;
-    graph: StateGraph;
     listener: StateListener<T>;
-    pending: boolean;
     pendingOriginalValue: T;
     pendingFinalValue: T;
     equals: StateEqualityFunction<T>;
@@ -1773,6 +1679,7 @@ type StateInternalOptions<T> = StateOptions<T> & {
 };
 
 abstract class OwnerClass {
+    private abortController;
     private readonly cleanupFunctions;
     private disposingValue;
     private disposedValue;
@@ -1789,6 +1696,12 @@ abstract class OwnerClass {
      * @readonly
      */
     get disposing(): boolean;
+    /**
+     * An abort signal for work scoped to this owner's lifetime.
+     * The signal is created lazily, keeps a stable identity, and aborts synchronously when the owner is disposed.
+     * @readonly
+     */
+    get signal(): AbortSignal;
     /**
      * Disposes this owner and invokes all registered cleanup functions.
      * Once disposed, an owner cannot be used again.
@@ -1843,6 +1756,7 @@ class StateClass<T> extends Owner {
     private readonly immediateListeners;
     /** @deprecated Use getQueuedListeners(this) */
     private readonly queuedListeners;
+    private notificationQueue;
     constructor(owner: Owner | null, initialValue: T, options?: StateInternalOptions<T>);
     /**
      * Returns the owner that manages this state's lifecycle, or null if ownerless.
@@ -1999,69 +1913,6 @@ type BreakdownConstructor = {
     <TValue>(owner: Owner, state: State.Readonly<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
 };
 
-export interface ComponentExtensions {
-        /**
-         * Breaks a source state into keyed reusable parts owned by this component.
-         *
-         * The breakdown handler receives this component first, then a keyed Part registrar and the current source value.
-         * Parts are cleaned up when this component is removed.
-         *
-         * @param state The source state to break down on each update.
-         * @param breakdown Called immediately and on each source update to register keyed parts.
-         * @returns This component for chaining.
-         */
-        breakdown<TValue>(this: Component, state: State.Readonly<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
-    }
-
-export interface ComponentStaticExtensions {
-        /**
-         * Breaks a source state into keyed reusable parts owned by the provided owner.
-         *
-         * Each unique key creates a component once. Later breakdown passes reuse that component,
-         * update its per-part state, and let callers reposition it through normal placement APIs.
-         *
-         * Parts omitted from a later pass are removed and their part state is disposed.
-         *
-         * @param owner The owner that explicitly owns every created part.
-         * @param state The source state to break down on each update.
-         * @param breakdown Called immediately and on each source update to register keyed parts.
-         * @returns A cleanup function that stops the breakdown and disposes its parts.
-         */
-        Breakdown: BreakdownConstructor;
-    }
-
-export interface ComponentExtensions {
-        /**
-         * Composes this component with a builder function.
-         *
-         * The builder receives this component as its `this` context and must return the same component instance.
-         * Builders that have already been applied are skipped.
-         *
-         * @param builder The component builder function to apply.
-         * @param params Parameters forwarded to the builder.
-         * @returns This component narrowed with the builder's result type.
-         */
-        and<PARAMS extends unknown[], RESULT extends Component>(builder: ComponentBuilderFunction<PARAMS, RESULT>, ...params: PARAMS): this & RESULT;
-        /**
-         * Checks whether this component has been marked with a builder identity.
-         *
-         * @param builder The builder identity to check.
-         * @returns True when the builder has been applied to this component.
-         */
-        is<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): this is this & RESULT;
-        /**
-         * Returns this component narrowed to the builder result type when the builder has been applied.
-         *
-         * @param builder The builder identity to check.
-         * @returns This component when marked with the builder, otherwise undefined.
-         */
-        as<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): (this & RESULT) | undefined;
-    }
-
-export interface ComponentExtensions {
-        and<T, TItem extends Component = Component, K extends PropertyKey = number>(builder: typeof Sortable, input: readonly T[] | State.Readonly<readonly T[]>, options: SortableOptions<T, TItem, K>): this & Component & SortableExtensions<T, TItem, K>;
-    }
-
 type GroupedStateObject = Record<string, State.Readonly<any>>;
 
 type GroupedValue<T extends GroupedStateObject> = {
@@ -2179,6 +2030,97 @@ type GroupConstructor = {
     new <T extends GroupedStateObject, U>(states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
 };
 
+export interface ComponentExtensions {
+        /**
+         * Renders keyed Components from a State and owns them with this Component.
+         *
+         * The initial render runs synchronously. Later State updates are queued, batched, and coalesced through State.subscribe.
+         * Virtual parent, order, containment, connectivity, and lifecycle intent update synchronously during the handler.
+         * Only physical DOM mutation and Mount wait until the handler returns.
+         * Async handlers, await, and Part or structural calls after the handler returns are unsupported.
+         *
+         * Kitsui structural APIs update the scoped virtual tree during the pass. Raw DOM operations and non-structural manipulators remain physical and immediate.
+         * Part only builds, registers, or reuses a Component; it never places that Component.
+         * Part builders must return an ownerless, unplaced Component root.
+         * The returned root must still be active.
+         * Explicitly place every returned part during each pass to establish its destination and order.
+         *
+         * If the handler throws, recorded structural intents still commit, omission reconciliation is skipped, and there is no rollback.
+         * After a successful pass, omitted parts are disposed and stale or disposed relative references are ignored.
+         * Placement does not transfer Breakdown lifetime.
+         *
+         * Mount fires once after the transaction closes and materializes. It means managed-parent placement, not document connectivity.
+         * Mount listeners run outside the Breakdown transaction, so their structural changes are separate and immediate.
+         * Nested Breakdown calls join the outer transaction.
+         *
+         * @param state The State that supplies each render value.
+         * @param breakdown The render callback.
+         * @returns This Component for chaining.
+         * @throws If a Part builder returns a non-Component, disposed, owned, or already placed root.
+         */
+        breakdown<TValue>(this: Component, state: State.Readonly<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
+    }
+
+export interface ComponentStaticExtensions {
+        /**
+         * Renders keyed Components from a State and owns them with the supplied owner.
+         *
+         * The initial render runs synchronously. Later State updates are queued, batched, and coalesced through State.subscribe.
+         * Virtual parent, order, containment, connectivity, and lifecycle intent update synchronously during the handler.
+         * Only physical DOM mutation and Mount wait until the handler returns.
+         * Async handlers, await, and Part or structural calls after the handler returns are unsupported.
+         *
+         * Kitsui structural APIs update the scoped virtual tree during the pass. Raw DOM operations and non-structural manipulators remain physical and immediate.
+         * Part only builds, registers, or reuses a Component; it never places that Component.
+         * Part builders must return an ownerless, unplaced Component root.
+         * The returned root must still be active.
+         * Explicitly place every returned part during each pass to establish its destination and order.
+         *
+         * If the handler throws, recorded structural intents still commit, omission reconciliation is skipped, and there is no rollback.
+         * After a successful pass, omitted parts are disposed and stale or disposed relative references are ignored.
+         * Placement does not transfer Breakdown lifetime.
+         *
+         * Mount fires once after the transaction closes and materializes. It means managed-parent placement, not document connectivity.
+         * Mount listeners run outside the Breakdown transaction, so their structural changes are separate and immediate.
+         * Nested Breakdown calls join the outer transaction.
+         *
+         * @param owner The Owner responsible for every keyed part.
+         * @param state The State that supplies each render value.
+         * @param breakdown The render callback.
+         * @returns A cleanup function that stops future renders and disposes all parts.
+         * @throws If a Part builder returns a non-Component, disposed, owned, or already placed root.
+         */
+        Breakdown: BreakdownConstructor;
+    }
+
+export interface ComponentExtensions {
+        /**
+         * Composes this component with a builder function.
+         *
+         * The builder receives this component as its `this` context and must return the same component instance.
+         * Builders that have already been applied are skipped.
+         *
+         * @param builder The component builder function to apply.
+         * @param params Parameters forwarded to the builder.
+         * @returns This component narrowed with the builder's result type.
+         */
+        and<PARAMS extends unknown[], RESULT extends Component>(builder: ComponentBuilderFunction<PARAMS, RESULT>, ...params: PARAMS): this & RESULT;
+        /**
+         * Checks whether this component has been marked with a builder identity.
+         *
+         * @param builder The builder identity to check.
+         * @returns True when the builder has been applied to this component.
+         */
+        is<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): this is this & RESULT;
+        /**
+         * Returns this component narrowed to the builder result type when the builder has been applied.
+         *
+         * @param builder The builder identity to check.
+         * @returns This component when marked with the builder, otherwise undefined.
+         */
+        as<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): (this & RESULT) | undefined;
+    }
+
 export interface StateStaticExtensions {
         /**
          * Creates a grouped state that mirrors the current values of multiple states.
@@ -2188,5 +2130,177 @@ export interface StateStaticExtensions {
          * @group Group
          */
         Group: GroupConstructor;
+    }
+
+export interface StateExtensions<T> {
+        /**
+         * Creates an ownerless readonly state that waits until source changes stop for the requested duration.
+         * The initial value is available synchronously and later source changes are processed after queued State batching.
+         * @param milliseconds The quiet duration in milliseconds. Must be finite and non-negative.
+         * @returns A debounced readonly derivation that follows the normal implicit-owner lifecycle.
+         */
+        debounce(milliseconds: number): State.Readonly<T>;
+        /**
+         * Creates an ownerless readonly state that emits the first queued change immediately and then at most once per interval.
+         * The latest value received during an interval is emitted at its trailing boundary.
+         * @param milliseconds The throttle interval in milliseconds. Must be finite and non-negative.
+         * @returns A leading-and-trailing readonly derivation that follows the normal implicit-owner lifecycle.
+         */
+        throttle(milliseconds: number): State.Readonly<T>;
+    }
+
+export interface ComponentExtensions {
+        /**
+         * Physically appends this component to the end of the target component or DOM parent.
+         * If placement crosses a ShadowRoot boundary, the nearest wrapped host owns this component's lifetime.
+         * Ordinary light-DOM placement does not add an explicit owner.
+         * This authoring call synchronously replaces any prior Kitsui placement authority for this component.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         * @throws If this or the target component is disposed.
+         */
+        appendTo(target: PlacementContainer): this;
+        /**
+         * Conditionally appends this component based on a boolean state.
+         * Automatically removes the component when the state becomes false.
+         * @param state The boolean state that controls visibility.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         */
+        appendToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
+        /**
+         * Physically prepends this component to the start of the target component or DOM parent.
+         * If placement crosses a ShadowRoot boundary, the nearest wrapped host owns this component's lifetime.
+         * Ordinary light-DOM placement does not add an explicit owner.
+         * This authoring call synchronously replaces any prior Kitsui placement authority for this component.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         * @throws If this or the target component is disposed.
+         */
+        prependTo(target: PlacementContainer): this;
+        /**
+         * Conditionally prepends this component based on a boolean state.
+         * Automatically removes the component when the state becomes false.
+         * @param state The boolean state that controls visibility.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         */
+        prependToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
+        /**
+         * Physically inserts this component before or after the target node, component, or place.
+         * If placement crosses a ShadowRoot boundary, the nearest wrapped host owns this component's lifetime.
+         * Ordinary light-DOM placement does not add an explicit owner.
+         * This authoring call synchronously replaces any prior Kitsui placement authority for this component.
+         * @param where \"before\" or \"after\" the target.
+         * @param target The reference node, component, place, or null.
+         * @returns This component for chaining.
+         * @throws If this component is disposed or target's parent is not a valid insert location.
+         */
+        insertTo(where: InsertWhere, target: PlacementTarget): this;
+        /**
+         * Conditionally inserts this component based on a boolean state.
+         * Automatically removes the component when the state becomes false.
+         * @param state The boolean state that controls visibility.
+         * @param where \"before\" or \"after\" the target.
+         * @param target The reference node, component, place, or null.
+         * @returns This component for chaining.
+         */
+        insertToWhen(state: State.Readonly<boolean>, where: InsertWhere, target: PlacementTarget): this;
+        /**
+         * Manually controls component placement with a reactive placer function.
+         * The placer receives a Place constructor and returns State<Place | null> that controls where the component is inserted.
+         * @param owner The owner who manages the placement lifecycle.
+         * @param placer A function that produces State<Place | null> determining the component's location.
+         * @returns This component for chaining.
+         * @throws If this component is disposed or the placer does not return a State<Place | null>.
+         */
+        place(owner: Owner, placer: PlacerFunction): this;
+    }
+
+export interface MarkerExtensions {
+        /**
+         * Appends this marker to the end of the target component or DOM parent.
+         * @param target The target component or DOM parent.
+         * @returns This marker for chaining.
+         */
+        appendTo(target: PlacementContainer): this;
+        /**
+         * Prepends this marker to the start of the target component or DOM parent.
+         * @param target The target component or DOM parent.
+         * @returns This marker for chaining.
+         */
+        prependTo(target: PlacementContainer): this;
+        /**
+         * Inserts this marker relative to another target.
+         * @param where Whether to insert before or after the target.
+         * @param target The component, marker, place, or DOM node to insert around.
+         * @returns This marker for chaining.
+         */
+        insertTo(where: InsertWhere, target: PlacementTarget): this;
+    }
+
+export interface ComponentExtensions {
+        and<T, TItem extends Component = Component, K extends PropertyKey = number>(builder: typeof Sortable, input: readonly T[] | State.Readonly<readonly T[]>, options: SortableOptions<T, TItem, K>): this & Component & SortableExtensions<T, TItem, K>;
+    }
+
+export interface StateExtensions<T> {
+        /**
+         * Creates a new ownerless state containing the mapped value of this state.
+         * The mapped state subscribes to changes in the source and automatically updates.
+         * The mapped state must gain an owner before the next tick.
+         * @param mapValue Function that transforms each value from the source state.
+         * @param options Optional state configuration for the mapped state.
+         * @returns A new ownerless state with the transformed values.
+         */
+        map<TMapped>(mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
+        /**
+         * Creates a new state containing the mapped value of this state.
+         * The mapped state subscribes to changes in the source and automatically updates.
+         * @param owner The owner responsible for managing the mapped state's lifecycle.
+         * @param mapValue Function that transforms each value from the source state.
+         * @param options Optional state configuration for the mapped state.
+         * @returns A new state with the transformed values.
+         */
+        map<TMapped>(owner: Owner, mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
+        /**
+         * Maps the latest coalesced source value asynchronously.
+         * Superseded operations are aborted and ignored, and the returned State is disposed with the explicit owner.
+         * @param owner The owner responsible for the asynchronous mapping lifetime.
+         * @param mapper Maps a source value with a signal that aborts on supersession or disposal.
+         * @returns A readonly asynchronous State that begins with the canonical pending value.
+         */
+        mapAsync<U, E = unknown>(owner: Owner, mapper: (value: T, signal: AbortSignal) => Promise<U>): AsyncState<U, E>;
+        /**
+         * A boolean state indicating whether the current value is truthy.
+         * The value is memoized per state instance for efficiency.
+         */
+        readonly truthy: RecomputableState<boolean>;
+        /**
+         * A boolean state indicating whether the current value is falsy.
+         * The value is memoized per state instance for efficiency.
+         */
+        readonly falsy: RecomputableState<boolean>;
+        /**
+         * Returns a state that falls back to a computed value when this state is null.
+         * Otherwise, returns the original value.
+         * @param getValue Function invoked to compute the fallback value when needed.
+         * @param options Optional state configuration for the derived state.
+         * @returns A new state with the original or fallback value.
+         */
+        or<TFallback>(getValue: () => TFallback, options?: StateOptions<Exclude<T, Nullish> | TFallback>): RecomputableState<Exclude<T, Nullish> | TFallback>;
+        /**
+         * Returns a boolean state that is true when this state equals the provided value or state.
+         * Uses strict equality (===) for comparison.
+         * @param compareValue The value or state to compare against the current state value.
+         * @returns A new state that is true when the values are strictly equal, false otherwise.
+         */
+        equals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
+        /**
+         * Returns a boolean state that is true when this state does not equal the provided value or state.
+         * Uses strict inequality (!==) for comparison.
+         * @param compareValue The value or state to compare against the current state value.
+         * @returns A new state that is true when the values are not strictly equal, false otherwise.
+         */
+        notEquals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
     }
 }
