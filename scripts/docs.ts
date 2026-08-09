@@ -206,7 +206,7 @@ export async function buildDocsSite (options: BuildDocsOptions = {}): Promise<vo
 		let html: string;
 
 		try {
-			html = await renderPage(toDocumentPath(outputRelativePath), kitsuiTypedoc, extraLinks, !!options.reloadPort);
+			html = await renderPage(toDocumentPath(outputRelativePath), kitsuiTypedoc, extraLinks, true);
 		} catch (error) {
 			throw new Error(`Docs page '${page}' failed to render.`, {
 				cause: error,

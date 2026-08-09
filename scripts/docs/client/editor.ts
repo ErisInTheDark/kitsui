@@ -2,7 +2,7 @@
 // Only runs on pages that contain the editor container element.
 
 import { registerPageCleanup } from "./lifecycle";
-import { rewritePreviewModuleImports } from "./preview";
+import { resolvePreviewKitsuiModuleUrl, rewritePreviewModuleImports } from "./preview";
 
 const MONACO_BASE = "./vs";
 const MONACO_EDITOR_STYLESHEET = `${MONACO_BASE}/editor/editor.main.css`;
@@ -569,7 +569,7 @@ function runPreview (
 			return;
 		}
 
-		const kitsuiModuleUrl = new URL("kitsui.esm.js", import.meta.url).toString();
+		const kitsuiModuleUrl = resolvePreviewKitsuiModuleUrl(import.meta.url);
 		const js = rewritePreviewModuleImports(jsFile.text, kitsuiModuleUrl);
 
 		try {

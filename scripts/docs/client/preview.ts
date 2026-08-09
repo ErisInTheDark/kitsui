@@ -1,3 +1,10 @@
+export function resolvePreviewKitsuiModuleUrl (importerUrl: string): string {
+	const importer = new URL(importerUrl);
+	const kitsuiModule = new URL("kitsui.esm.js", importer);
+	kitsuiModule.search = importer.search;
+	return kitsuiModule.toString();
+}
+
 function isWhitespace (character: string | undefined): boolean {
 	return character !== undefined && /\s/u.test(character);
 }

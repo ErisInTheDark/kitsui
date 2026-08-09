@@ -200,6 +200,8 @@ describe("build:docs pipeline", () => {
 		expect(clientJs.includes('from "./kitsui.esm.js"'), "Playground preview bundle should not rewrite kitsui imports to a blob-relative path").toBe(false);
 		expect(clientJs.includes('new URL("kitsui.esm.js"'), "Playground preview bundle should resolve kitsui against the docs runtime URL").toBe(true);
 		expect(clientJs.includes('createElement("iframe")'), "Playground preview should render inside an isolated iframe so each run gets a fresh runtime and stylesheet scope").toBe(true);
+		expect(indexHtml, "Production docs should version the Kitsui runtime asset").toMatch(/src="kitsui\.esm\.js\?cacheBust=\d+"/u);
+		expect(indexHtml, "Production docs should version the client runtime asset").toMatch(/src="client\.js\?cacheBust=\d+"/u);
 		expect(indexHtml.includes('name="viewport"'), "Missing viewport meta tag").toBe(true);
 		expect(indexHtml.includes('<title>kitsui</title>'), "Missing title tag").toBe(true);
 		expect(indexHtml.includes("Overview"), "Missing Overview section").toBe(true);

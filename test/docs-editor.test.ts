@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { rewritePreviewModuleImports } from "../scripts/docs/client/preview";
+import { resolvePreviewKitsuiModuleUrl, rewritePreviewModuleImports } from "../scripts/docs/client/preview";
 
 const KITSUI_MODULE_URL = "https://kitsui.local/docs/kitsui.esm.js";
 
@@ -140,6 +140,11 @@ afterEach(() => {
 });
 
 describe("docs editor preview import rewriting", () => {
+	it("preserves the docs build cache key in the preview Kitsui URL", () => {
+		expect(resolvePreviewKitsuiModuleUrl("https://kitsui.local/docs/client.js?cacheBust=abc123"))
+			.toBe("https://kitsui.local/docs/kitsui.esm.js?cacheBust=abc123");
+	});
+
 	it("rewrites static and side-effect kitsui imports to the absolute docs URL", () => {
 		const source = [
 			'import { Component } from "kitsui";',
