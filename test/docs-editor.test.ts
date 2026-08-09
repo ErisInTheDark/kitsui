@@ -236,6 +236,8 @@ describe("docs editor preview import rewriting", () => {
 		expect(monaco.editor.createModel).toHaveBeenCalledTimes(1);
 		await flushPromises();
 		const firstPreviewFrame = document.querySelector<HTMLIFrameElement>("iframe");
+		const previewSource = firstPreviewFrame!.srcdoc;
+		expect(previewSource).toMatch(/window\.addEventListener\("pagehide"[\s\S]*const mod = await import/u);
 		const previewCleanup = vi.fn();
 		firstPreviewFrame!.contentWindow!.addEventListener("pagehide", previewCleanup, { once: true });
 		await expect(initEditor()).resolves.toBeUndefined();

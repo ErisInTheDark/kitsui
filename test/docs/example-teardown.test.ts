@@ -119,12 +119,12 @@ describe("docs example teardown", () => {
 				.find((button) => button.textContent?.startsWith("Restock ("));
 			expect(restock, "three catches should make the Restock upgrade affordable").not.toBeUndefined();
 			restock!.click();
-			await settleExampleLifecycle();
 			const fishAfterRestock = root.element.querySelectorAll<HTMLButtonElement>('button[aria-label^="Catch "]');
 			expect(
 				fishAfterRestock,
-				"buying Restock should render a second fish",
+				"buying Restock should synchronously author a second fish",
 			).toHaveLength(2);
+			await settleExampleLifecycle();
 			await new Promise<void>((resolve) => setTimeout(resolve, 50));
 			await settleExampleLifecycle();
 			expect(

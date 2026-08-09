@@ -1424,7 +1424,7 @@ function FishSchool (
 	}
 
 	render(pondFishAdded.value)
-	pondFishAdded.subscribe(layer, render)
+	pondFishAdded.subscribeImmediate(layer, render)
 	return layer
 }
 

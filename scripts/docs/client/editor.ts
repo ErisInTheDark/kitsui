@@ -237,23 +237,33 @@ function mountPreviewFrame (runtime: EditorRuntime, js: string): void {
 			pre.textContent = String(error);
 			root.appendChild(pre);
 		};
+		let active = true;
+		let mountedResult = null;
+		window.addEventListener("pagehide", () => {
+			active = false;
+			if (mountedResult && typeof mountedResult.remove === "function") {
+				mountedResult.remove();
+			}
+		}, { once: true });
 
 		try {
 			const mod = await import(${JSON.stringify(moduleUrl)});
-			const render = mod.default;
-			if (typeof render === "function") {
-				const result = render();
-				if (result && typeof result === "object" && "element" in result && result.element instanceof HTMLElement) {
-					root.appendChild(result.element);
-					if (typeof result.remove === "function") {
-						window.addEventListener("pagehide", () => result.remove(), { once: true });
+			if (active) {
+				const render = mod.default;
+				if (typeof render === "function") {
+					const result = render();
+					if (result && typeof result === "object" && "element" in result && result.element instanceof HTMLElement) {
+						mountedResult = result;
+						root.appendChild(result.element);
+					} else if (result instanceof HTMLElement) {
+						root.appendChild(result);
 					}
-				} else if (result instanceof HTMLElement) {
-					root.appendChild(result);
 				}
 			}
 		} catch (error) {
-			showError(error);
+			if (active) {
+				showError(error);
+			}
 		}
 	</script>
 </body>
