@@ -1600,7 +1600,7 @@ var __kitsui_factory__ = (() => {
     onPlaced(placementNode.node);
   }
   function isRegistrationDisposed(registration) {
-    return !registration.active || registration.owner.deref()?.disposed !== false;
+    return !registration.active || registration.owner.deref()?.disposed === true;
   }
   function isDisposedNode(node) {
     const registration = registrations.get(node);
