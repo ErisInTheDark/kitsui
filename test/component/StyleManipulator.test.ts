@@ -249,7 +249,7 @@ describe("StyleManipulator", () => {
 
 		expect(() => {
 			component.style.set({ color: "rebeccapurple" });
-		}).toThrow("Disposed components cannot be modified.");
+		}).toThrow("Modifications are not allowed after owner disposal.");
 	});
 
 	it("enforces the public StyleAttributeDefinition typing contract", () => {

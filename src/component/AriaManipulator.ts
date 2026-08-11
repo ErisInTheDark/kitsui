@@ -1,7 +1,6 @@
-import { State, type CleanupFunction } from "../state/State";
+import { Owner, State, type CleanupFunction } from "../state/State";
 import type { AttributeManipulator, AttributeValueInput } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
-import type { Component } from "./Component";
 
 /**
  * Valid ARIA role values.
@@ -123,7 +122,7 @@ const noop: CleanupFunction = () => {
 };
 
 let generatedAriaReferenceId = 0;
-const mappedReferenceStatesByOwner = new WeakMap<Component, WeakMap<State.Readonly<AriaReferenceSelection>, State<string | null>>>();
+const mappedReferenceStatesByOwner = new WeakMap<Owner, WeakMap<State.Readonly<AriaReferenceSelection>, State<string | null>>>();
 
 function isValueSource<TValue> (value: unknown): value is State.Readonly<TValue> {
 	return value instanceof State;
@@ -211,9 +210,9 @@ function resolveReferenceSelection (value: AriaReferenceSelection): string | nul
  * (which may be reactive States). Handles resolving and normalizing element references to ID tokens.
  * @internal
  */
-function toReferenceValueInput (owner: Component, value: AriaReferenceInput): AttributeValueInput {
+function toReferenceValueInput (owner: Owner, value: AriaReferenceInput): AttributeValueInput {
 	if (owner.disposed) {
-		throw new Error("Disposed components cannot be modified.");
+		throw new Error("Modifications are not allowed after owner disposal.");
 	}
 
 	if (!(value instanceof State)) {
@@ -251,7 +250,7 @@ function toReferenceValueInput (owner: Component, value: AriaReferenceInput): At
  * Methods return the owning Component to enable fluent chaining.
  * Internally uses an AttributeManipulator to apply changes.
  */
-export class AriaManipulator<OWNER extends Component> {
+export class AriaManipulator<OWNER extends Owner> {
 	constructor (
 		private readonly owner: OWNER,
 		private readonly attribute: AttributeManipulator<OWNER>,

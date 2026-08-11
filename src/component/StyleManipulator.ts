@@ -1,5 +1,4 @@
-import { State, type CleanupFunction } from "../state/State";
-import type { Component } from "./Component";
+import { Owner, State, type CleanupFunction } from "../state/State";
 import type { StyleValue } from "./Style";
 import { expandVariableAccessShorthand, toCssPropertyName } from "./styleValue";
 
@@ -88,11 +87,11 @@ function serializeStyleValue (value: StyleAttributeValue): string | null {
  * still defines that property. When a state-driven definition stops defining a
  * property, the previous active concern for that property is restored if one exists.
  */
-export class StyleManipulator<OWNER extends Component> {
+export class StyleManipulator<OWNER extends Owner> {
 	private readonly layers: LayerRecord[] = [];
 
 	/**
-	 * @param owner The component owner managing this manipulator's lifecycle.
+	 * @param owner The owner managing this manipulator's lifecycle.
 	 * @param element The element whose inline styles are controlled.
 	 */
 	constructor (
@@ -105,7 +104,7 @@ export class StyleManipulator<OWNER extends Component> {
 	 * Each property can also be driven by its own subscribable value.
 	 * Nullish property values remove that property from the inline style attribute.
 	 * @param value Direct or reactive inline style definition.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	set (value: StyleAttributeInput): OWNER {
 		this.ensureActive();
@@ -234,7 +233,7 @@ export class StyleManipulator<OWNER extends Component> {
 
 	private ensureActive (): void {
 		if (this.owner.disposed) {
-			throw new Error("Disposed components cannot be modified.");
+			throw new Error("Modifications are not allowed after owner disposal.");
 		}
 	}
 }

@@ -1,5 +1,4 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
-import type { Component } from "./Component";
 import { Style } from "./Style";
 
 /**
@@ -99,7 +98,7 @@ function resolveStyleSelection (selection: StyleSelection): Map<string, Style.Cl
  * // Multiple styles or iterables
  * component.class.add([primaryStyle, accentStyle]);
  */
-export class ClassManipulator<OWNER extends Component> {
+export class ClassManipulator<OWNER extends Owner> {
 	private readonly styleDeterminers = new Map<string, DeterminerRecord>();
 
 	/**
@@ -117,7 +116,7 @@ export class ClassManipulator<OWNER extends Component> {
 	 *
 	 * @param classes Static or reactive styles to add. Accepts individual styles,
 	 * falsy values for conditional logic, or reactive style sources (States).
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 * @throws If the owner is disposed.
 	 *
 	 * @example
@@ -147,7 +146,7 @@ export class ClassManipulator<OWNER extends Component> {
 	 *
 	 * @param classes Static or reactive styles to remove. Accepts individual styles,
 	 * falsy values for conditional logic, or reactive style sources (States).
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 * @throws If the owner is disposed.
 	 */
 	remove (...classes: StyleInput[]): OWNER {
@@ -168,7 +167,7 @@ export class ClassManipulator<OWNER extends Component> {
 	 * @param state A boolean State controlling the visibility of the classes.
 	 * @param classes Styles to bind to the state. Accepts individual styles, falsy
 	 * values, or reactive style sources.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 * @throws If the owner is disposed.
 	 *
 	 * @example
@@ -214,7 +213,7 @@ export class ClassManipulator<OWNER extends Component> {
 	 *
 	 * @param owner The external owner managing the lifetime of these class additions.
 	 * @param classes Static or reactive styles to add.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 * @throws If this manipulator's owner is disposed.
 	 *
 	 * @example
@@ -253,7 +252,7 @@ export class ClassManipulator<OWNER extends Component> {
 
 	private ensureActive (): void {
 		if (this.owner.disposed) {
-			throw new Error("Disposed components cannot be modified.");
+			throw new Error("Modifications are not allowed after owner disposal.");
 		}
 	}
 

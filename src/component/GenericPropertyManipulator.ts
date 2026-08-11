@@ -1,5 +1,4 @@
-import { State, type CleanupFunction } from "../state/State";
-import type { Component } from "./Component";
+import { Owner, State, type CleanupFunction } from "../state/State";
 
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
@@ -11,14 +10,14 @@ const noop: CleanupFunction = () => {
 };
 
 /**
- * Manages a string-backed component property with support for direct values and reactive sources.
- * Extend this when a component property follows the same direct-or-reactive `set()` and visibility-aware `bind()` flow as text content.
+ * Manages a string-backed property with support for direct values and reactive sources.
+ * Extend this when a property follows the same direct-or-reactive `set()` and visibility-aware `bind()` flow as text content.
  * Subclasses provide the property-specific source conversion and serialization rules.
- * @typeParam OWNER The owning component type returned for fluent chaining.
+ * @typeParam OWNER The owner type returned for fluent chaining.
  * @typeParam INPUT The public input type accepted by `set()` and `bind()`.
  * @typeParam SELECTION The concrete values emitted by the reactive source before serialization.
  */
-export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT, SELECTION> {
+export abstract class GenericPropertyManipulator<OWNER extends Owner, INPUT, SELECTION> {
 	private determiner: DeterminerRecord | null = null;
 
 	constructor (
@@ -28,7 +27,7 @@ export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT,
 	/**
 	 * Sets the property from a direct value or subscribable source.
 	 * @param value Direct or reactive property input.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	set (value: INPUT): OWNER {
 		this.ensureActive();
@@ -49,7 +48,7 @@ export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT,
 	 * Applies the property while visible and clears it while hidden.
 	 * @param visible Boolean source controlling whether the property is shown.
 	 * @param value Direct or reactive property input.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	bind (visible: State.Readonly<boolean>, value: INPUT): OWNER {
 		this.ensureActive();
@@ -124,7 +123,7 @@ export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT,
 
 	private ensureActive (): void {
 		if (this.owner.disposed) {
-			throw new Error("Disposed components cannot be modified.");
+			throw new Error("Modifications are not allowed after owner disposal.");
 		}
 	}
 }

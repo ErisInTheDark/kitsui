@@ -1,6 +1,5 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
 import type { Falsy } from "./ClassManipulator";
-import type { Component } from "./Component";
 
 /**
  * Types accepted as attribute names: a single string, or any iterable of strings.
@@ -139,11 +138,11 @@ function toAttributeValueSource (value: AttributeValueInput): State.Readonly<Rea
  * Attributes can be added, set, removed, and bound to reactive state.
  * Values are kept in sync with their sources and invalid configurations are rejected.
  */
-export class AttributeManipulator<OWNER extends Component> {
+export class AttributeManipulator<OWNER extends Owner> {
 	private readonly attributeDeterminers = new Map<string, AttributeDeterminerRecord>();
 
 	/**
-	 * @param owner The component owner managing this manipulator's cleanup.
+	 * @param owner The owner managing this manipulator's cleanup.
 	 * @param element The DOM element whose attributes are managed.
 	 */
 	constructor (
@@ -154,7 +153,7 @@ export class AttributeManipulator<OWNER extends Component> {
 	/**
 	 * Adds valueless attributes to the element. Multiple names can be passed as separate arguments or as an iterable.
 	 * @param attributes Attribute names to add.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	add (...attributes: AttributeNameInput[]): OWNER {
 		this.ensureActive();
@@ -171,14 +170,14 @@ export class AttributeManipulator<OWNER extends Component> {
 	 * Values or names can be subscribable sources that update automatically.
 	 * @param name - Attribute name or source.
 	 * @param value - Attribute value or source.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	set (name: AttributeNameInput, value: AttributeValueInput): OWNER;
 	/**
 	 * Sets attribute values using entries with name and value pairs.
 	 * Values or names can be subscribable sources that update automatically.
 	 * @param entries - Objects with `name` and `value` properties.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	set (...entries: AttributeEntry[]): OWNER;
 	set (...argumentsList: [AttributeNameInput, AttributeValueInput] | AttributeEntry[]): OWNER {
@@ -196,7 +195,7 @@ export class AttributeManipulator<OWNER extends Component> {
 	/**
 	 * Removes attributes from the element. Multiple names can be passed as separate arguments or as an iterable.
 	 * @param attributes Attribute names to remove.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	remove (...attributes: AttributeNameInput[]): OWNER {
 		this.ensureActive();
@@ -212,7 +211,7 @@ export class AttributeManipulator<OWNER extends Component> {
 	 * Toggles valueless attributes on the element based on a boolean.
 	 * @param attribute Attribute name or names to toggle.
 	 * @param enabled Whether the attributes should be present.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	toggle (attribute: AttributeNameInput, enabled: boolean): OWNER {
 		this.ensureActive();
@@ -225,7 +224,7 @@ export class AttributeManipulator<OWNER extends Component> {
 	 * Binds valueless attributes to a boolean state, adding/removing them based on state value.
 	 * @param state A subscribable boolean state.
 	 * @param attributes Attribute names to bind.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	bind (state: State.Readonly<boolean>, ...attributes: AttributeNameInput[]): OWNER;
 	/**
@@ -233,7 +232,7 @@ export class AttributeManipulator<OWNER extends Component> {
 	 * When state is true, attributes are set; when false, they are removed.
 	 * @param state A subscribable boolean state.
 	 * @param entries Objects with `name` and `value` properties.
-	 * @returns The owning component for fluent chaining.
+	 * @returns The owner of this manipulator.
 	 */
 	bind (state: State.Readonly<boolean>, ...entries: AttributeEntry[]): OWNER;
 	bind (
@@ -269,7 +268,7 @@ export class AttributeManipulator<OWNER extends Component> {
 
 	private ensureActive (): void {
 		if (this.owner.disposed) {
-			throw new Error("Disposed components cannot be modified.");
+			throw new Error("Modifications are not allowed after owner disposal.");
 		}
 	}
 
