@@ -924,7 +924,7 @@ var __kitsui_factory__ = (() => {
   }
   function toReferenceValueInput(owner, value) {
     if (owner.disposed) {
-      throw new Error("Disposed components cannot be modified.");
+      throw new Error("Modifications are not allowed after owner disposal.");
     }
     if (!(value instanceof State)) {
       return resolveReferenceSelection(value);
@@ -1147,7 +1147,7 @@ var __kitsui_factory__ = (() => {
   }
   var AttributeManipulator = class {
     /**
-     * @param owner The component owner managing this manipulator's cleanup.
+     * @param owner The owner managing this manipulator's cleanup.
      * @param element The DOM element whose attributes are managed.
      */
     constructor(owner, element) {
@@ -1158,7 +1158,7 @@ var __kitsui_factory__ = (() => {
     /**
      * Adds valueless attributes to the element. Multiple names can be passed as separate arguments or as an iterable.
      * @param attributes Attribute names to add.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     add(...attributes) {
       this.ensureActive();
@@ -1178,7 +1178,7 @@ var __kitsui_factory__ = (() => {
     /**
      * Removes attributes from the element. Multiple names can be passed as separate arguments or as an iterable.
      * @param attributes Attribute names to remove.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     remove(...attributes) {
       this.ensureActive();
@@ -1191,7 +1191,7 @@ var __kitsui_factory__ = (() => {
      * Toggles valueless attributes on the element based on a boolean.
      * @param attribute Attribute name or names to toggle.
      * @param enabled Whether the attributes should be present.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     toggle(attribute, enabled) {
       this.ensureActive();
@@ -1223,7 +1223,7 @@ var __kitsui_factory__ = (() => {
     }
     ensureActive() {
       if (this.owner.disposed) {
-        throw new Error("Disposed components cannot be modified.");
+        throw new Error("Modifications are not allowed after owner disposal.");
       }
     }
     resolveSetEntries(argumentsList) {
@@ -3634,7 +3634,7 @@ ${innerRules}
      *
      * @param classes Static or reactive styles to add. Accepts individual styles,
      * falsy values for conditional logic, or reactive style sources (States).
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If the owner is disposed.
      *
      * @example
@@ -3661,7 +3661,7 @@ ${innerRules}
      *
      * @param classes Static or reactive styles to remove. Accepts individual styles,
      * falsy values for conditional logic, or reactive style sources (States).
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If the owner is disposed.
      */
     remove(...classes) {
@@ -3679,7 +3679,7 @@ ${innerRules}
      * @param state A boolean State controlling the visibility of the classes.
      * @param classes Styles to bind to the state. Accepts individual styles, falsy
      * values, or reactive style sources.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If the owner is disposed.
      *
      * @example
@@ -3719,7 +3719,7 @@ ${innerRules}
      *
      * @param owner The external owner managing the lifetime of these class additions.
      * @param classes Static or reactive styles to add.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If this manipulator's owner is disposed.
      *
      * @example
@@ -3752,7 +3752,7 @@ ${innerRules}
     }
     ensureActive() {
       if (this.owner.disposed) {
-        throw new Error("Disposed components cannot be modified.");
+        throw new Error("Modifications are not allowed after owner disposal.");
       }
     }
     installAddInput(style) {
@@ -3928,7 +3928,7 @@ ${innerRules}
   }
   var StyleManipulator = class {
     /**
-     * @param owner The component owner managing this manipulator's lifecycle.
+     * @param owner The owner managing this manipulator's lifecycle.
      * @param element The element whose inline styles are controlled.
      */
     constructor(owner, element) {
@@ -3941,7 +3941,7 @@ ${innerRules}
      * Each property can also be driven by its own subscribable value.
      * Nullish property values remove that property from the inline style attribute.
      * @param value Direct or reactive inline style definition.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     set(value) {
       this.ensureActive();
@@ -4041,7 +4041,7 @@ ${innerRules}
     }
     ensureActive() {
       if (this.owner.disposed) {
-        throw new Error("Disposed components cannot be modified.");
+        throw new Error("Modifications are not allowed after owner disposal.");
       }
     }
   };
@@ -4057,7 +4057,7 @@ ${innerRules}
     /**
      * Sets the property from a direct value or subscribable source.
      * @param value Direct or reactive property input.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     set(value) {
       this.ensureActive();
@@ -4074,7 +4074,7 @@ ${innerRules}
      * Applies the property while visible and clears it while hidden.
      * @param visible Boolean source controlling whether the property is shown.
      * @param value Direct or reactive property input.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     bind(visible, value) {
       this.ensureActive();
@@ -4121,7 +4121,7 @@ ${innerRules}
     }
     ensureActive() {
       if (this.owner.disposed) {
-        throw new Error("Disposed components cannot be modified.");
+        throw new Error("Modifications are not allowed after owner disposal.");
       }
     }
   };

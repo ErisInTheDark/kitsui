@@ -29,7 +29,7 @@ export type AriaReferenceSelection = AriaReference | Iterable<AriaReference>;
 
 export type AriaReferenceInput = AriaReferenceSelection | State.Readonly<AriaReferenceSelection>;
 
-export class AriaManipulator<OWNER extends Component> {
+export class AriaManipulator<OWNER extends Owner> {
     private readonly owner;
     private readonly attribute;
     constructor(owner: OWNER, attribute: AttributeManipulator<OWNER>);
@@ -150,19 +150,19 @@ export interface AttributeEntry {
     value: AttributeValueInput;
 }
 
-export class AttributeManipulator<OWNER extends Component> {
+export class AttributeManipulator<OWNER extends Owner> {
     private readonly owner;
     private readonly element;
     private readonly attributeDeterminers;
     /**
-     * @param owner The component owner managing this manipulator's cleanup.
+     * @param owner The owner managing this manipulator's cleanup.
      * @param element The DOM element whose attributes are managed.
      */
     constructor(owner: OWNER, element: HTMLElement);
     /**
      * Adds valueless attributes to the element. Multiple names can be passed as separate arguments or as an iterable.
      * @param attributes Attribute names to add.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     add(...attributes: AttributeNameInput[]): OWNER;
     /**
@@ -170,34 +170,34 @@ export class AttributeManipulator<OWNER extends Component> {
      * Values or names can be subscribable sources that update automatically.
      * @param name - Attribute name or source.
      * @param value - Attribute value or source.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     set(name: AttributeNameInput, value: AttributeValueInput): OWNER;
     /**
      * Sets attribute values using entries with name and value pairs.
      * Values or names can be subscribable sources that update automatically.
      * @param entries - Objects with `name` and `value` properties.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     set(...entries: AttributeEntry[]): OWNER;
     /**
      * Removes attributes from the element. Multiple names can be passed as separate arguments or as an iterable.
      * @param attributes Attribute names to remove.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     remove(...attributes: AttributeNameInput[]): OWNER;
     /**
      * Toggles valueless attributes on the element based on a boolean.
      * @param attribute Attribute name or names to toggle.
      * @param enabled Whether the attributes should be present.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     toggle(attribute: AttributeNameInput, enabled: boolean): OWNER;
     /**
      * Binds valueless attributes to a boolean state, adding/removing them based on state value.
      * @param state A subscribable boolean state.
      * @param attributes Attribute names to bind.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     bind(state: State.Readonly<boolean>, ...attributes: AttributeNameInput[]): OWNER;
     /**
@@ -205,7 +205,7 @@ export class AttributeManipulator<OWNER extends Component> {
      * When state is true, attributes are set; when false, they are removed.
      * @param state A subscribable boolean state.
      * @param entries Objects with `name` and `value` properties.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     bind(state: State.Readonly<boolean>, ...entries: AttributeEntry[]): OWNER;
     private ensureActive;
@@ -222,7 +222,7 @@ export type StyleSelection = Style.Class | Falsy | Iterable<Style.Class | Falsy>
 
 export type StyleInput = Style.Class | Falsy | State.Readonly<StyleSelection>;
 
-export class ClassManipulator<OWNER extends Component> {
+export class ClassManipulator<OWNER extends Owner> {
     private readonly owner;
     private readonly element;
     private readonly styleDeterminers;
@@ -237,7 +237,7 @@ export class ClassManipulator<OWNER extends Component> {
      *
      * @param classes Static or reactive styles to add. Accepts individual styles,
      * falsy values for conditional logic, or reactive style sources (States).
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If the owner is disposed.
      *
      * @example
@@ -258,7 +258,7 @@ export class ClassManipulator<OWNER extends Component> {
      *
      * @param classes Static or reactive styles to remove. Accepts individual styles,
      * falsy values for conditional logic, or reactive style sources (States).
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If the owner is disposed.
      */
     remove(...classes: StyleInput[]): OWNER;
@@ -270,7 +270,7 @@ export class ClassManipulator<OWNER extends Component> {
      * @param state A boolean State controlling the visibility of the classes.
      * @param classes Styles to bind to the state. Accepts individual styles, falsy
      * values, or reactive style sources.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If the owner is disposed.
      *
      * @example
@@ -286,7 +286,7 @@ export class ClassManipulator<OWNER extends Component> {
      *
      * @param owner The external owner managing the lifetime of these class additions.
      * @param classes Static or reactive styles to add.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      * @throws If this manipulator's owner is disposed.
      *
      * @example
@@ -957,21 +957,21 @@ export abstract class GenericClaimManipulator<OWNER extends Owner> {
     private ensureActive;
 }
 
-export abstract class GenericPropertyManipulator<OWNER extends Component, INPUT, SELECTION> {
+export abstract class GenericPropertyManipulator<OWNER extends Owner, INPUT, SELECTION> {
     protected readonly owner: OWNER;
     private determiner;
     constructor(owner: OWNER);
     /**
      * Sets the property from a direct value or subscribable source.
      * @param value Direct or reactive property input.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     set(value: INPUT): OWNER;
     /**
      * Applies the property while visible and clears it while hidden.
      * @param visible Boolean source controlling whether the property is shown.
      * @param value Direct or reactive property input.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     bind(visible: State.Readonly<boolean>, value: INPUT): OWNER;
     /**
@@ -1399,12 +1399,12 @@ export type StyleAttributeDefinition = ({
 
 export type StyleAttributeInput = StyleAttributeDefinition | State.Readonly<StyleAttributeDefinition | null>;
 
-export class StyleManipulator<OWNER extends Component> {
+export class StyleManipulator<OWNER extends Owner> {
     private readonly owner;
     private readonly element;
     private readonly layers;
     /**
-     * @param owner The component owner managing this manipulator's lifecycle.
+     * @param owner The owner managing this manipulator's lifecycle.
      * @param element The element whose inline styles are controlled.
      */
     constructor(owner: OWNER, element: HTMLElement);
@@ -1413,7 +1413,7 @@ export class StyleManipulator<OWNER extends Component> {
      * Each property can also be driven by its own subscribable value.
      * Nullish property values remove that property from the inline style attribute.
      * @param value Direct or reactive inline style definition.
-     * @returns The owning component for fluent chaining.
+     * @returns The owner of this manipulator.
      */
     set(value: StyleAttributeInput): OWNER;
     private installDefinition;
