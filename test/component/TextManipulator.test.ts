@@ -163,6 +163,6 @@ describe("TextManipulator", () => {
 
 		component.dispose();
 
-		expect(() => text.set("late")).toThrowError("Disposed components cannot be modified.");
+		expect(() => text.set("late")).toThrowError("Modifications are not allowed after owner disposal.");
 	});
 });

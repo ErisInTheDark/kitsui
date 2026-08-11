@@ -247,7 +247,7 @@ function toReferenceValueInput (owner: Owner, value: AriaReferenceInput): Attrib
  * Fluent builder for setting ARIA attributes on an element.
  * 
  * All methods accept static values or reactive States (State).
- * Methods return the owning Component to enable fluent chaining.
+ * Methods return the manipulator owner.
  * Internally uses an AttributeManipulator to apply changes.
  */
 export class AriaManipulator<OWNER extends Owner> {

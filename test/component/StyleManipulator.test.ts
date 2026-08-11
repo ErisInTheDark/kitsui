@@ -245,10 +245,11 @@ describe("StyleManipulator", () => {
 
 	it("throws when trying to set styles on a disposed component", () => {
 		const component = mountedComponent("div");
+		const style = component.style;
 		component.remove();
 
 		expect(() => {
-			component.style.set({ color: "rebeccapurple" });
+			style.set({ color: "rebeccapurple" });
 		}).toThrow("Modifications are not allowed after owner disposal.");
 	});
 
