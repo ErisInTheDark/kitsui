@@ -28,22 +28,6 @@
     "test:run": "vitest run",
     "typecheck": "tsx ./scripts/typecheck.ts"
   },
-  "devDependencies": {
-    "@typescript/native-preview": "7.0.0-dev.20260405.1",
-    "esbuild": "0.27.3",
-    "happy-dom": "20.8.3",
-    "vitest": "4.1.2",
-    "typedoc": "0.28.18",
-    "tsx": "4.21.0",
-    "markdown-it": "14.1.1",
-    "@types/markdown-it": "14.1.2",
-    "@vitest/utils": "4.1.2",
-    "chokidar": "5.0.0",
-    "ws": "8.20.0",
-    "dotenv": "17.3.1",
-    "typedoc-plugin-missing-exports": "4.1.3",
-    "monaco-editor": "0.55.1"
-  },
   "pnpm": {
     "onlyBuiltDependencies": []
   }
