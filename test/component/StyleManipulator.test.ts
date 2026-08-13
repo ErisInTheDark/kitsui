@@ -226,6 +226,19 @@ describe("StyleManipulator", () => {
 		expect(component.element.style.getPropertyValue("--resolved-border-width"), "fallback shorthand values should also allow nested variable shorthand").toBe("var(--border-width, var(--spacing))");
 	});
 
+	it("expands calculation shorthand and escaped brackets in inline style values", () => {
+		const component = mountedComponent("div");
+
+		component.style.set({
+			$gap: "8px",
+			$literalTrack: "[[sidebar]]",
+			$resolvedSize: "[100% - $gap]",
+		});
+
+		expect(component.element.style.getPropertyValue("--literal-track"), "doubled brackets should emit one literal bracket layer").toBe("[sidebar]");
+		expect(component.element.style.getPropertyValue("--resolved-size"), "calculation shorthand should compile alongside variable shorthand").toBe("calc(100% - var(--gap))");
+	});
+
 	/** Verifies negative variable shorthand also expands inside fallback expressions in inline style values. */
 	it("expands negative variable shorthand in inline style values", () => {
 		const component = mountedComponent("div");

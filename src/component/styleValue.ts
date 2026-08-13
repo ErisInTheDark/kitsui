@@ -31,7 +31,7 @@ export function toCssPropertyName (propertyName: string): string {
 	return propertyName.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
 }
 
-export function expandVariableAccessShorthand (styleValue: string | number): string {
+export function compileStyleValue (styleValue: string | number): string {
 	if (typeof styleValue === "number") {
 		return String(styleValue);
 	}
@@ -77,7 +77,6 @@ export function expandVariableAccessShorthand (styleValue: string | number): str
 		return result;
 	}
 
-	let awaitingClosingBrace = 0;
 	function consumeVariableAccess (): string | undefined {
 		const restorePoint = i;
 		if (!consumeChar("$")) {
@@ -108,8 +107,7 @@ export function expandVariableAccessShorthand (styleValue: string | number): str
 		}
 
 		consumeWhitespace();
-		awaitingClosingBrace++;
-		const fallbackValue = consumeStyleValue();
+		const fallbackValue = consumeStyleValue("}");
 		consumeWhitespace();
 		if (!consumeChar("}")) {
 			i = restorePoint;
@@ -122,7 +120,7 @@ export function expandVariableAccessShorthand (styleValue: string | number): str
 	function consumeNegativeVariableAccess (): string | undefined {
 		const restorePoint = i;
 		const previousChar = peekPreviousNonWhitespaceChar();
-		if (previousChar && !"(,:*/%+-".includes(previousChar)) {
+		if (previousChar && !"([,:*/%+-".includes(previousChar)) {
 			return undefined;
 		}
 
@@ -139,15 +137,52 @@ export function expandVariableAccessShorthand (styleValue: string | number): str
 		return `calc(-1 * ${variableAccess})`;
 	}
 
-	function consumeStyleValue (): string {
+	function consumeEscapedSquareBrackets (): string | undefined {
+		if (src[i] !== "[" || src[i + 1] !== "[") {
+			return undefined;
+		}
+
+		i += 2;
+		const contentStart = i;
+		const closingBrackets = src.indexOf("]]", i);
+		if (closingBrackets < 0) {
+			return "[[";
+		}
+
+		i = closingBrackets + 2;
+		return `[${src.slice(contentStart, closingBrackets)}]`;
+	}
+
+	function consumeCalculation (): string | undefined {
+		const restorePoint = i;
+		if (!consumeChar("[")) {
+			return undefined;
+		}
+
+		const expression = consumeStyleValue("]");
+		if (!consumeChar("]") || !expression.trim()) {
+			i = restorePoint;
+			return undefined;
+		}
+
+		return `calc(${expression})`;
+	}
+
+	function consumeStyleValue (closingCharacter?: "]" | "}"): string {
 		let result = "";
 		do {
-			if (awaitingClosingBrace && src[i] === "}") {
-				awaitingClosingBrace--;
+			if (closingCharacter && src[i] === closingCharacter) {
 				return result;
 			}
 
-			result += consumeWhitespace() || consumeNegativeVariableAccess() || consumeVariableAccess() || src[i++];
+			result += (false
+				|| consumeWhitespace()
+				|| consumeEscapedSquareBrackets()
+				|| consumeCalculation()
+				|| consumeNegativeVariableAccess()
+				|| consumeVariableAccess()
+				|| src[i++]
+			);
 		} while (i < src.length);
 		return result;
 	}

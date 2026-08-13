@@ -1,7 +1,7 @@
 import { Marker } from "../component/Marker";
 import { Owner } from "../state/State";
 import Arrays from "../utility/Arrays";
-import { expandVariableAccessShorthand, toCssPropertyName } from "./styleValue";
+import { compileStyleValue, toCssPropertyName } from "./styleValue";
 
 /**
  * A CSS property value that can be a string or number.
@@ -25,6 +25,8 @@ export type KeyframesDefinition = Record<string, StyleDefinition | null | undefi
  * - Standard CSS properties (camelCase, e.g., `backgroundColor`)
  * - Custom CSS variables (prefixed with `$`, e.g., `$cardGap` becomes `--card-gap`)
  * - Variable shorthand in values (e.g., `gap: "$cardGap"` or `gap: "${varName: fallback}"`)
+ * - Calculation shorthand in values (e.g., `width: "[100% - $cardGap]"`)
+ * - Literal square brackets escaped by doubling them (e.g., `gridTemplateColumns: "[[content]] 1fr"`)
  * 
  * Properties with `null` or `undefined` values are filtered during serialization.
  */
@@ -143,7 +145,7 @@ function serializeStylePropertyValue (propertyName: string, value: StyleValue | 
 		if (markers) return markers.map(marker => animationMarkerData.get(marker)!.name).join(", ");
 	}
 
-	return String(expandVariableAccessShorthand(value as StyleValue));
+	return String(compileStyleValue(value as StyleValue));
 }
 
 function serializeDeclarationBody (definition: StyleDefinition): string {
@@ -670,7 +672,7 @@ export const StyleFontFace = Marker.builder<[definition: FontFaceDefinition]>({
 	build (marker, definition) {
 		const properties = Object.entries(definition)
 			.filter((entry): entry is [string, StyleValue] => entry[1] !== undefined && entry[1] !== null)
-			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`)
+			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(compileStyleValue(value))}`)
 			.join("; ");
 		const rule = `@font-face { ${properties} }`;
 
@@ -774,7 +776,7 @@ function createStyleContainer<const OPTIONS extends StyleContainerOptions> (name
 		};
 		methodDefinitions.styleProperty = {
 			value: (propertyName: StyleContainerPropertyName, value: StyleValue, definition: StyleDefinition): StyleDefinition => {
-				return spreadableContainerQuery(name, `style(${toCssPropertyName(propertyName)}: ${expandVariableAccessShorthand(value)})`, definition);
+				return spreadableContainerQuery(name, `style(${toCssPropertyName(propertyName)}: ${compileStyleValue(value)})`, definition);
 			},
 		};
 	}

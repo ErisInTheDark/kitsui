@@ -1,6 +1,6 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
 import type { StyleValue } from "./Style";
-import { expandVariableAccessShorthand, toCssPropertyName } from "./styleValue";
+import { compileStyleValue, toCssPropertyName } from "./styleValue";
 
 /** Inline style values accepted by {@link StyleManipulator}. */
 export type StyleAttributeValue = StyleValue | null | undefined;
@@ -14,8 +14,9 @@ export type StyleAttributeValueInput = StyleAttributeValue | State.Readonly<Reac
  * Inline style declarations accepted by {@link StyleManipulator}.
  * Supports string-valued CSSStyleDeclaration properties except `animation`
  * and `animationName`, plus custom properties prefixed with `$`.
- * String values also support the same variable shorthand used by `StyleDefinition`,
- * such as `$gap` and `${gap: 12px}`.
+ * String values also support the same variable and calculation shorthand used by
+ * `StyleDefinition`, such as `$gap`, `${gap: 12px}`, and `[100% - $gap]`.
+ * Double square brackets escape a literal bracket group, such as `[[content]]`.
  *
  * Each property can be assigned directly or through a {@link State} source.
  */
@@ -76,7 +77,7 @@ function serializeStyleValue (value: StyleAttributeValue): string | null {
 		return null;
 	}
 
-	return expandVariableAccessShorthand(value);
+	return compileStyleValue(value);
 }
 
 /**

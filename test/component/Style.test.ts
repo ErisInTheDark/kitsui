@@ -47,6 +47,18 @@ describe("Style", () => {
 		expect(styleElement?.textContent).toContain(".style-variable-shorthand { --card-gap: 12px; gap: var(--card-gap); padding: calc(var(--card-gap) * 2) }");
 	});
 
+	it("serializes calculation shorthand and escaped grid line names", () => {
+		Style.Class("style-calculation-shorthand", {
+			$cardGap: "12px",
+			gridTemplateColumns: "[[sidebar-start]] [100% - $cardGap] [[sidebar-end]]",
+			width: "[min(100%, 40rem) - $cardGap]",
+		});
+
+		const styleElement = document.querySelector("style[data-kitsui-styles='true']");
+
+		expect(styleElement?.textContent).toContain(".style-calculation-shorthand { --card-gap: 12px; grid-template-columns: [sidebar-start] calc(100% - var(--card-gap)) [sidebar-end]; width: calc(min(100%, 40rem) - var(--card-gap)) }");
+	});
+
 	/** Verifies negative variable shorthand serializes as a calc() expression and still expands inside operator contexts. */
 	it("serializes negative variable shorthand values", () => {
 		Style.Class("style-negative-variable-shorthand", {

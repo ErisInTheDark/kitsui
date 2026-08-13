@@ -328,6 +328,18 @@ card
 	.event.owned.on.pointerleave(() => raised.set(false))
 ```
 
+String style values support calculation shorthand. Kitsui compiles `[expression]` to `calc(expression)` and expands variable shorthand inside the expression. Double the square brackets when CSS needs literal brackets, such as named grid lines.
+
+```ts
+const layoutStyle = Style.Class("layout", {
+	$gap: "1rem",
+	gridTemplateColumns: "[[content-start]] [100% - ${sidebarWidth: 18rem} - $gap] [[content-end]]",
+	width: "[100% - $gap]",
+})
+```
+
+This emits literal `[content-start]` and `[content-end]` grid line names. The bracketed expressions become `calc(...)` values, and `$gap` plus `${sidebarWidth: 18rem}` become CSS variable references.
+
 ## Breakdown
 
 Use `component.breakdown(...)` when a State drives a keyed list or region and each Component should be reused by key.
