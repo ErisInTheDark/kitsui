@@ -3018,7 +3018,7 @@ var __kitsui_factory__ = (() => {
     }
     return propertyName.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);
   }
-  function expandVariableAccessShorthand(styleValue) {
+  function compileStyleValue(styleValue) {
     if (typeof styleValue === "number") {
       return String(styleValue);
     }
@@ -3055,7 +3055,6 @@ var __kitsui_factory__ = (() => {
       }
       return result;
     }
-    let awaitingClosingBrace = 0;
     function consumeVariableAccess() {
       const restorePoint = i;
       if (!consumeChar("$")) {
@@ -3081,8 +3080,7 @@ var __kitsui_factory__ = (() => {
         return void 0;
       }
       consumeWhitespace();
-      awaitingClosingBrace++;
-      const fallbackValue = consumeStyleValue();
+      const fallbackValue = consumeStyleValue("}");
       consumeWhitespace();
       if (!consumeChar("}")) {
         i = restorePoint;
@@ -3093,7 +3091,7 @@ var __kitsui_factory__ = (() => {
     function consumeNegativeVariableAccess() {
       const restorePoint = i;
       const previousChar = peekPreviousNonWhitespaceChar();
-      if (previousChar && !"(,:*/%+-".includes(previousChar)) {
+      if (previousChar && !"([,:*/%+-".includes(previousChar)) {
         return void 0;
       }
       if (!consumeChar("-")) {
@@ -3106,14 +3104,38 @@ var __kitsui_factory__ = (() => {
       }
       return `calc(-1 * ${variableAccess})`;
     }
-    function consumeStyleValue() {
+    function consumeEscapedSquareBrackets() {
+      if (src[i] !== "[" || src[i + 1] !== "[") {
+        return void 0;
+      }
+      i += 2;
+      const contentStart = i;
+      const closingBrackets = src.indexOf("]]", i);
+      if (closingBrackets < 0) {
+        return "[[";
+      }
+      i = closingBrackets + 2;
+      return `[${src.slice(contentStart, closingBrackets)}]`;
+    }
+    function consumeCalculation() {
+      const restorePoint = i;
+      if (!consumeChar("[")) {
+        return void 0;
+      }
+      const expression = consumeStyleValue("]");
+      if (!consumeChar("]") || !expression.trim()) {
+        i = restorePoint;
+        return void 0;
+      }
+      return `calc(${expression})`;
+    }
+    function consumeStyleValue(closingCharacter) {
       let result = "";
       do {
-        if (awaitingClosingBrace && src[i] === "}") {
-          awaitingClosingBrace--;
+        if (closingCharacter && src[i] === closingCharacter) {
           return result;
         }
-        result += consumeWhitespace() || consumeNegativeVariableAccess() || consumeVariableAccess() || src[i++];
+        result += consumeWhitespace() || consumeEscapedSquareBrackets() || consumeCalculation() || consumeNegativeVariableAccess() || consumeVariableAccess() || src[i++];
       } while (i < src.length);
       return result;
     }
@@ -3151,7 +3173,7 @@ var __kitsui_factory__ = (() => {
       const markers2 = toAnimationMarkersArray(value);
       if (markers2) return markers2.map((marker) => animationMarkerData.get(marker).name).join(", ");
     }
-    return String(expandVariableAccessShorthand(value));
+    return String(compileStyleValue(value));
   }
   function serializeDeclarationBody(definition) {
     return Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null && !isNestedDefinition(entry[0], entry[1])).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${serializeStylePropertyValue(propertyName, value)}`).join("; ");
@@ -3419,7 +3441,7 @@ ${innerRules}
       return `kitsui:font-face-${markerIdCounter++}`;
     },
     build(marker, definition) {
-      const properties = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(expandVariableAccessShorthand(value))}`).join("; ");
+      const properties = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(compileStyleValue(value))}`).join("; ");
       const rule = `@font-face { ${properties} }`;
       fontFaceRules.push(rule);
       renderStyleSheet();
@@ -3504,7 +3526,7 @@ ${innerRules}
       };
       methodDefinitions.styleProperty = {
         value: (propertyName, value, definition) => {
-          return spreadableContainerQuery(name, `style(${toCssPropertyName(propertyName)}: ${expandVariableAccessShorthand(value)})`, definition);
+          return spreadableContainerQuery(name, `style(${toCssPropertyName(propertyName)}: ${compileStyleValue(value)})`, definition);
         }
       };
     }
@@ -3924,7 +3946,7 @@ ${innerRules}
     if (value === null || value === void 0) {
       return null;
     }
-    return expandVariableAccessShorthand(value);
+    return compileStyleValue(value);
   }
   var StyleManipulator = class {
     /**
