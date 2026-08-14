@@ -69,12 +69,15 @@ describe("build output", () => {
 		expect(rawDeclarationContents.includes('export { Owner, State } from "./state/State";'), "exports Owner and State").toBe(true);
 		expect(rawDeclarationContents.includes('export { AsyncPending } from "./state/extensions/mappingExtension";'), "exports AsyncPending").toBe(true);
 		expect(bundledDeclarationContents.includes('declare module "kitsui" {'), "declares module kitsui").toBe(true);
+		expect(bundledDeclarationContents.includes('onCleanup(owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;'), "exports owner-bound cleanup").toBe(true);
 		expect(bundledDeclarationContents.includes('export interface ComponentExtensions {'), "exports ComponentExtensions").toBe(true);
 		expect(bundledDeclarationContents.includes('export interface StateExtensions<T> {'), "exports StateExtensions").toBe(true);
 		expect(bundledDeclarationContents.includes('appendTo(target: PlacementContainer): this;'), "exports appendTo").toBe(true);
 		expect(bundledDeclarationContents.includes('Group: GroupConstructor;'), "exports Group").toBe(true);
 		expect(bundledDeclarationContents.includes('debounce(milliseconds: number): State.Readonly<T>;'), "exports debounce").toBe(true);
+		expect(bundledDeclarationContents.includes('debounce(owner: Owner, milliseconds: number): State.Readonly<T>;'), "exports owner-bound debounce").toBe(true);
 		expect(bundledDeclarationContents.includes('throttle(milliseconds: number): State.Readonly<T>;'), "exports throttle").toBe(true);
+		expect(bundledDeclarationContents.includes('throttle(owner: Owner, milliseconds: number): State.Readonly<T>;'), "exports owner-bound throttle").toBe(true);
 		expect(bundledDeclarationContents.includes('mapAsync<U, E = unknown>'), "exports mapAsync").toBe(true);
 		expect(bundledDeclarationContents.includes('export interface AsyncState<T, E>'), "exports AsyncState").toBe(true);
 		expect(bundledDeclarationContents.includes('interface ComponentHTMLElementEventMap extends HTMLElementEventMap {'), "exports ComponentHTMLElementEventMap").toBe(true);

@@ -24,9 +24,11 @@ class RequestOwner extends Owner {
 }
 
 const requestOwner: Owner = new RequestOwner();
+const releaseOwnedCleanup: CleanupFunction = standaloneOwner.onCleanup(requestOwner, () => undefined);
 
 void standaloneState;
 void requestOwner;
+void releaseOwnedCleanup;
 // @ts-expect-error standalone Owner instances are created by calling Owner().
 new Owner();
 // @ts-expect-error Owner.create() was replaced by Owner().
@@ -39,6 +41,8 @@ const staticReadonly = State.Readonly({ count: 1 });
 const readonlySource: State.Readonly<number> = state;
 const debounced: State.Readonly<number> = readonlySource.debounce(100);
 const throttled: State.Readonly<number> = readonlySource.throttle(100);
+const ownedDebounced: State.Readonly<number> = readonlySource.debounce(standaloneOwner, 100);
+const ownedThrottled: State.Readonly<number> = readonlySource.throttle(standaloneOwner, 100);
 const asyncValue: AsyncState<string, unknown> = readonlySource.mapAsync(host, async value => String(value));
 const typedError: AsyncState<string, TypeError> = readonlySource.mapAsync<string, TypeError>(host, async value => String(value));
 const lastSettled: State.Readonly<AsyncSettled<string, unknown> | null> = asyncValue.lastSettled;
@@ -56,6 +60,8 @@ void state;
 AsyncPending satisfies { readonly type: "pending" };
 void debounced;
 void throttled;
+void ownedDebounced;
+void ownedThrottled;
 void asyncValue;
 void typedError;
 void lastSettled;

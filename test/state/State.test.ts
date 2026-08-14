@@ -30,6 +30,10 @@ function mountedOwner<NAME extends keyof HTMLElementTagNameMap = "div">(tagName:
 	return Component(tagName).appendTo(document.body);
 }
 
+function cleanupRegistrationCount (owner: Owner): number {
+	return (owner as unknown as { cleanupFunctions: Set<() => void> }).cleanupFunctions.size;
+}
+
 async function flushEffects (): Promise<void> {
 	const schedulerRef = globalThis as typeof globalThis & {
 		scheduler?: {
@@ -125,6 +129,92 @@ describe("Owner", () => {
 
 		owner.onCleanup(cleanup);
 		owner.dispose();
+		owner.dispose();
+
+		expect(cleanup).toHaveBeenCalledOnce();
+	});
+
+	it("runs owner-bound cleanup when the receiver is disposed and releases both registrations", () => {
+		const target = Owner();
+		const registrationOwner = Owner();
+		const cleanup = vi.fn();
+		const release = target.onCleanup(registrationOwner, cleanup);
+
+		expect(cleanupRegistrationCount(target)).toBe(1);
+		expect(cleanupRegistrationCount(registrationOwner)).toBe(1);
+
+		target.dispose();
+
+		expect(cleanup).toHaveBeenCalledOnce();
+		expect(cleanupRegistrationCount(registrationOwner)).toBe(0);
+
+		release();
+		registrationOwner.dispose();
+		expect(cleanup).toHaveBeenCalledOnce();
+	});
+
+	it("unregisters owner-bound cleanup without running it when the registration owner is disposed first", () => {
+		const target = Owner();
+		const registrationOwner = Owner();
+		const cleanup = vi.fn();
+		target.onCleanup(registrationOwner, cleanup);
+
+		registrationOwner.dispose();
+
+		expect(cleanup).not.toHaveBeenCalled();
+		expect(cleanupRegistrationCount(target)).toBe(0);
+
+		target.dispose();
+		expect(cleanup).not.toHaveBeenCalled();
+	});
+
+	it("manually releases owner-bound cleanup from both owners", () => {
+		const target = Owner();
+		const registrationOwner = Owner();
+		const cleanup = vi.fn();
+		const release = target.onCleanup(registrationOwner, cleanup);
+
+		release();
+		release();
+
+		expect(cleanupRegistrationCount(target)).toBe(0);
+		expect(cleanupRegistrationCount(registrationOwner)).toBe(0);
+		target.dispose();
+		registrationOwner.dispose();
+		expect(cleanup).not.toHaveBeenCalled();
+	});
+
+	it("settles owner-bound cleanup registration when either owner is already disposed", () => {
+		const disposedTarget = Owner();
+		const liveRegistrationOwner = Owner();
+		const targetCleanup = vi.fn();
+		disposedTarget.dispose();
+
+		disposedTarget.onCleanup(liveRegistrationOwner, targetCleanup);
+
+		expect(targetCleanup).toHaveBeenCalledOnce();
+		expect(cleanupRegistrationCount(liveRegistrationOwner)).toBe(0);
+
+		const liveTarget = Owner();
+		const disposedRegistrationOwner = Owner();
+		const registrationCleanup = vi.fn();
+		disposedRegistrationOwner.dispose();
+
+		liveTarget.onCleanup(disposedRegistrationOwner, registrationCleanup);
+		liveTarget.dispose();
+
+		expect(registrationCleanup).not.toHaveBeenCalled();
+		expect(cleanupRegistrationCount(liveTarget)).toBe(0);
+		liveRegistrationOwner.dispose();
+	});
+
+	it("treats the receiver as its own registration owner without duplicating registration", () => {
+		const owner = Owner();
+		const cleanup = vi.fn();
+		owner.onCleanup(owner, cleanup);
+
+		expect(cleanupRegistrationCount(owner)).toBe(1);
+
 		owner.dispose();
 
 		expect(cleanup).toHaveBeenCalledOnce();

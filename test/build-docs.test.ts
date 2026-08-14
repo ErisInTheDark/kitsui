@@ -188,8 +188,11 @@ describe("build:docs pipeline", () => {
 		expect(kitsuiDeclaration.includes('export interface StateStaticExtensions {'), "Missing flattened StateStaticExtensions interface in the main kitsui module").toBe(true);
 		expect(kitsuiDeclaration.includes('appendTo(target: PlacementContainer): this;'), "Missing merged placeExtension methods on ComponentExtensions").toBe(true);
 		expect(kitsuiDeclaration.includes('Group: GroupConstructor;'), "Missing merged State.Group declaration on StateStaticExtensions").toBe(true);
+		expect(kitsuiDeclaration.includes('onCleanup(owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;'), "Missing owner-bound cleanup in bundled docs declarations").toBe(true);
 		expect(kitsuiDeclaration.includes('debounce(milliseconds: number): State.Readonly<T>;'), "Missing debounce in bundled docs declarations").toBe(true);
+		expect(kitsuiDeclaration.includes('debounce(owner: Owner, milliseconds: number): State.Readonly<T>;'), "Missing owner-bound debounce in bundled docs declarations").toBe(true);
 		expect(kitsuiDeclaration.includes('throttle(milliseconds: number): State.Readonly<T>;'), "Missing throttle in bundled docs declarations").toBe(true);
+		expect(kitsuiDeclaration.includes('throttle(owner: Owner, milliseconds: number): State.Readonly<T>;'), "Missing owner-bound throttle in bundled docs declarations").toBe(true);
 		expect(kitsuiDeclaration.includes('mapAsync<U, E = unknown>'), "Missing mapAsync in bundled docs declarations").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface AsyncState<T, E>'), "Missing AsyncState in bundled docs declarations").toBe(true);
 		expect(/^\s*declare module "kitsui\//mu.test(kitsuiDeclaration), "Declaration bundle should not emit secondary kitsui submodule declarations").toBe(false);

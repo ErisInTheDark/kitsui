@@ -310,7 +310,66 @@ abstract class OwnerClass {
 	 * @param cleanupFunction Function to invoke during cleanup.
 	 * @returns A function that unregisters the cleanup function. Calling it prevents the cleanup function from being invoked later.
 	 */
-	onCleanup (cleanupFunction: CleanupFunction): CleanupFunction {
+	onCleanup (cleanupFunction: CleanupFunction): CleanupFunction;
+	/**
+	 * Registers a cleanup function to be invoked when this owner is disposed, while binding the registration to another owner.
+	 * If the registration owner is disposed first, the cleanup function is unregistered without being invoked.
+	 * @param owner Owner that manages the cleanup registration lifetime.
+	 * @param cleanupFunction Function to invoke during cleanup.
+	 * @returns A function that unregisters the cleanup function from both owners.
+	 */
+	onCleanup (owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;
+	onCleanup (ownerOrCleanupFunction: Owner | CleanupFunction, maybeCleanupFunction?: CleanupFunction): CleanupFunction {
+		if (!(ownerOrCleanupFunction instanceof OwnerClass)) {
+			return this.registerCleanup(ownerOrCleanupFunction);
+		}
+
+		const owner = ownerOrCleanupFunction;
+		const cleanupFunction = maybeCleanupFunction as CleanupFunction;
+		if (owner === this) {
+			return this.registerCleanup(cleanupFunction);
+		}
+
+		if (owner.disposed) {
+			return noop;
+		}
+
+		let active = true;
+		let releaseOwner: CleanupFunction = noop;
+		const releaseCleanup = this.registerCleanup(() => {
+			if (!active) {
+				return;
+			}
+
+			active = false;
+			releaseOwner();
+			cleanupFunction();
+		});
+
+		if (!active) {
+			return noop;
+		}
+
+		const release = () => {
+			if (!active) {
+				return;
+			}
+
+			active = false;
+			releaseCleanup();
+			releaseOwner();
+		};
+
+		releaseOwner = owner.onCleanup(release);
+		if (!active) {
+			releaseOwner();
+			return noop;
+		}
+
+		return release;
+	}
+
+	private registerCleanup (cleanupFunction: CleanupFunction): CleanupFunction {
 		if (this.disposedValue) {
 			cleanupFunction();
 			return noop;

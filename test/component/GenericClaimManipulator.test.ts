@@ -7,16 +7,24 @@ class TestOwner extends Owner { }
 class TrackingOwner extends TestOwner {
 	retainedCleanupCount = 0;
 
-	override onCleanup (cleanupFunction: CleanupFunction): CleanupFunction {
+	override onCleanup (cleanupFunction: CleanupFunction): CleanupFunction;
+	override onCleanup (owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;
+	override onCleanup (ownerOrCleanupFunction: Owner | CleanupFunction, maybeCleanupFunction?: CleanupFunction): CleanupFunction {
+		const cleanupFunction = typeof ownerOrCleanupFunction === "function"
+			? ownerOrCleanupFunction
+			: maybeCleanupFunction as CleanupFunction;
 		let active = true;
 		this.retainedCleanupCount += 1;
-		const release = super.onCleanup(() => {
+		const trackedCleanup = () => {
 			if (active) {
 				active = false;
 				this.retainedCleanupCount -= 1;
 			}
 			cleanupFunction();
-		});
+		};
+		const release = ownerOrCleanupFunction instanceof Owner
+			? super.onCleanup(ownerOrCleanupFunction, trackedCleanup)
+			: super.onCleanup(trackedCleanup);
 
 		return () => {
 			if (!active) {
@@ -32,8 +40,12 @@ class TrackingOwner extends TestOwner {
 class DisposingOnRegistrationOwner extends TestOwner {
 	disposeOnCleanupRegistration = false;
 
-	override onCleanup (cleanupFunction: CleanupFunction): CleanupFunction {
-		const release = super.onCleanup(cleanupFunction);
+	override onCleanup (cleanupFunction: CleanupFunction): CleanupFunction;
+	override onCleanup (owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;
+	override onCleanup (ownerOrCleanupFunction: Owner | CleanupFunction, maybeCleanupFunction?: CleanupFunction): CleanupFunction {
+		const release = ownerOrCleanupFunction instanceof Owner
+			? super.onCleanup(ownerOrCleanupFunction, maybeCleanupFunction as CleanupFunction)
+			: super.onCleanup(ownerOrCleanupFunction);
 		if (this.disposeOnCleanupRegistration) {
 			this.disposeOnCleanupRegistration = false;
 			this.dispose();

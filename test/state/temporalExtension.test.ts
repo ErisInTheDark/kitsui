@@ -281,6 +281,28 @@ describe("State temporal extensions", () => {
 		expect(derived.disposed).toBe(true);
 	});
 
+	it.each(["debounce", "throttle"] as const)("%s accepts an explicit owner and cancels pending work with that owner", async (method) => {
+		useTimerClock();
+		const sourceOwner = createOwner();
+		const derivedOwner = createOwner();
+		const source = State(sourceOwner, 0);
+		const derived = source[method](derivedOwner, 100);
+
+		expect(derived.getOwner()).toBe(derivedOwner);
+		expect(source.getOwner()).toBe(sourceOwner);
+
+		source.set(1);
+		await flushEffects();
+		expect(vi.getTimerCount()).toBe(1);
+
+		derivedOwner.dispose();
+
+		expect(derived.disposed).toBe(true);
+		expect(source.disposed).toBe(false);
+		expect(vi.getTimerCount()).toBe(0);
+		sourceOwner.dispose();
+	});
+
 	it("shares one native timer across many temporal derivations", async () => {
 		useTimerClock();
 		const sourceOwner = createOwner();
