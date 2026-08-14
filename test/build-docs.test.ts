@@ -211,6 +211,7 @@ describe("build:docs pipeline", () => {
 		expect(/class="docs-header-right"[^>]*><a class="docs-header-link" href="playground.html">Playground<\/a><\/div>/u.test(componentHtml), "API docs pages should expose Playground in the masthead").toBe(true);
 		expect(styleHtml.includes('id="mountStylesheet"'), "mountStylesheet should not appear in the public Style docs").toBe(false);
 		expect(styleHtml.includes('id="unmountStylesheet"'), "unmountStylesheet should not appear in the public Style docs").toBe(false);
+		expect(styleHtml.includes('id="resetStyles"'), "resetStyles should appear in the public Style docs").toBe(true);
 		const markerEventMapDeclaration = declarationSlice(markerHtml, "MarkerEventMap");
 		expect(markerEventMapDeclaration.includes("Lifecycle event map emitted by Marker instances."), "MarkerEventMap should render its JSDoc summary").toBe(true);
 		expect(markerHtml.includes("A wrapper around a DOM comment used where an actual DOM element is not needed."), "Marker should render its JSDoc summary on the public docs page").toBe(true);

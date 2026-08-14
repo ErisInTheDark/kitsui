@@ -106,8 +106,13 @@ type StyleClassConstructor = {
 
 const styleRegistry = new Map<string, Style.Class>();
 const styleOrder: Style.Class[] = [];
-const importRules: string[] = [];
-const fontFaceRules: string[] = [];
+
+interface RegisteredStyleRule {
+	readonly cssText: string;
+}
+
+const importRules: RegisteredStyleRule[] = [];
+const fontFaceRules: RegisteredStyleRule[] = [];
 const animationRules = new Map<string, string>();
 
 interface AnimationMarkerData {
@@ -116,8 +121,8 @@ interface AnimationMarkerData {
 }
 const animationMarkerData = new WeakMap<Marker, AnimationMarkerData>();
 
-const resetRules: string[] = [];
-const rootRules: string[] = [];
+const resetRules: RegisteredStyleRule[] = [];
+const rootRules: RegisteredStyleRule[] = [];
 let styleElement: HTMLStyleElement | null = null;
 const animationMarkerOwner = new class StyleAnimationOwner extends Owner { }();
 
@@ -246,6 +251,14 @@ function serializeDefinition (className: string, definition: StyleDefinition): s
 	return serializeRules(`.${className}`, definition).join("\n");
 }
 
+function registerStyleRules (cssTexts: readonly string[]): RegisteredStyleRule[] {
+	return cssTexts.map(cssText => ({ cssText }));
+}
+
+function serializeRegisteredRules (rules: readonly RegisteredStyleRule[]): string {
+	return rules.map(rule => rule.cssText).join("\n");
+}
+
 function getStyleElement (): HTMLStyleElement | null {
 	if (typeof document === "undefined") {
 		return null;
@@ -298,19 +311,19 @@ function renderStyleSheet (): void {
 	const parts: string[] = [];
 
 	if (importRules.length > 0)
-		parts.push(importRules.join("\n"));
+		parts.push(serializeRegisteredRules(importRules));
 
 	if (resetRules.length > 0)
-		parts.push(resetRules.join("\n"));
+		parts.push(serializeRegisteredRules(resetRules));
 
 	if (fontFaceRules.length > 0)
-		parts.push(fontFaceRules.join("\n"));
+		parts.push(serializeRegisteredRules(fontFaceRules));
 
 	if (animationRules.size > 0)
 		parts.push([...animationRules.values()].join("\n"));
 
 	if (rootRules.length > 0)
-		parts.push(rootRules.join("\n"));
+		parts.push(serializeRegisteredRules(rootRules));
 
 	for (const style of styleOrder)
 		parts.push(style.cssText);
@@ -326,14 +339,38 @@ export function mountStylesheet (): void {
 	renderStyleSheet();
 }
 
-/** @hidden */
-export function unmountStylesheet (): void {
-	styleElement = null;
+function clearStylesheetRules (): void {
 	animationRules.clear();
 	importRules.length = 0;
 	resetRules.length = 0;
 	rootRules.length = 0;
 	fontFaceRules.length = 0;
+}
+
+/** @hidden */
+export function unmountStylesheet (): void {
+	styleElement = null;
+	clearStylesheetRules();
+}
+
+/**
+ * Clears all registered stylesheet state and removes generated kitsui style elements.
+ * Use this at a hot-reload boundary before modules register their styles again.
+ * Existing style and marker handles are not disposed, but their stylesheet registrations are forgotten.
+ * Component-owned inline styles are not affected.
+ */
+export function resetStyles (): void {
+	styleRegistry.clear();
+	styleOrder.length = 0;
+	clearStylesheetRules();
+	styleElement?.remove();
+	styleElement = null;
+
+	if (typeof document !== "undefined") {
+		for (const element of document.querySelectorAll("style[data-kitsui-styles='true']")) {
+			element.remove();
+		}
+	}
 }
 
 function insertStyleInOrder (style: StyleClass): void {
@@ -538,7 +575,7 @@ export const StyleReset = Marker.builder<[definition: StyleDefinition]>({
 		return `kitsui:style-reset-${markerIdCounter++}`;
 	},
 	build (marker, definition) {
-		const rules = serializeRules("*", definition);
+		const rules = registerStyleRules(serializeRules("*", definition));
 		resetRules.push(...rules);
 		renderStyleSheet();
 		return () => { 
@@ -566,7 +603,7 @@ export const StyleRoot = Marker.builder<[definition: StyleDefinition]>({
 		return `kitsui:style-root-${markerIdCounter++}`;
 	},
 	build (marker, definition) {
-		const rules = serializeRules(":root", definition);
+		const rules = registerStyleRules(serializeRules(":root", definition));
 		rootRules.push(...rules);
 		renderStyleSheet();
 		return () => { 
@@ -599,7 +636,7 @@ export const StyleSelector = Marker.builder<[selector: string, definition: Style
 		return `kitsui:style-selector-${markerIdCounter++}`;
 	},
 	build (marker, selector, definition) {
-		const rules = serializeRules(selector, definition);
+		const rules = registerStyleRules(serializeRules(selector, definition));
 		rootRules.push(...rules);
 		renderStyleSheet();
 		return () => { 
@@ -625,7 +662,7 @@ export const StyleImport = Marker.builder<[url: string]>({
 		return `kitsui:style-import-${markerIdCounter++}`;
 	},
 	build (marker, url) {
-		const rule = `@import url("${url}");`;
+		const rule = { cssText: `@import url("${url}");` };
 
 		importRules.push(rule);
 		renderStyleSheet();
@@ -674,7 +711,7 @@ export const StyleFontFace = Marker.builder<[definition: FontFaceDefinition]>({
 			.filter((entry): entry is [string, StyleValue] => entry[1] !== undefined && entry[1] !== null)
 			.map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(compileStyleValue(value))}`)
 			.join("; ");
-		const rule = `@font-face { ${properties} }`;
+		const rule = { cssText: `@font-face { ${properties} }` };
 
 		fontFaceRules.push(rule);
 		renderStyleSheet();

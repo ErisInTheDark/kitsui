@@ -17,6 +17,7 @@ describe("kitsui entrypoint", () => {
 		expect(kitsui).toHaveProperty("StyleManipulator");
 		expect(kitsui).toHaveProperty("Sortable");
 		expect(kitsui).toHaveProperty("Style");
+		expect(kitsui).toHaveProperty("resetStyles");
 		expect(kitsui).toHaveProperty("mediaQuery");
 		expect(kitsui.Style).toHaveProperty("Container");
 		expect(kitsui).toHaveProperty("whenDisabled");

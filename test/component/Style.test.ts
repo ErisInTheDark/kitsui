@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { Marker } from "../../src/component/Marker";
-import { Style, StyleFontFace, StyleImport, StyleReset, darkScheme, elements, lightScheme, mediaQuery, pseudoAfter, pseudoBefore, whenAfterSelf, whenDisabled, whenFirst, whenHover, type QueryExpression } from "../../src/component/Style";
+import { Style, StyleAnimation, StyleFontFace, StyleImport, StyleReset, StyleRoot, StyleSelector, darkScheme, elements, lightScheme, mediaQuery, pseudoAfter, pseudoBefore, resetStyles, whenAfterSelf, whenDisabled, whenFirst, whenHover, type QueryExpression } from "../../src/component/Style";
 import placeExtension from "../../src/component/extensions/placeExtension";
 
 placeExtension();
@@ -103,6 +103,61 @@ describe("Style", () => {
 		expect(() => {
 			Style.Class("unique-style", { color: "blue" });
 		}).toThrow(/already registered/i);
+	});
+
+	it("resets every stylesheet registration for hot reload", () => {
+		StyleImport("https://fonts.example.com/hot-reload.css").appendTo(document.head);
+		StyleReset({ boxSizing: "border-box" }).appendTo(document.head);
+		StyleFontFace({ fontFamily: "'HotReload'", src: "url(hot-reload.woff2)" }).appendTo(document.head);
+		StyleRoot({ colorScheme: "dark" }).appendTo(document.head);
+		StyleSelector("::view-transition-new(root)", { opacity: 0 }).appendTo(document.head);
+		const animation = StyleAnimation("hot-reload", {
+			from: { opacity: 0 },
+			to: { opacity: 1 },
+		});
+		Style.Class("style-hot-reload", {
+			animationName: animation,
+			color: "red",
+		});
+
+		const oldStyleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+		expect(oldStyleText).toContain("hot-reload.css");
+		expect(oldStyleText).toContain("* { box-sizing: border-box }");
+		expect(oldStyleText).toContain("@font-face { font-family: 'HotReload'; src: url(hot-reload.woff2) }");
+		expect(oldStyleText).toContain(":root { color-scheme: dark }");
+		expect(oldStyleText).toContain("::view-transition-new(root) { opacity: 0 }");
+		expect(oldStyleText).toContain(`@keyframes ${animation.name}`);
+		expect(oldStyleText).toContain(".style-hot-reload");
+
+		resetStyles();
+
+		expect(document.querySelector("style[data-kitsui-styles='true']"), "the generated stylesheet should be removed by a full reset").toBeNull();
+
+		const reloadedStyle = Style.Class("style-hot-reload", { color: "blue" });
+		const newStyleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+
+		expect(reloadedStyle.definition).toEqual({ color: "blue" });
+		expect(newStyleText).toContain(".style-hot-reload { color: blue }");
+		expect(newStyleText).not.toContain("hot-reload.css");
+		expect(newStyleText).not.toContain("box-sizing: border-box");
+		expect(newStyleText).not.toContain("@font-face");
+		expect(newStyleText).not.toContain(":root");
+		expect(newStyleText).not.toContain("::view-transition-new");
+		expect(newStyleText).not.toContain("@keyframes");
+	});
+
+	it("keeps stale marker cleanup from removing identical rules registered after a reset", () => {
+		const staleImport = StyleImport("https://fonts.example.com/shared.css").appendTo(document.head);
+
+		resetStyles();
+
+		const currentImport = StyleImport("https://fonts.example.com/shared.css").appendTo(document.head);
+		staleImport.remove();
+
+		const styleText = document.querySelector("style[data-kitsui-styles='true']")?.textContent ?? "";
+		expect(styleText).toContain('@import url("https://fonts.example.com/shared.css");');
+
+		currentImport.remove();
 	});
 
 	it("can create styles ordered after existing styles", () => {

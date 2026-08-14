@@ -101,6 +101,7 @@ export { OwnerManipulator } from "./component/OwnerManipulator";
 export {
     Style, StyleAnimation, StyleFontFace, StyleImport, StyleReset, StyleRoot, StyleSelector, darkScheme, elements, lightScheme, mediaQuery,
     pseudoAfter, pseudoBefore,
+    resetStyles,
     whenActive, whenActiveSelf,
     whenClosed,
     whenDisabled,
