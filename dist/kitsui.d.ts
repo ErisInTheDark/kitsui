@@ -1247,6 +1247,8 @@ function mountStylesheet(): void;
 
 function unmountStylesheet(): void;
 
+export function resetStyles(): void;
+
 export function Style(definition: StyleDefinition): StyleDefinition;
 
 export namespace Style {
@@ -1716,6 +1718,15 @@ abstract class OwnerClass {
      */
     onCleanup(cleanupFunction: CleanupFunction): CleanupFunction;
     /**
+     * Registers a cleanup function to be invoked when this owner is disposed, while binding the registration to another owner.
+     * If the registration owner is disposed first, the cleanup function is unregistered without being invoked.
+     * @param owner Owner that manages the cleanup registration lifetime.
+     * @param cleanupFunction Function to invoke during cleanup.
+     * @returns A function that unregisters the cleanup function from both owners.
+     */
+    onCleanup(owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;
+    private registerCleanup;
+    /**
      * Hook invoked before cleanup functions run during disposal.
      * Subclasses may override to perform custom pre-disposal logic.
      * @protected
@@ -2141,12 +2152,28 @@ export interface StateExtensions<T> {
          */
         debounce(milliseconds: number): State.Readonly<T>;
         /**
+         * Creates an explicitly owned readonly state that waits until source changes stop for the requested duration.
+         * The initial value is available synchronously and later source changes are processed after queued State batching.
+         * @param owner The owner responsible for managing the debounced state's lifecycle.
+         * @param milliseconds The quiet duration in milliseconds. Must be finite and non-negative.
+         * @returns A debounced readonly derivation owned by the provided owner.
+         */
+        debounce(owner: Owner, milliseconds: number): State.Readonly<T>;
+        /**
          * Creates an ownerless readonly state that emits the first queued change immediately and then at most once per interval.
          * The latest value received during an interval is emitted at its trailing boundary.
          * @param milliseconds The throttle interval in milliseconds. Must be finite and non-negative.
          * @returns A leading-and-trailing readonly derivation that follows the normal implicit-owner lifecycle.
          */
         throttle(milliseconds: number): State.Readonly<T>;
+        /**
+         * Creates an explicitly owned readonly state that emits the first queued change immediately and then at most once per interval.
+         * The latest value received during an interval is emitted at its trailing boundary.
+         * @param owner The owner responsible for managing the throttled state's lifecycle.
+         * @param milliseconds The throttle interval in milliseconds. Must be finite and non-negative.
+         * @returns A leading-and-trailing readonly derivation owned by the provided owner.
+         */
+        throttle(owner: Owner, milliseconds: number): State.Readonly<T>;
     }
 
 export interface ComponentExtensions {

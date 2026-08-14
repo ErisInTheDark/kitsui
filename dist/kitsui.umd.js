@@ -63,6 +63,7 @@ var __kitsui_factory__ = (() => {
     mediaQuery: () => mediaQuery,
     pseudoAfter: () => pseudoAfter,
     pseudoBefore: () => pseudoBefore,
+    resetStyles: () => resetStyles,
     whenActive: () => whenActive,
     whenActiveSelf: () => whenActiveSelf,
     whenClosed: () => whenClosed,
@@ -350,7 +351,7 @@ var __kitsui_factory__ = (() => {
     }
     queueMicrotask(flush);
   }
-  var OwnerClass = class {
+  var OwnerClass = class _OwnerClass {
     /** @hidden */
     constructor() {
       __publicField(this, "abortController", null);
@@ -426,13 +427,47 @@ var __kitsui_factory__ = (() => {
         throw firstError;
       }
     }
-    /**
-     * Registers a cleanup function to be invoked when this owner is disposed.
-     * If the owner is already disposed, the cleanup function is invoked immediately.
-     * @param cleanupFunction Function to invoke during cleanup.
-     * @returns A function that unregisters the cleanup function. Calling it prevents the cleanup function from being invoked later.
-     */
-    onCleanup(cleanupFunction) {
+    onCleanup(ownerOrCleanupFunction, maybeCleanupFunction) {
+      if (!(ownerOrCleanupFunction instanceof _OwnerClass)) {
+        return this.registerCleanup(ownerOrCleanupFunction);
+      }
+      const owner = ownerOrCleanupFunction;
+      const cleanupFunction = maybeCleanupFunction;
+      if (owner === this) {
+        return this.registerCleanup(cleanupFunction);
+      }
+      if (owner.disposed) {
+        return noop;
+      }
+      let active = true;
+      let releaseOwner = noop;
+      const releaseCleanup = this.registerCleanup(() => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        releaseOwner();
+        cleanupFunction();
+      });
+      if (!active) {
+        return noop;
+      }
+      const release = () => {
+        if (!active) {
+          return;
+        }
+        active = false;
+        releaseCleanup();
+        releaseOwner();
+      };
+      releaseOwner = owner.onCleanup(release);
+      if (!active) {
+        releaseOwner();
+        return noop;
+      }
+      return release;
+    }
+    registerCleanup(cleanupFunction) {
       if (this.disposedValue) {
         cleanupFunction();
         return noop;
@@ -3255,6 +3290,12 @@ ${innerRules}
   function serializeDefinition(className, definition) {
     return serializeRules(`.${className}`, definition).join("\n");
   }
+  function registerStyleRules(cssTexts) {
+    return cssTexts.map((cssText) => ({ cssText }));
+  }
+  function serializeRegisteredRules(rules) {
+    return rules.map((rule) => rule.cssText).join("\n");
+  }
   function getStyleElement() {
     if (typeof document === "undefined") {
       return null;
@@ -3294,20 +3335,39 @@ ${innerRules}
     }
     const parts = [];
     if (importRules.length > 0)
-      parts.push(importRules.join("\n"));
+      parts.push(serializeRegisteredRules(importRules));
     if (resetRules.length > 0)
-      parts.push(resetRules.join("\n"));
+      parts.push(serializeRegisteredRules(resetRules));
     if (fontFaceRules.length > 0)
-      parts.push(fontFaceRules.join("\n"));
+      parts.push(serializeRegisteredRules(fontFaceRules));
     if (animationRules.size > 0)
       parts.push([...animationRules.values()].join("\n"));
     if (rootRules.length > 0)
-      parts.push(rootRules.join("\n"));
+      parts.push(serializeRegisteredRules(rootRules));
     for (const style of styleOrder)
       parts.push(style.cssText);
     styleElement2.textContent = parts.join("\n");
     if (parts.length > 0)
       styleElement2.append(document.createTextNode("\n"));
+  }
+  function clearStylesheetRules() {
+    animationRules.clear();
+    importRules.length = 0;
+    resetRules.length = 0;
+    rootRules.length = 0;
+    fontFaceRules.length = 0;
+  }
+  function resetStyles() {
+    styleRegistry.clear();
+    styleOrder.length = 0;
+    clearStylesheetRules();
+    styleElement?.remove();
+    styleElement = null;
+    if (typeof document !== "undefined") {
+      for (const element of document.querySelectorAll("style[data-kitsui-styles='true']")) {
+        element.remove();
+      }
+    }
   }
   function insertStyleInOrder(style) {
     if (style.afterClassNames.length === 0) {
@@ -3394,7 +3454,7 @@ ${innerRules}
       return `kitsui:style-reset-${markerIdCounter++}`;
     },
     build(marker, definition) {
-      const rules = serializeRules("*", definition);
+      const rules = registerStyleRules(serializeRules("*", definition));
       resetRules.push(...rules);
       renderStyleSheet();
       return () => {
@@ -3408,7 +3468,7 @@ ${innerRules}
       return `kitsui:style-root-${markerIdCounter++}`;
     },
     build(marker, definition) {
-      const rules = serializeRules(":root", definition);
+      const rules = registerStyleRules(serializeRules(":root", definition));
       rootRules.push(...rules);
       renderStyleSheet();
       return () => {
@@ -3422,7 +3482,7 @@ ${innerRules}
       return `kitsui:style-selector-${markerIdCounter++}`;
     },
     build(marker, selector, definition) {
-      const rules = serializeRules(selector, definition);
+      const rules = registerStyleRules(serializeRules(selector, definition));
       rootRules.push(...rules);
       renderStyleSheet();
       return () => {
@@ -3436,7 +3496,7 @@ ${innerRules}
       return `kitsui:style-import-${markerIdCounter++}`;
     },
     build(marker, url) {
-      const rule = `@import url("${url}");`;
+      const rule = { cssText: `@import url("${url}");` };
       importRules.push(rule);
       renderStyleSheet();
       return () => {
@@ -3451,7 +3511,7 @@ ${innerRules}
     },
     build(marker, definition) {
       const properties = Object.entries(definition).filter((entry) => entry[1] !== void 0 && entry[1] !== null).map(([propertyName, value]) => `${toCssPropertyName(propertyName)}: ${String(compileStyleValue(value))}`).join("; ");
-      const rule = `@font-face { ${properties} }`;
+      const rule = { cssText: `@font-face { ${properties} }` };
       fontFaceRules.push(rule);
       renderStyleSheet();
       return () => {
@@ -6624,6 +6684,7 @@ ${innerRules}
   }
 
   // src/state/extensions/temporalExtension.ts
+  var createOwnedState3 = State;
   var createOwnerlessState2 = State;
   var patched6 = false;
   function validateDuration(milliseconds) {
@@ -6631,11 +6692,12 @@ ${innerRules}
       throw new RangeError("State duration must be a finite non-negative number.");
     }
   }
-  function createDebouncedState(source, milliseconds) {
+  function createDebouncedState(source, owner, milliseconds) {
     validateDuration(milliseconds);
-    const debounced = createOwnerlessState2(source.value, {
+    const options = {
       graph: source.getGraph()
-    });
+    };
+    const debounced = owner ? createOwnedState3(owner, source.value, options) : createOwnerlessState2(source.value, options);
     let latestValue = source.value;
     let timeoutHandle = null;
     const releaseImplicitOwnerPropagation = debounced._registerImplicitOwnerDependent?.(source) ?? (() => void 0);
@@ -6666,11 +6728,12 @@ ${innerRules}
     });
     return debounced;
   }
-  function createThrottledState(source, milliseconds) {
+  function createThrottledState(source, owner, milliseconds) {
     validateDuration(milliseconds);
-    const throttled = createOwnerlessState2(source.value, {
+    const options = {
       graph: source.getGraph()
-    });
+    };
+    const throttled = owner ? createOwnedState3(owner, source.value, options) : createOwnerlessState2(source.value, options);
     let timeoutHandle = null;
     let trailingValue = source.value;
     let hasTrailingValue = false;
@@ -6721,11 +6784,15 @@ ${innerRules}
     patched6 = true;
     const StateClass2 = State.extend();
     const prototype = StateClass2.prototype;
-    prototype.debounce = function debounce(milliseconds) {
-      return createDebouncedState(this, milliseconds);
+    prototype.debounce = function debounce(ownerOrMilliseconds, maybeMilliseconds) {
+      const owner = ownerOrMilliseconds instanceof Owner ? ownerOrMilliseconds : null;
+      const milliseconds = typeof ownerOrMilliseconds === "number" ? ownerOrMilliseconds : maybeMilliseconds;
+      return createDebouncedState(this, owner, milliseconds);
     };
-    prototype.throttle = function throttle(milliseconds) {
-      return createThrottledState(this, milliseconds);
+    prototype.throttle = function throttle(ownerOrMilliseconds, maybeMilliseconds) {
+      const owner = ownerOrMilliseconds instanceof Owner ? ownerOrMilliseconds : null;
+      const milliseconds = typeof ownerOrMilliseconds === "number" ? ownerOrMilliseconds : maybeMilliseconds;
+      return createThrottledState(this, owner, milliseconds);
     };
   }
 
@@ -6736,7 +6803,7 @@ ${innerRules}
     bubbles: true,
     cancelable: false
   };
-  var createOwnedState3 = State;
+  var createOwnedState4 = State;
   var activeDragsByDocument = /* @__PURE__ */ new WeakMap();
   function pointFromPointerEvent(event) {
     return {
@@ -6951,11 +7018,11 @@ ${innerRules}
       __publicField(this, "cleanupInput", noop11);
       __publicField(this, "disposedValue", false);
       __publicField(this, "startContext", null);
-      this.phase = createOwnedState3(component, "idle");
-      this.position = createOwnedState3(component, null);
-      this.preview = createOwnedState3(component, null);
-      const active = createOwnedState3(component, false);
-      const pending = createOwnedState3(component, false);
+      this.phase = createOwnedState4(component, "idle");
+      this.position = createOwnedState4(component, null);
+      this.preview = createOwnedState4(component, null);
+      const active = createOwnedState4(component, false);
+      const pending = createOwnedState4(component, false);
       this.active = active;
       this.pending = pending;
       this.phase.subscribeImmediate(component, (phase) => {
@@ -7500,7 +7567,7 @@ ${innerRules}
   // src/component/Sortable.ts
   var noop13 = () => {
   };
-  var createOwnedState4 = State;
+  var createOwnedState5 = State;
   var sortablesByDocument = /* @__PURE__ */ new WeakMap();
   var activeSessionsByDocument = /* @__PURE__ */ new WeakMap();
   function isStateLike2(value) {
@@ -7612,10 +7679,10 @@ ${innerRules}
       __publicField(this, "previewOrder", []);
       __publicField(this, "releaseSourceSubscription", noop13);
       const initial = isStateLike2(input) ? input.value : input;
-      this.items = createOwnedState4(component, []);
-      this.preview = createOwnedState4(component, []);
-      this.phase = createOwnedState4(component, "idle");
-      this.dragging = createOwnedState4(component, null);
+      this.items = createOwnedState5(component, []);
+      this.preview = createOwnedState5(component, []);
+      this.phase = createOwnedState5(component, "idle");
+      this.dragging = createOwnedState5(component, null);
       sortableRegistryFor(component.element.ownerDocument).add(this);
       const handleDispose = () => {
         this.dispose();
@@ -7898,7 +7965,7 @@ ${innerRules}
       }
     }
     createRecord(entry) {
-      const state2 = createOwnedState4(this.component, entry.item);
+      const state2 = createOwnedState5(this.component, entry.item);
       const rendered = validateRenderedComponent(this.options.render(state2, entry.key, entry.index), "Sortable render");
       const draggable = Draggable.call(rendered);
       draggable.owner.add(this.component, "sortable-item");
