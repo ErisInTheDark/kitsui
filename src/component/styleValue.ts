@@ -138,6 +138,7 @@ export function compileStyleValue (styleValue: string | number): string {
 	}
 
 	function consumeEscapedSquareBrackets (): string | undefined {
+		const restorePoint = i;
 		if (src[i] !== "[" || src[i + 1] !== "[") {
 			return undefined;
 		}
@@ -146,7 +147,8 @@ export function compileStyleValue (styleValue: string | number): string {
 		const contentStart = i;
 		const closingBrackets = src.indexOf("]]", i);
 		if (closingBrackets < 0) {
-			return "[[";
+			i = restorePoint;
+			return undefined;
 		}
 
 		i = closingBrackets + 2;
@@ -168,6 +170,15 @@ export function compileStyleValue (styleValue: string | number): string {
 		return `calc(${expression})`;
 	}
 
+	function consumeUnmatchedDoubleOpeningBracket (): string | undefined {
+		if (src[i] !== "[" || src[i + 1] !== "[") {
+			return undefined;
+		}
+
+		i += 2;
+		return "[[";
+	}
+
 	function consumeStyleValue (closingCharacter?: "]" | "}"): string {
 		let result = "";
 		do {
@@ -179,6 +190,7 @@ export function compileStyleValue (styleValue: string | number): string {
 				|| consumeWhitespace()
 				|| consumeEscapedSquareBrackets()
 				|| consumeCalculation()
+				|| consumeUnmatchedDoubleOpeningBracket()
 				|| consumeNegativeVariableAccess()
 				|| consumeVariableAccess()
 				|| src[i++]

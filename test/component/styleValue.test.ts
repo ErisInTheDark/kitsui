@@ -21,6 +21,7 @@ describe("style value compilation", () => {
 	it("compiles multiple and nested calculations", () => {
 		expect(compileStyleValue("translate([100% - $x], [50% - $y])")).toBe("translate(calc(100% - var(--x)), calc(50% - var(--y)))");
 		expect(compileStyleValue("[100% - [2 * $gap]]")).toBe("calc(100% - calc(2 * var(--gap)))");
+		expect(compileStyleValue("[[1px * $iconZoom] * max($scaleFactorPixelPerfect, $scale) / $scaleFactor]")).toBe("calc(calc(1px * var(--icon-zoom)) * max(var(--scale-factor-pixel-perfect), var(--scale)) / var(--scale-factor))");
 	});
 
 	it("emits doubled square brackets as an opaque literal bracket group", () => {
