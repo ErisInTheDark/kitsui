@@ -3105,6 +3105,7 @@ var __kitsui_factory__ = (() => {
       return `calc(-1 * ${variableAccess})`;
     }
     function consumeEscapedSquareBrackets() {
+      const restorePoint = i;
       if (src[i] !== "[" || src[i + 1] !== "[") {
         return void 0;
       }
@@ -3112,7 +3113,8 @@ var __kitsui_factory__ = (() => {
       const contentStart = i;
       const closingBrackets = src.indexOf("]]", i);
       if (closingBrackets < 0) {
-        return "[[";
+        i = restorePoint;
+        return void 0;
       }
       i = closingBrackets + 2;
       return `[${src.slice(contentStart, closingBrackets)}]`;
@@ -3129,13 +3131,20 @@ var __kitsui_factory__ = (() => {
       }
       return `calc(${expression})`;
     }
+    function consumeUnmatchedDoubleOpeningBracket() {
+      if (src[i] !== "[" || src[i + 1] !== "[") {
+        return void 0;
+      }
+      i += 2;
+      return "[[";
+    }
     function consumeStyleValue(closingCharacter) {
       let result = "";
       do {
         if (closingCharacter && src[i] === closingCharacter) {
           return result;
         }
-        result += consumeWhitespace() || consumeEscapedSquareBrackets() || consumeCalculation() || consumeNegativeVariableAccess() || consumeVariableAccess() || src[i++];
+        result += consumeWhitespace() || consumeEscapedSquareBrackets() || consumeCalculation() || consumeUnmatchedDoubleOpeningBracket() || consumeNegativeVariableAccess() || consumeVariableAccess() || src[i++];
       } while (i < src.length);
       return result;
     }
