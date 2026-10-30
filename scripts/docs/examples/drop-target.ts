@@ -1,4 +1,4 @@
-import { Component, Draggable, DropTarget, State, Style, type DraggableExtensions } from "kitsui";
+import { Component, Draggable, DropTarget, State, Style, type DraggableExtensions } from "@inthedark/kitsui";
 
 const itemStyle = Style.Class("drop-item", {
 	cursor: "grab",

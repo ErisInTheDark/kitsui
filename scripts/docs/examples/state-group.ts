@@ -1,4 +1,4 @@
-import { Component, State, Style } from "kitsui";
+import { Component, State, Style } from "@inthedark/kitsui";
 
 const shellStyle = Style.Class("state-group-example", {
 	display: "grid",

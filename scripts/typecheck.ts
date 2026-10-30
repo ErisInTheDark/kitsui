@@ -84,7 +84,7 @@ async function runBundledDeclarationTypecheck (rootDirectory: string): Promise<v
 				extends: rootTsconfigRelativePath,
 				compilerOptions: {
 					paths: {
-						kitsui: ["./kitsui.generated.ts"],
+						"@inthedark/kitsui": ["./kitsui.generated.ts"],
 					},
 				},
 				include: ["./kitsui.generated.ts", "./kitsui-check.ts"],

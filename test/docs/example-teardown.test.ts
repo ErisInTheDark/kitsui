@@ -80,7 +80,7 @@ async function importExampleModule (exampleFileName: string): Promise<ImportedEx
 
 	const source = await readFile(sourcePath, "utf8");
 	const kitsuiImportPath = relative(dirname(tempExamplePath), join(workspaceRoot, "src", "index.ts")).replace(/\\/g, "/");
-	const rewrittenSource = source.replace(/from ["']kitsui["']/g, `from "${kitsuiImportPath}"`);
+	const rewrittenSource = source.replace(/from ["']@inthedark\/kitsui["']/g, `from "${kitsuiImportPath}"`);
 
 	await writeFile(tempExamplePath, rewrittenSource, "utf8");
 

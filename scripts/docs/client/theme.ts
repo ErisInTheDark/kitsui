@@ -1,4 +1,4 @@
-import { Component, State, Style, whenHover } from "kitsui";
+import { Component, State, Style, whenHover } from "@inthedark/kitsui";
 
 const key = "kitsui-theme"
 

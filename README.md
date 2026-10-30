@@ -4,10 +4,14 @@ kitsui is a DOM-first UI library built around owned `Component` and `State` obje
 
 Think of kitsui like react but with less magic. Every possible effect is explicitly declared and controlled by you. Build and move real Components directly; kitsui does not run an application-wide render cycle behind your code.
 
+```sh
+pnpm add @inthedark/kitsui
+```
+
 ## A Typical Component
 
 ```ts
-import { Component, State, Style } from "kitsui"
+import { Component, State, Style } from "@inthedark/kitsui"
 
 const counterStyle = Style.Class("counter", {
 	alignItems: "center",
@@ -62,7 +66,7 @@ Do not force assignability with `as Name` in the return statement. Give the func
 Custom component methods should return `this` unless there is a strong reason to return something else.
 
 ```ts
-import { Component } from "kitsui"
+import { Component } from "@inthedark/kitsui"
 
 interface ButtonExtensions {
 	setBusy (busy: boolean): this
@@ -113,7 +117,7 @@ Base component events are only for events available on every component, such as 
 Custom kitsui component event names should be `PascalCase`, such as `DragStart` or `WidgetCommit`, so they stay distinct from native DOM events like `click` and `pointerdown`.
 
 ```ts
-import { Component } from "kitsui"
+import { Component } from "@inthedark/kitsui"
 
 interface WidgetEvents {
 	WidgetCommit: CustomEvent<{

@@ -9,8 +9,8 @@ import type {
 	SortableTransfer,
 	QueryExpression,
 	StyleValue,
-} from "kitsui";
-import { AsyncPending, Component, Draggable, DropTarget, Owner, Sortable, State, Style, mediaQuery } from "kitsui";
+} from "@inthedark/kitsui";
+import { AsyncPending, Component, Draggable, DropTarget, Owner, Sortable, State, Style, mediaQuery } from "@inthedark/kitsui";
 
 const standaloneOwner: Owner = Owner();
 const standaloneState = State(standaloneOwner, "active");

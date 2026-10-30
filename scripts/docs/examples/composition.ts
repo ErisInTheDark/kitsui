@@ -1,4 +1,4 @@
-import { Component, Style, whenHover } from "kitsui";
+import { Component, Style, whenHover } from "@inthedark/kitsui";
 
 const shellStyle = Style.Class("composition-example", {
 	display: "grid",

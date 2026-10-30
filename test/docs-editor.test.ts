@@ -57,7 +57,7 @@ function installEditorFetchStub (examples: Record<string, string>): void {
 		}
 
 		if (url.endsWith("kitsui.d.ts")) {
-			return createFetchResponse('declare module "kitsui" {}');
+			return createFetchResponse('declare module "@inthedark/kitsui" {}');
 		}
 
 		throw new Error(`Unexpected fetch: ${url}`);
@@ -147,10 +147,10 @@ describe("docs editor preview import rewriting", () => {
 
 	it("rewrites static and side-effect kitsui imports to the absolute docs URL", () => {
 		const source = [
-			'import { Component } from "kitsui";',
-			"import 'kitsui';",
-			'export { State } from "kitsui";',
-			'import "kitsui";',
+			'import { Component } from "@inthedark/kitsui";',
+			"import '@inthedark/kitsui';",
+			'export { State } from "@inthedark/kitsui";',
+			'import "@inthedark/kitsui";',
 		].join("\n");
 
 		const rewritten = rewritePreviewModuleImports(source, KITSUI_MODULE_URL);
@@ -163,9 +163,9 @@ describe("docs editor preview import rewriting", () => {
 
 	it("rewrites dynamic import and require calls to the absolute docs URL", () => {
 		const source = [
-			'const dynamicModule = import("kitsui");',
-			'const requiredModule = require("kitsui");',
-			"const requiredModuleSingle = require('kitsui');",
+			'const dynamicModule = import("@inthedark/kitsui");',
+			'const requiredModule = require("@inthedark/kitsui");',
+			"const requiredModuleSingle = require('@inthedark/kitsui');",
 		].join("\n");
 
 		const rewritten = rewritePreviewModuleImports(source, KITSUI_MODULE_URL);
@@ -177,20 +177,20 @@ describe("docs editor preview import rewriting", () => {
 
 	it("does not rewrite kitsui text inside ordinary strings or comments", () => {
 		const source = [
-			'const code = "import { Component } from \\\"kitsui\\\"";',
-			"const label = 'kitsui';",
-			'const pattern = /import\\(\"kitsui\"\\)/u;',
-			'// import("kitsui") should stay untouched in comments',
-			'/* require("kitsui") should stay untouched in block comments */',
+			'const code = "import { Component } from \\\"@inthedark/kitsui\\\"";',
+			"const label = '@inthedark/kitsui';",
+			'const pattern = /import\\(\"@inthedark\\/kitsui\"\\)/u;',
+			'// import("@inthedark/kitsui") should stay untouched in comments',
+			'/* require("@inthedark/kitsui") should stay untouched in block comments */',
 		].join("\n");
 
 		const rewritten = rewritePreviewModuleImports(source, KITSUI_MODULE_URL);
 
-		expect(rewritten).toContain('const code = "import { Component } from \\\"kitsui\\\"";');
-		expect(rewritten).toContain("const label = 'kitsui';");
-		expect(rewritten).toContain('const pattern = /import\\(\"kitsui\"\\)/u;');
-		expect(rewritten).toContain('// import("kitsui") should stay untouched in comments');
-		expect(rewritten).toContain('/* require("kitsui") should stay untouched in block comments */');
+		expect(rewritten).toContain('const code = "import { Component } from \\\"@inthedark/kitsui\\\"";');
+		expect(rewritten).toContain("const label = '@inthedark/kitsui';");
+		expect(rewritten).toContain('const pattern = /import\\(\"@inthedark\\/kitsui\"\\)/u;');
+		expect(rewritten).toContain('// import("@inthedark/kitsui") should stay untouched in comments');
+		expect(rewritten).toContain('/* require("@inthedark/kitsui") should stay untouched in block comments */');
 		expect(rewritten.includes(KITSUI_MODULE_URL)).toBe(false);
 	});
 

@@ -1,4 +1,4 @@
-import { Component, Draggable, Style } from "kitsui";
+import { Component, Draggable, Style } from "@inthedark/kitsui";
 
 const boxStyle = Style.Class("draggable-box", {
 	background: "#2563eb",

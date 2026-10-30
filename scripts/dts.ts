@@ -538,7 +538,7 @@ export async function buildDeclarationBundle (options: BuildDeclarationBundleOpt
 
 	// Feature-owned overloads must follow general extension overloads because TypeScript gives later merged declarations priority.
 	const renderedStatements = [...declarations, ...supplementalAugmentations, ...exportedModuleAugmentations];
-	return `declare module "kitsui" {\n${renderedStatements.join("\n\n")}\n}\n`;
+	return `declare module "@inthedark/kitsui" {\n${renderedStatements.join("\n\n")}\n}\n`;
 }
 
 export async function writeDeclarationBundle (options: BuildDeclarationBundleOptions = {}): Promise<string> {

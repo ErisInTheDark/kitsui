@@ -11,7 +11,7 @@ import {
     whenDisabled,
     whenFocusSelf,
     whenHover,
-} from "kitsui";
+} from "@inthedark/kitsui";
 
 interface UpgradeDefinition {
 	buttonLabel: State.Readonly<string>

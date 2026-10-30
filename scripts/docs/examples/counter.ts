@@ -1,4 +1,4 @@
-import { Component, State, Style } from "kitsui";
+import { Component, State, Style } from "@inthedark/kitsui";
 
 const countStyle = Style.Class("counter-count", {
 	fontSize: "48px",

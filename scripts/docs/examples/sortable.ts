@@ -1,4 +1,4 @@
-import { Component, Sortable, State, Style, type DraggableExtensions } from "kitsui";
+import { Component, Sortable, State, Style, type DraggableExtensions } from "@inthedark/kitsui";
 
 interface Item {
 	readonly id: string;

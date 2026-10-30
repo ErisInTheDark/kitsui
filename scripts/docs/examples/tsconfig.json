@@ -6,7 +6,7 @@
 		"strict": true,
 		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"paths": {
-			"kitsui": ["../../../src/index.ts"]
+			"@inthedark/kitsui": ["../../../src/index.ts"]
 		}
 	},
 	"include": ["./**/*.ts"],

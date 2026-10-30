@@ -1,7 +1,16 @@
 {
-  "name": "kitsui",
+  "name": "@inthedark/kitsui",
   "version": "0.1.0",
   "description": "UI framework template built around mutable Component wrappers and explicit State transitions.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ErisInTheDark/kitsui.git"
+  },
+  "homepage": "https://github.com/ErisInTheDark/kitsui#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/kitsui.umd.js",
   "types": "./dist/kitsui.d.ts",
   "exports": {
@@ -13,16 +22,28 @@
   "unpkg": "dist/kitsui.umd.js",
   "jsdelivr": "dist/kitsui.umd.js",
   "files": [
-    "dist",
-    "src"
+    "dist"
   ],
   "engines": {
     "node": ">=20"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "24.22.1",
+      "onFail": "download"
+    },
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.14.0",
+      "onFail": "download"
+    }
   },
   "scripts": {
     "build": "tsx ./scripts/build.ts",
     "build:dts": "tsx ./scripts/dts.ts",
     "build:docs": "tsx ./scripts/docs.ts",
+    "build:package": "tsx ./scripts/publish-package.ts --stage",
     "watch": "tsx ./scripts/watch.ts",
     "test": "vitest",
     "test:run": "vitest run",

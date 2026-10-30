@@ -68,7 +68,7 @@ describe("build output", () => {
 		expect(rawDeclarationContents.includes('export { Component } from "./component/Component";'), "exports Component").toBe(true);
 		expect(rawDeclarationContents.includes('export { Owner, State } from "./state/State";'), "exports Owner and State").toBe(true);
 		expect(rawDeclarationContents.includes('export { AsyncPending } from "./state/extensions/mappingExtension";'), "exports AsyncPending").toBe(true);
-		expect(bundledDeclarationContents.includes('declare module "kitsui" {'), "declares module kitsui").toBe(true);
+		expect(bundledDeclarationContents.includes('declare module "@inthedark/kitsui" {'), "declares module kitsui").toBe(true);
 		expect(bundledDeclarationContents.includes('onCleanup(owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;'), "exports owner-bound cleanup").toBe(true);
 		expect(bundledDeclarationContents.includes('export interface ComponentExtensions {'), "exports ComponentExtensions").toBe(true);
 		expect(bundledDeclarationContents.includes('export interface StateExtensions<T> {'), "exports StateExtensions").toBe(true);

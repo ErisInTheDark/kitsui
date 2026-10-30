@@ -15,6 +15,13 @@
   - Do not module-augment `ComponentHTMLElementEventMap` from feature modules such as Draggable, DropTarget, or Sortable.
   - Raw `element.addEventListener(...)` is fine for internal DOM coordination, but the public typed `component.event.*` API should expose feature-specific events only through the owning component interface.
 
+## 📦 PACKAGE
+
+- npm package `@inthedark/kitsui`; import specifier everywhere (types bundle, docs, examples) is `@inthedark/kitsui`.
+- `pnpm run build:package` stages publishable contents in `build/` (`scripts/publish-package.ts` owns what ships).
+- `.github/workflows/publish-package.yml` (manual dispatch) bumps version on main, then publishes via npm trusted publishing.
+- Node + pnpm versions pinned in `package.json` via `vp env pin`.
+
 ## ✅ VALIDATION
 
 - If you're in VSCode, run `agent: verify`. Confirm the latest `agent: typecheck` result and `agent: test` result. If you're not in VSCode, run these as defined in the vscode tasks.json.

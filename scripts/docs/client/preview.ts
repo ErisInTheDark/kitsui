@@ -227,7 +227,7 @@ export function rewritePreviewModuleImports (source: string, moduleUrl: string):
 		if (character === "\"" || character === "'") {
 			const end = findStringEnd(source, index, character);
 			const literal = source.slice(index + 1, end);
-			if (literal === "kitsui" && isImportSpecifierContext(source, index)) {
+			if (literal === "@inthedark/kitsui" && isImportSpecifierContext(source, index)) {
 				result += moduleSpecifier;
 			} else {
 				result += source.slice(index, end + 1);

@@ -86,7 +86,7 @@ function commentSummary (declaration: DocsDeclaration | undefined): string {
 function readonlyConsumerQuickInfoDocumentation (declarationPath: string, declarationText: string): string {
 	const probePath = path.join(path.dirname(declarationPath), "state-readonly-quick-info-probe.ts");
 	const probeSource = [
-		'import { State } from "kitsui";',
+		'import { State } from "@inthedark/kitsui";',
 		"type ReadonlyState = State.Readonly<number>;",
 		"",
 	].join("\n");
@@ -182,7 +182,7 @@ describe("build:docs pipeline", () => {
 		const firstManipulatorHtml = await readFile(path.join(docsDirectory, `${firstManipulator}.html`), "utf8");
 		expect(indexHtml.includes('<html lang="en">'), "Missing html element with lang attribute").toBe(true);
 		expect(examplesJson.includes("highly-accurate-fishing-simulator.ts"), "Expected docs/examples/examples.json to list highly-accurate-fishing-simulator.ts").toBe(true);
-		expect(kitsuiDeclaration.includes('declare module "kitsui" {'), "Missing kitsui module declaration bundle for Monaco").toBe(true);
+		expect(kitsuiDeclaration.includes('declare module "@inthedark/kitsui" {'), "Missing kitsui module declaration bundle for Monaco").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface ComponentExtensions {'), "Missing flattened ComponentExtensions interface in the main kitsui module").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface StateExtensions<T> {'), "Missing flattened StateExtensions interface in the main kitsui module").toBe(true);
 		expect(kitsuiDeclaration.includes('export interface StateStaticExtensions {'), "Missing flattened StateStaticExtensions interface in the main kitsui module").toBe(true);

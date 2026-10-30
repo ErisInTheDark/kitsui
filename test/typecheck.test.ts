@@ -28,7 +28,7 @@ describe("typecheck configuration", () => {
 	it("points the docs client project at source types instead of dist declarations", async () => {
 		const docsClientTsconfig = await readFile(docsClientTsconfigPath, "utf8");
 
-		expect(docsClientTsconfig).toMatch(/"kitsui"\s*:\s*\["\.\.\/\.\.\/\.\.\/src\/index\.ts"\]/u);
+		expect(docsClientTsconfig).toMatch(/"@inthedark\/kitsui"\s*:\s*\["\.\.\/\.\.\/\.\.\/src\/index\.ts"\]/u);
 	});
 
 	it("always includes bundled declaration validation", async () => {
@@ -62,7 +62,7 @@ describe("typecheck configuration", () => {
 		await writeFile(path.join(tempRoot, "scripts", "docs", "client", "tsconfig.json"), "{}", "utf8");
 		await writeFile(path.join(tempRoot, "scripts", "docs", "examples", "tsconfig.json"), "{}", "utf8");
 		await writeFile(path.join(tempRoot, "tsconfig.kitsui-dts.json"), "{}", "utf8");
-		await writeFile(path.join(tempRoot, "dist", "kitsui.d.ts"), 'declare module "kitsui" {}\n', "utf8");
+		await writeFile(path.join(tempRoot, "dist", "kitsui.d.ts"), 'declare module "@inthedark/kitsui" {}\n', "utf8");
 
 		const calls: string[] = [];
 

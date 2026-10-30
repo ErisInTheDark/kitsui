@@ -416,7 +416,7 @@ export async function initEditor (): Promise<void> {
 			kitsuiDeclaration = await fetchKitsuiDeclaration();
 		} catch (error) {
 			console.warn(error);
-			kitsuiDeclaration = "declare module \"kitsui\" {}";
+			kitsuiDeclaration = "declare module \"@inthedark/kitsui\" {}";
 		}
 
 		if (isInitAborted()) {

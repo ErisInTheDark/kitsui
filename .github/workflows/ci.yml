@@ -16,73 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/setup@v3
         with:
-          version: 10
-
-      - name: Setup Node.js environment
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          cache: true
 
       - name: Run tests
         run: pnpm run test:run
 
       - name: Run typecheck
         run: pnpm run typecheck
-
-  build:
-    needs: verify
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Setup Node.js environment
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build package
-        run: pnpm run build
-
-      - name: Stage package branch contents
-        run: |
-          rm -rf build
-          mkdir -p build
-
-          node <<'NODE' > build/package.json
-            const fs = require('fs');
-
-            const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            delete packageJson.devDependencies;
-
-            process.stdout.write(`${JSON.stringify(packageJson, null, 2)}\n`);
-          NODE
-
-          cp -r dist build/dist
-          find build/dist -type f -name '*.d.ts' ! -name 'kitsui.d.ts' -delete
-
-      - name: Deploy package branch
-        uses: s0/git-publish-subdir-action@v2.5.1
-        env:
-          REPO: self
-          BRANCH: package
-          FOLDER: build
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MESSAGE: "Deploy {sha}:\n{msg}"
 
   docs:
     needs: verify
@@ -91,18 +33,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/setup@v3
         with:
-          version: 10
-
-      - name: Setup Node.js environment
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          cache: true
 
       - name: Build docs
         run: pnpm run build:docs
