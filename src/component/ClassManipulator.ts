@@ -21,11 +21,14 @@ export type StyleInput = Style.Class | Falsy | State.Readonly<StyleSelection>;
 interface DeterminerRecord {
 	cleanup: CleanupFunction;
 	token: symbol;
+	/** Set when a static add/remove decides the class: whether it is present. */
+	staticPresence?: boolean;
 }
 
 interface ReplaceDeterminerOptions {
 	logStateReplacement?: boolean;
 	onCleanup?: CleanupFunction;
+	staticPresence?: boolean;
 }
 
 const noop: CleanupFunction = () => {
@@ -268,10 +271,21 @@ export class ClassManipulator<OWNER extends Owner> {
 			return;
 		}
 
+		this.installStaticPresence(style, true);
+	}
+
+	/** Statically adds or removes a class, reusing the existing determiner when it already statically decides the same thing. */
+	private installStaticPresence (style: Style.Class, present: boolean): void {
+		const current = this.styleDeterminers.get(style.className);
+		if (current?.staticPresence === present) {
+			this.element.classList.toggle(style.className, present);
+			return;
+		}
+
 		this.replaceDeterminer(style, () => {
-			this.element.classList.add(style.className);
+			this.element.classList.toggle(style.className, present);
 			return noop;
-		});
+		}, { staticPresence: present });
 	}
 
 	private installRemoveInput (style: StyleInput): void {
@@ -286,10 +300,7 @@ export class ClassManipulator<OWNER extends Owner> {
 			return;
 		}
 
-		this.replaceDeterminer(style, () => {
-			this.element.classList.remove(style.className);
-			return noop;
-		});
+		this.installStaticPresence(style, false);
 	}
 
 	private installStateDrivenStyles (
@@ -429,7 +440,7 @@ export class ClassManipulator<OWNER extends Owner> {
 			console.error(`State-driven style '${style.className}' replaced an existing style determiner.`);
 		}
 
-		this.styleDeterminers.set(style.className, { cleanup, token });
+		this.styleDeterminers.set(style.className, { cleanup, token, staticPresence: options.staticPresence });
 		previousDeterminer?.cleanup();
 		releaseCurrentDeterminer = install(applyIfCurrent);
 

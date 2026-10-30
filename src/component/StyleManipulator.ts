@@ -1,5 +1,6 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
 import type { StyleValue } from "./Style";
+import { staticPropertySource, type PropertySource } from "./GenericPropertyManipulator";
 import { compileStyleValue, toCssPropertyName } from "./styleValue";
 
 /** Inline style values accepted by {@link StyleManipulator}. */
@@ -56,20 +57,20 @@ function isStateSource<TValue> (value: unknown): value is State.Readonly<TValue>
 	return value instanceof State;
 }
 
-function toStyleAttributeSource (value: StyleAttributeInput): State.Readonly<StyleAttributeDefinition | null> {
+function toStyleAttributeSource (value: StyleAttributeInput): PropertySource<StyleAttributeDefinition | null> {
 	if (isStateSource<StyleAttributeDefinition | null>(value)) {
 		return value;
 	}
 
-	return State.Readonly(value === undefined ? null : value);
+	return staticPropertySource(value === undefined ? null : value);
 }
 
-function toStyleValueSource (value: StyleAttributeValueInput): State.Readonly<ReactiveStyleAttributeValue> {
+function toStyleValueSource (value: StyleAttributeValueInput): PropertySource<ReactiveStyleAttributeValue> {
 	if (isStateSource<ReactiveStyleAttributeValue>(value)) {
 		return value;
 	}
 
-	return State.Readonly(value === undefined ? null : value);
+	return staticPropertySource(value === undefined ? null : value);
 }
 
 function serializeStyleValue (value: StyleAttributeValue): string | null {

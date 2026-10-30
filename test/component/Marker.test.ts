@@ -5,6 +5,7 @@ import { EventManipulator } from "../../src/component/EventManipulator";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Marker } from "../../src/component/Marker";
 import { Owner } from "../../src/state/State";
+import { captureOrphanCheck } from "../utility/captureOrphanCheck";
 
 placeExtension();
 
@@ -44,56 +45,6 @@ async function flushLifecycle (): Promise<void> {
 	await flushEffects();
 }
 
-function captureOrphanCheck (): {
-	timeoutHandler: (() => void) | null;
-	orphanCheck: (() => void) | null;
-	queuedError: (() => void) | null;
-	restore: () => void;
-} {
-	let timeoutHandler: (() => void) | null = null;
-	let orphanCheck: (() => void) | null = null;
-	let queuedError: (() => void) | null = null;
-	const originalThen = Promise.prototype.then;
-	const patchedThen: typeof Promise.prototype.then = function patchedThen<TResult1 = any, TResult2 = never> (
-		this: Promise<any>,
-		onFulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
-		onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
-	): Promise<TResult1 | TResult2> {
-		if (typeof onFulfilled === "function") {
-			orphanCheck = onFulfilled as unknown as () => void;
-		}
-
-		return originalThen.call(this, onFulfilled, onRejected) as Promise<TResult1 | TResult2>;
-	};
-	Promise.prototype.then = patchedThen;
-	const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback: VoidFunction) => {
-		queuedError = callback as () => void;
-	});
-	const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler) => {
-		if (typeof handler === "function") {
-			timeoutHandler = handler as unknown as () => void;
-		}
-
-		return 0 as unknown as ReturnType<typeof setTimeout>;
-	}) as unknown as typeof setTimeout);
-
-	return {
-		get timeoutHandler (): (() => void) | null {
-			return timeoutHandler;
-		},
-		get orphanCheck (): (() => void) | null {
-			return orphanCheck;
-		},
-		get queuedError (): (() => void) | null {
-			return queuedError;
-		},
-		restore (): void {
-			Promise.prototype.then = originalThen;
-			queueMicrotaskSpy.mockRestore();
-			setTimeoutSpy.mockRestore();
-		},
-	};
-}
 
 describe("Marker", () => {
 	it("updates virtual placement and ownership synchronously while Mount waits for commit", () => {

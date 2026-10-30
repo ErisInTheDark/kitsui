@@ -40,6 +40,7 @@
     }
   },
   "scripts": {
+    "bench": "node --expose-gc --import tsx ./scripts/bench.ts",
     "build": "tsx ./scripts/build.ts",
     "build:dts": "tsx ./scripts/dts.ts",
     "build:docs": "tsx ./scripts/docs.ts",

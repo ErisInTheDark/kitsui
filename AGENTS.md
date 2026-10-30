@@ -22,6 +22,11 @@
 - `.github/workflows/publish-package.yml` (manual dispatch) bumps version on main, then publishes via npm trusted publishing.
 - Node + pnpm versions pinned in `package.json` via `vp env pin`.
 
+## ⚡ PERFORMANCE
+
+- `pnpm bench` measures heavy realistic scenarios in happy-dom; `--save <name>`, `--compare <name>`, `--source <old src/index.ts>` for before/after. Compare kitsui scenarios against the raw-DOM control; happy-dom inflates DOM costs.
+- Hot paths avoid per-instance closures, eager collections, and `State.Readonly` wrappers for static values. Owner cleanups and State subscriptions are link objects (`CleanupLink`, `StateLink`).
+
 ## ✅ VALIDATION
 
 - If you're in VSCode, run `agent: verify`. Confirm the latest `agent: typecheck` result and `agent: test` result. If you're not in VSCode, run these as defined in the vscode tasks.json.

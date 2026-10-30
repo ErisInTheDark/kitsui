@@ -1,4 +1,4 @@
-import { Owner, State, type CleanupFunction } from "../../state/State";
+import { isOwner, Owner, State, type CleanupFunction } from "../../state/State";
 import { cleanupAndRethrow, runCleanupSteps } from "../../utility/cleanup";
 import { Component, type ComponentStaticExtensions } from "../Component";
 import { beginDOMTreeTransaction, DOMTree } from "../DOMTree";
@@ -156,7 +156,7 @@ export default function breakdownExtension (): void {
 
 	const ComponentWithBreakdown = Component as typeof Component & ComponentStaticExtensions;
 	const Breakdown = function Breakdown<TValue> (owner: Owner, state: State.Readonly<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction {
-		if (!(owner instanceof Owner)) {
+		if (!isOwner(owner)) {
 			throw new TypeError("Component.Breakdown requires an Owner as the first argument.");
 		}
 

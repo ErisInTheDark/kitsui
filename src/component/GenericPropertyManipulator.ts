@@ -5,9 +5,20 @@ interface DeterminerRecord {
 	token: symbol;
 }
 
+/** The reactive surface a property manipulator reads: a current value plus change notifications. */
+export interface PropertySource<SELECTION> {
+	readonly value: SELECTION;
+	subscribe (owner: Owner, listener: (value: SELECTION) => void): CleanupFunction;
+}
+
 const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
+
+/** A property source whose value never changes, so it needs no State or subscription. */
+export function staticPropertySource<SELECTION> (value: SELECTION): PropertySource<SELECTION> {
+	return { value, subscribe: () => noop };
+}
 
 /**
  * Manages a string-backed property with support for direct values and reactive sources.
@@ -32,6 +43,14 @@ export abstract class GenericPropertyManipulator<OWNER extends Owner, INPUT, SEL
 	set (value: INPUT): OWNER {
 		this.ensureActive();
 		const source = this.toSource(value);
+
+		if (!(source instanceof State)) {
+			this.replaceDeterminer((applyIfCurrent) => {
+				applyIfCurrent(source.value);
+				return noop;
+			});
+			return this.owner;
+		}
 
 		this.replaceDeterminer((applyIfCurrent) => {
 			applyIfCurrent(source.value);
@@ -73,11 +92,12 @@ export abstract class GenericPropertyManipulator<OWNER extends Owner, INPUT, SEL
 	}
 
 	/**
-	 * Converts a public input value into the reactive source used by the determiner lifecycle.
+	 * Converts a public input value into the source used by the determiner lifecycle.
+	 * Return a State for reactive inputs, or {@link staticPropertySource} for direct values.
 	 * @param value Direct or reactive property input.
-	 * @returns A subscribable source that yields concrete property selections.
+	 * @returns A source that yields concrete property selections.
 	 */
-	protected abstract toSource (value: INPUT): State.Readonly<SELECTION>;
+	protected abstract toSource (value: INPUT): PropertySource<SELECTION>;
 
 	/**
 	 * Writes the current selection to the underlying component property.

@@ -1,9 +1,8 @@
+import { cancelNextTickCheck, isNextTickCheckScheduled, scheduleNextTickCheck } from "../utility/nextTickCheck";
+
 /**
  * Function invoked during cleanup to release resources.
  */
-import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
-import { runCleanupSteps } from "../utility/cleanup";
-
 export type CleanupFunction = () => void;
 
 type IsAny<T> = 0 extends (1 & T) ? true : false;
@@ -63,7 +62,7 @@ export interface StateOptions<T> {
 	/**
 	 * Adjusts candidate state values after construction, `set()`, or `update()` resolves them.
 	 * Runs before equality checks, storage, and listener emission.
-	 * 
+	 *
 	 * Like a state updater, it can return a replacement value or `undefined` to keep the candidate value.
 	 */
 	fix?: StateFixFunction<T>;
@@ -111,30 +110,17 @@ type MutableStateConstructor = Omit<StateConstructor, "prototype"> & {
  */
 export type ExtendableStateClass = MutableStateConstructor & StateStaticExtensions;
 
+/** Queued links of states that share one batching scope, waiting for the next flush. */
 interface StateGraph {
-	pendingListeners: Set<QueuedStateListenerRecord<unknown>>;
+	pending: StateLink<unknown>[];
 	scheduled: boolean;
-}
-
-interface ImmediateStateListenerRecord<T> {
-	active: boolean;
-	listener: StateListener<T>;
 }
 
 interface StateNotification<T> {
 	force: boolean;
-	immediateListeners: ImmediateStateListenerRecord<T>[];
+	immediateLinks: StateLink<T>[] | null;
 	previousValue: T;
 	value: T;
-}
-
-interface QueuedStateListenerRecord<T> {
-	active: boolean;
-	forcePendingEmit: boolean;
-	listener: StateListener<T>;
-	pendingOriginalValue: T;
-	pendingFinalValue: T;
-	equals: StateEqualityFunction<T>;
 }
 
 /** @hidden */
@@ -158,9 +144,57 @@ function assertDefinedStateValue (value: unknown): void {
 
 function createStateGraph (): StateGraph {
 	return {
-		pendingListeners: new Set<QueuedStateListenerRecord<unknown>>(),
+		pending: [],
 		scheduled: false,
 	};
+}
+
+function flushGraph (graph: StateGraph): void {
+	graph.scheduled = false;
+	const links = graph.pending;
+	if (links.length === 0) {
+		return;
+	}
+
+	graph.pending = [];
+
+	// Snapshot every delivery before any listener runs; listeners may queue the same links again for the next flush.
+	const count = links.length;
+	const originals = new Array<unknown>(count);
+	const finals = new Array<unknown>(count);
+	const deliver = new Array<boolean>(count);
+	for (let index = 0; index < count; index++) {
+		const link = links[index];
+		link.queued = false;
+		originals[index] = link.pendingOriginalValue;
+		finals[index] = link.pendingFinalValue;
+		deliver[index] = link.forcePendingEmit || !link.equals(link.pendingOriginalValue, link.pendingFinalValue);
+		link.forcePendingEmit = false;
+		link.pendingOriginalValue = undefined;
+		link.pendingFinalValue = undefined;
+	}
+
+	let failed = false;
+	let firstError: unknown;
+	for (let index = 0; index < count; index++) {
+		const link = links[index];
+		if (!deliver[index] || link.source === null) {
+			continue;
+		}
+
+		try {
+			link.notify(finals[index], originals[index]);
+		} catch (error) {
+			if (!failed) {
+				failed = true;
+				firstError = error;
+			}
+		}
+	}
+
+	if (failed) {
+		throw firstError;
+	}
 }
 
 function scheduleGraphFlush (graph: StateGraph): void {
@@ -169,32 +203,7 @@ function scheduleGraphFlush (graph: StateGraph): void {
 	}
 
 	graph.scheduled = true;
-	const flush = () => {
-		graph.scheduled = false;
-		const pendingDeliveries = [...graph.pendingListeners].map(record => ({
-			equals: record.equals,
-			finalValue: record.pendingFinalValue,
-			force: record.forcePendingEmit,
-			originalValue: record.pendingOriginalValue,
-			record,
-		}));
-		graph.pendingListeners.clear();
-		for (const { record } of pendingDeliveries) {
-			record.forcePendingEmit = false;
-		}
-
-		runCleanupSteps(pendingDeliveries.map(({ equals, finalValue, force, originalValue, record }) => () => {
-			if (!record.active) {
-				return;
-			}
-
-			if (!force && equals(originalValue, finalValue)) {
-				return;
-			}
-
-			record.listener(finalValue, originalValue);
-		}));
-	};
+	const flush = () => flushGraph(graph);
 
 	const schedulerRef = globalThis as typeof globalThis & {
 		scheduler?: {
@@ -211,12 +220,121 @@ function scheduleGraphFlush (graph: StateGraph): void {
 }
 
 /**
+ * A node in an owner's cleanup list. Subclasses carry their own data instead of closures,
+ * so registering cleanup work allocates one object and unregistering is O(1).
+ * @internal
+ */
+export abstract class CleanupLink {
+	cleanupOwner: OwnerClass | null = null;
+	previousCleanup: CleanupLink | null = null;
+	nextCleanup: CleanupLink | null = null;
+
+	/** Runs once when the owner this link is registered on disposes. */
+	abstract runCleanup (): void;
+
+	/** Unregisters this link from its owner without running it. */
+	releaseCleanup (): void {
+		const owner = this.cleanupOwner;
+		if (owner) {
+			unlinkCleanup(owner, this);
+		}
+	}
+}
+
+class FunctionCleanupLink extends CleanupLink {
+	constructor (private readonly cleanupFunction: CleanupFunction) {
+		super();
+	}
+
+	runCleanup (): void {
+		this.cleanupFunction();
+	}
+}
+
+/** One half of a cleanup registered on two owners: whichever disposes first releases the other half. */
+class PairedCleanupLink extends CleanupLink {
+	partner: PairedCleanupLink | null = null;
+
+	constructor (private readonly cleanupFunction: CleanupFunction | null) {
+		super();
+	}
+
+	runCleanup (): void {
+		this.partner?.releaseCleanup();
+		this.cleanupFunction?.();
+	}
+}
+
+/**
+ * Disposes a target owner when the owner it is registered on disposes.
+ * @internal
+ */
+export class DisposeLink extends CleanupLink {
+	constructor (private readonly target: OwnerClass) {
+		super();
+	}
+
+	runCleanup (): void {
+		this.target.dispose();
+	}
+}
+
+/**
+ * Registers a cleanup link on an owner. If the owner is already disposed, the link runs immediately.
+ * @internal
+ */
+export function linkCleanup (owner: OwnerClass, link: CleanupLink): void {
+	if (owner["disposedValue"]) {
+		link.runCleanup();
+		return;
+	}
+
+	link.cleanupOwner = owner;
+	const tail = owner["cleanupTail"];
+	link.previousCleanup = tail;
+	if (tail) {
+		tail.nextCleanup = link;
+	} else {
+		owner["cleanupHead"] = link;
+	}
+	owner["cleanupTail"] = link;
+}
+
+function unlinkCleanup (owner: OwnerClass, link: CleanupLink): void {
+	if (link.cleanupOwner !== owner) {
+		return;
+	}
+
+	link.cleanupOwner = null;
+	if (owner["disposedValue"]) {
+		// Disposal detached the list and walks it through the saved links; marking the link inactive is enough.
+		return;
+	}
+
+	const previous = link.previousCleanup;
+	const next = link.nextCleanup;
+	if (previous) {
+		previous.nextCleanup = next;
+	} else {
+		owner["cleanupHead"] = next;
+	}
+	if (next) {
+		next.previousCleanup = previous;
+	} else {
+		owner["cleanupTail"] = previous;
+	}
+	link.previousCleanup = null;
+	link.nextCleanup = null;
+}
+
+/**
  * Implements the shared disposal lifecycle for owner-aware resources.
  * @group Owner
  */
 abstract class OwnerClass {
 	private abortController: AbortController | null = null;
-	private readonly cleanupFunctions = new Set<CleanupFunction>();
+	private cleanupHead: CleanupLink | null = null;
+	private cleanupTail: CleanupLink | null = null;
 	private disposingValue = false;
 	private disposedValue = false;
 
@@ -271,29 +389,54 @@ abstract class OwnerClass {
 		this.disposingValue = true;
 		let firstError: unknown;
 		let failed = false;
-		const settle = (callback: () => void) => {
+
+		try {
 			try {
-				callback();
+				this.abortController?.abort();
+			} catch (error) {
+				failed = true;
+				firstError = error;
+			}
+
+			try {
+				this.beforeDispose();
 			} catch (error) {
 				if (!failed) {
 					failed = true;
 					firstError = error;
 				}
 			}
-		};
 
-		try {
-			settle(() => this.abortController?.abort());
-			settle(() => this.beforeDispose());
-
-			const cleanupFunctions = [...this.cleanupFunctions];
-			this.cleanupFunctions.clear();
-
-			for (const cleanupFunction of cleanupFunctions) {
-				settle(cleanupFunction);
+			let link = this.cleanupHead;
+			this.cleanupHead = null;
+			this.cleanupTail = null;
+			while (link) {
+				const next = link.nextCleanup;
+				link.previousCleanup = null;
+				link.nextCleanup = null;
+				const active = link.cleanupOwner === this;
+				link.cleanupOwner = null;
+				if (active) {
+					try {
+						link.runCleanup();
+					} catch (error) {
+						if (!failed) {
+							failed = true;
+							firstError = error;
+						}
+					}
+				}
+				link = next;
 			}
 
-			settle(() => this.afterDispose());
+			try {
+				this.afterDispose();
+			} catch (error) {
+				if (!failed) {
+					failed = true;
+					firstError = error;
+				}
+			}
 		}
 		finally {
 			this.disposingValue = false;
@@ -320,81 +463,41 @@ abstract class OwnerClass {
 	 */
 	onCleanup (owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;
 	onCleanup (ownerOrCleanupFunction: Owner | CleanupFunction, maybeCleanupFunction?: CleanupFunction): CleanupFunction {
-		if (!(ownerOrCleanupFunction instanceof OwnerClass)) {
-			return this.registerCleanup(ownerOrCleanupFunction);
+		if (!(ownerOrCleanupFunction instanceof OwnerClass) || ownerOrCleanupFunction === this) {
+			const cleanupFunction = ownerOrCleanupFunction instanceof OwnerClass
+				? maybeCleanupFunction as CleanupFunction
+				: ownerOrCleanupFunction;
+			if (this.disposedValue) {
+				cleanupFunction();
+				return noop;
+			}
+
+			const link = new FunctionCleanupLink(cleanupFunction);
+			linkCleanup(this, link);
+			return () => link.releaseCleanup();
 		}
 
 		const owner = ownerOrCleanupFunction;
-		const cleanupFunction = maybeCleanupFunction as CleanupFunction;
-		if (owner === this) {
-			return this.registerCleanup(cleanupFunction);
-		}
-
 		if (owner.disposed) {
 			return noop;
 		}
 
-		let active = true;
-		let releaseOwner: CleanupFunction = noop;
-		const releaseCleanup = this.registerCleanup(() => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			releaseOwner();
-			cleanupFunction();
-		});
-
-		if (!active) {
-			return noop;
-		}
-
-		const release = () => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			releaseCleanup();
-			releaseOwner();
-		};
-
-		releaseOwner = owner.onCleanup(release);
-		if (!active) {
-			releaseOwner();
-			return noop;
-		}
-
-		return release;
-	}
-
-	private registerCleanup (cleanupFunction: CleanupFunction): CleanupFunction {
+		const cleanupFunction = maybeCleanupFunction as CleanupFunction;
 		if (this.disposedValue) {
 			cleanupFunction();
 			return noop;
 		}
 
-		let active = true;
-		const registeredCleanup = () => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			this.cleanupFunctions.delete(registeredCleanup);
-			cleanupFunction();
-		};
-
-		this.cleanupFunctions.add(registeredCleanup);
+		const runLink = new PairedCleanupLink(cleanupFunction);
+		const releaseLink = new PairedCleanupLink(null);
+		runLink.partner = releaseLink;
+		releaseLink.partner = runLink;
+		linkCleanup(this, runLink);
+		linkCleanup(owner, releaseLink);
 
 		return () => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			this.cleanupFunctions.delete(registeredCleanup);
+			runLink.releaseCleanup();
+			releaseLink.releaseCleanup();
 		};
 	}
 
@@ -456,70 +559,164 @@ type OwnerConstructor = (abstract new () => Owner) & {
  *
  * @group Owner
  */
-export const Owner = function Owner (): Owner {
-	return Reflect.construct(OwnerClass, [], new.target ?? OwnerClass) as Owner;
-} as OwnerConstructor;
+// A proxy keeps `Owner()` callable while `class X extends Owner` constructs exactly like `extends OwnerClass`,
+// which lets V8 share one hidden class per subclass instead of deriving a fresh one per instance.
+export const Owner = new Proxy(OwnerClass, {
+	apply: () => Reflect.construct(OwnerClass, []),
+}) as unknown as OwnerConstructor;
 
-Owner.prototype = OwnerClass.prototype;
+/**
+ * Whether a value is an owner. Prefer this over `instanceof Owner` in hot paths.
+ * @internal
+ */
+export function isOwner (value: unknown): value is Owner {
+	return value instanceof OwnerClass;
+}
 
 const orphanedStateErrorMessage = "States must have an owner before the next tick.";
 
-function getEqualityFunction<T> (state: State<T>): StateEqualityFunction<T> {
-	return state["equalityFunction"] as StateEqualityFunction<T>;
+/**
+ * A subscription of one listener-like target to a state's changes.
+ * Immediate links are notified synchronously on every change; queued links are batched per state graph.
+ * A link is also a cleanup link, so the owner that bounds the subscription can release it without a closure.
+ * @internal
+ */
+export abstract class StateLink<T> extends CleanupLink {
+	source: StateClass<T> | null = null;
+	queued = false;
+	forcePendingEmit = false;
+	pendingOriginalValue: T | undefined = undefined;
+	pendingFinalValue: T | undefined = undefined;
+	equals: StateEqualityFunction<T> = Object.is;
+
+	constructor (readonly immediate: boolean) {
+		super();
+	}
+
+	/** Receives a change from the source state. */
+	abstract notify (value: T, previousValue: T): void;
+
+	runCleanup (): void {
+		this.unsubscribe();
+	}
+
+	/** Stops receiving changes and releases the owner registration. Idempotent. */
+	unsubscribe (): void {
+		const source = this.source;
+		this.source = null;
+		if (source) {
+			detachLink(source, this);
+		}
+		this.releaseCleanup();
+	}
 }
 
-function getFixFunction<T> (state: State<T>): StateFixFunction<T> {
-	return state["fixFunction"] as StateFixFunction<T>;
+class ListenerLink<T> extends StateLink<T> {
+	constructor (immediate: boolean, private readonly listener: StateListener<T>) {
+		super(immediate);
+	}
+
+	notify (value: T, previousValue: T): void {
+		this.listener(value, previousValue);
+	}
 }
 
-function fixStateValue<T> (fix: StateFixFunction<T>, value: T): T {
-	return fix(value) ?? value;
+function attachLink<T> (state: StateClass<T>, link: StateLink<T>): void {
+	link.source = state;
+	if (link.immediate) {
+		const links = state["immediateLinks"];
+		if (links === null) {
+			state["immediateLinks"] = [link];
+		} else if (state["immediateLinksShared"]) {
+			state["immediateLinks"] = [...links, link];
+			state["immediateLinksShared"] = false;
+		} else {
+			links.push(link);
+		}
+		return;
+	}
+
+	link.equals = state["equalityFunction"];
+	const links = state["queuedLinks"];
+	if (links === null) {
+		state["queuedLinks"] = [link];
+	} else {
+		links.push(link);
+	}
 }
 
-function getImmediateListeners<T> (state: State<T>): Set<ImmediateStateListenerRecord<T>> {
-	return state["immediateListeners"] as Set<ImmediateStateListenerRecord<T>>;
+function removeFromLinks<T> (links: StateLink<T>[], link: StateLink<T>, copy: boolean): StateLink<T>[] | null {
+	const index = links.indexOf(link);
+	if (index < 0) {
+		return links;
+	}
+
+	if (links.length === 1) {
+		return null;
+	}
+
+	if (copy) {
+		return links.filter(candidate => candidate !== link);
+	}
+
+	links.splice(index, 1);
+	return links;
 }
 
-function getQueuedListeners<T> (state: State<T>): Set<QueuedStateListenerRecord<T>> {
-	return state["queuedListeners"] as Set<QueuedStateListenerRecord<T>>;
+function detachLink<T> (state: StateClass<T>, link: StateLink<T>): void {
+	if (link.immediate) {
+		const links = state["immediateLinks"];
+		if (links !== null) {
+			const shared = state["immediateLinksShared"];
+			state["immediateLinks"] = removeFromLinks(links, link, shared);
+			if (shared) {
+				state["immediateLinksShared"] = false;
+			}
+		}
+		return;
+	}
+
+	// A queued link may still sit in the graph's pending list; the flush skips it once its source is cleared.
+	const links = state["queuedLinks"];
+	if (links !== null) {
+		state["queuedLinks"] = removeFromLinks(links, link, false);
+	}
 }
 
 /** @group State */
-class StateClass<T> extends Owner {
+class StateClass<T> extends OwnerClass {
 	private owner: Owner | null;
-	private releaseOwner: CleanupFunction = noop;
+	private ownerLink: DisposeLink | null = null;
 	private isImplicitOwner = false;
 	private mutable = true;
 	private requiresExplicitOwner = false;
-	private readonly implicitOwnerDependents = new Set<StateClass<unknown>>();
-	private orphanCheckId: DeferredTimeoutHandle | null = null;
+	private implicitOwnerDependents: Set<StateClass<unknown>> | null = null;
 	private currentValue: T;
-	/** @deprecated Use getEqualityFunction(this) */
+	// Members that accept T are typed `any` so State<T> stays covariant (a State<string> is usable as a State<string | null>).
 	private equalityFunction: StateEqualityFunction<any>;
-	/** @deprecated Use getFixFunction(this) */
-	private fixFunction: StateFixFunction<any>;
-	private readonly graph: StateGraph;
-	/** @deprecated Use getImmediateListeners(this) */
-	private readonly immediateListeners = new Set<ImmediateStateListenerRecord<any>>();
-	/** @deprecated Use getQueuedListeners(this) */
-	private readonly queuedListeners = new Set<QueuedStateListenerRecord<any>>();
-	private notificationQueue: StateNotification<any>[] | null = null;
+	private readonly fixFunction: StateFixFunction<any>;
+	private graph: StateGraph | null;
+	private immediateLinks: StateLink<any>[] | null = null;
+	/** True while a notification in progress iterates `immediateLinks`; edits then copy the array instead of mutating it. */
+	private immediateLinksShared = false;
+	private queuedLinks: StateLink<any>[] | null = null;
+	private notifying = false;
+	private pendingNotifications: StateNotification<any>[] | null = null;
 
-	constructor (owner: Owner | null, initialValue: T, options: StateInternalOptions<T> = {}) {
+	constructor (owner: Owner | null, initialValue: T, options: StateInternalOptions<T> = {}, requiresOwner = true) {
 		super();
 		assertDefinedStateValue(initialValue);
 		this.owner = owner;
 		this.fixFunction = options.fix ?? ident;
 		this.currentValue = fixStateValue(this.fixFunction, initialValue);
 		this.equalityFunction = options.equals ?? Object.is;
-		this.graph = options.graph ?? createStateGraph();
+		this.graph = options.graph ?? null;
 
 		if (owner) {
-			this.releaseOwner = owner.onCleanup(() => {
-				this.dispose();
-			});
+			this.ownerLink = new DisposeLink(this);
+			linkCleanup(owner, this.ownerLink);
 		}
-		else {
+		else if (requiresOwner) {
 			this.refreshOrphanCheck();
 		}
 	}
@@ -551,7 +748,7 @@ class StateClass<T> extends Owner {
 	 * @internal
 	 */
 	getGraph (): StateGraph {
-		return this.graph;
+		return this.graph ??= createStateGraph();
 	}
 
 	/**
@@ -566,58 +763,87 @@ class StateClass<T> extends Owner {
 	set (nextValue: T): T {
 		this.ensureActive();
 		assertDefinedStateValue(nextValue);
-		const fixedValue = fixStateValue(getFixFunction(this), nextValue);
+		const fixedValue = fixStateValue(this.fixFunction, nextValue);
 
-		if (getEqualityFunction(this)(this.currentValue, fixedValue)) {
+		if (this.equalityFunction(this.currentValue, fixedValue)) {
 			return this.currentValue;
 		}
 
 		return this.commit(fixedValue, false);
 	}
 
-	private commit (nextValue: T, forceNotify: boolean): T {
+	private commit (nextValue: T, force: boolean): T {
 		const previousValue = this.currentValue;
 		this.currentValue = nextValue;
-		const notification: StateNotification<T> = {
-			force: forceNotify,
-			immediateListeners: [...getImmediateListeners(this)],
-			previousValue,
-			value: nextValue,
-		};
-		if (this.notificationQueue) {
-			this.notificationQueue.push(notification);
+		const immediateLinks = this.immediateLinks;
+
+		if (this.notifying) {
+			if (immediateLinks !== null) {
+				this.immediateLinksShared = true;
+			}
+			(this.pendingNotifications ??= []).push({ force, immediateLinks, previousValue, value: nextValue });
 			return this.currentValue;
 		}
 
-		const notificationQueue = [notification];
-		this.notificationQueue = notificationQueue;
+		if (immediateLinks === null && this.queuedLinks === null) {
+			return this.currentValue;
+		}
+
+		this.notifying = true;
+		if (immediateLinks !== null) {
+			this.immediateLinksShared = true;
+		}
+
 		try {
-			for (const change of notificationQueue) {
-				for (const listenerRecord of change.immediateListeners) {
-					if (listenerRecord.active) listenerRecord.listener(change.value, change.previousValue);
-				}
+			this.deliver(immediateLinks, force, previousValue, nextValue);
 
-				for (const listenerRecord of getQueuedListeners(this)) {
-					if (!listenerRecord.active) continue;
-					if (!this.graph.pendingListeners.has(listenerRecord as QueuedStateListenerRecord<unknown>)) {
-						listenerRecord.forcePendingEmit = change.force;
-						listenerRecord.pendingOriginalValue = change.previousValue;
-						listenerRecord.pendingFinalValue = change.value;
-						listenerRecord.equals = getEqualityFunction(this);
-						this.graph.pendingListeners.add(listenerRecord as QueuedStateListenerRecord<unknown>);
-						scheduleGraphFlush(this.graph);
-						continue;
-					}
-
-					listenerRecord.forcePendingEmit ||= change.force;
-					listenerRecord.pendingFinalValue = change.value;
+			let notifications = this.pendingNotifications;
+			while (notifications !== null) {
+				this.pendingNotifications = null;
+				for (const notification of notifications) {
+					this.deliver(notification.immediateLinks, notification.force, notification.previousValue, notification.value);
 				}
+				notifications = this.pendingNotifications;
 			}
 		} finally {
-			this.notificationQueue = null;
+			this.notifying = false;
+			this.pendingNotifications = null;
+			this.immediateLinksShared = false;
 		}
 
 		return this.currentValue;
+	}
+
+	private deliver (immediateLinks: StateLink<any>[] | null, force: boolean, previousValue: T, value: T): void {
+		if (immediateLinks !== null) {
+			for (const link of immediateLinks) {
+				if (link.source === this) {
+					link.notify(value, previousValue);
+				}
+			}
+		}
+
+		const queuedLinks = this.queuedLinks;
+		if (queuedLinks === null) {
+			return;
+		}
+
+		const graph = this.getGraph();
+		for (const link of queuedLinks) {
+			if (!link.queued) {
+				link.queued = true;
+				link.forcePendingEmit = force;
+				link.pendingOriginalValue = previousValue;
+				link.pendingFinalValue = value;
+				link.equals = this.equalityFunction;
+				graph.pending.push(link as StateLink<unknown>);
+				scheduleGraphFlush(graph);
+				continue;
+			}
+
+			link.forcePendingEmit ||= force;
+			link.pendingFinalValue = value;
+		}
 	}
 
 	/**
@@ -643,7 +869,7 @@ class StateClass<T> extends Owner {
 	update (updater: StateUpdater<T>): T {
 		this.ensureActive();
 		const nextValue = updater(this.currentValue);
-		return this.commit(fixStateValue(getFixFunction(this), nextValue === undefined ? this.currentValue : nextValue), true);
+		return this.commit(fixStateValue(this.fixFunction, nextValue === undefined ? this.currentValue : nextValue), true);
 	}
 
 	/**
@@ -671,20 +897,9 @@ class StateClass<T> extends Owner {
 			return noop;
 		}
 
-		const listenerRecord: ImmediateStateListenerRecord<T> = {
-			active: true,
-			listener,
-		};
-		getImmediateListeners(this).add(listenerRecord);
-
-		return () => {
-			if (!listenerRecord.active) {
-				return;
-			}
-
-			listenerRecord.active = false;
-			getImmediateListeners(this).delete(listenerRecord);
-		};
+		const link = new ListenerLink(true, listener);
+		attachLink(this, link);
+		return () => link.unsubscribe();
 	}
 
 	/**
@@ -700,26 +915,9 @@ class StateClass<T> extends Owner {
 			return noop;
 		}
 
-		const listenerRecord: QueuedStateListenerRecord<T> = {
-			active: true,
-			equals: getEqualityFunction(this),
-			forcePendingEmit: false,
-			listener,
-			pendingFinalValue: this.currentValue,
-			pendingOriginalValue: this.currentValue,
-		};
-		getQueuedListeners(this).add(listenerRecord);
-
-		return () => {
-			if (!listenerRecord.active) {
-				return;
-			}
-
-			listenerRecord.active = false;
-			this.graph.pendingListeners.delete(listenerRecord as QueuedStateListenerRecord<unknown>);
-
-			getQueuedListeners(this).delete(listenerRecord);
-		};
+		const link = new ListenerLink(false, listener);
+		attachLink(this, link);
+		return () => link.unsubscribe();
 	}
 
 	/**
@@ -731,28 +929,9 @@ class StateClass<T> extends Owner {
 	 * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
 	 */
 	subscribeImmediate (owner: Owner, listener: StateListener<T>): CleanupFunction {
-		this.setImplicitOwnerCandidate(owner);
-		const unsubscribe = this.subscribeImmediateUnbound(listener);
-		let active = true;
-
-		const releaseOwner = owner.onCleanup(() => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			unsubscribe();
-		});
-
-		return () => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			releaseOwner();
-			unsubscribe();
-		};
+		const link = new ListenerLink(true, listener);
+		this._link(owner, link);
+		return () => link.unsubscribe();
 	}
 
 	/**
@@ -764,30 +943,24 @@ class StateClass<T> extends Owner {
 	 * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
 	 */
 	subscribe (owner: Owner, listener: StateListener<T>): CleanupFunction {
-		this.setImplicitOwnerCandidate(owner);
-		const unsubscribe = this.subscribeUnbound(listener);
-		let active = true;
-
-		const releaseOwner = owner.onCleanup(() => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			unsubscribe();
-		});
-
-		return () => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			releaseOwner();
-			unsubscribe();
-		};
+		const link = new ListenerLink(false, listener);
+		this._link(owner, link);
+		return () => link.unsubscribe();
 	}
 
+	/**
+	 * Attaches a subscription link bounded by an owner, with the same ownership effects as `subscribe`.
+	 * @internal
+	 */
+	_link (owner: Owner, link: StateLink<any>): void {
+		this.setImplicitOwnerCandidate(owner);
+		if (!this.disposed) {
+			attachLink(this, link);
+		}
+		linkCleanup(owner, link);
+	}
+
+	/** @internal */
 	_registerImplicitOwnerDependent (dependent: State.Readonly<unknown>): CleanupFunction {
 		const dependentState = dependent as StateClass<unknown>;
 
@@ -795,64 +968,60 @@ class StateClass<T> extends Owner {
 			return noop;
 		}
 
-		this.implicitOwnerDependents.add(dependentState);
+		(this.implicitOwnerDependents ??= new Set()).add(dependentState);
 
 		if (this.isImplicitOwner && this.owner !== null) {
 			dependentState.setImplicitOwnerCandidate(this.owner);
 		}
 
 		return () => {
-			this.implicitOwnerDependents.delete(dependentState);
+			this.implicitOwnerDependents?.delete(dependentState);
 		};
 	}
 
 	protected beforeDispose (): void {
-		this.clearOrphanCheck();
-		this.releaseOwner();
-		this.releaseOwner = noop;
+		cancelNextTickCheck(this);
+		this.ownerLink?.releaseCleanup();
+		this.ownerLink = null;
 
-		for (const listenerRecord of getImmediateListeners(this)) {
-			listenerRecord.active = false;
+		const immediateLinks = this.immediateLinks;
+		const queuedLinks = this.queuedLinks;
+		this.immediateLinks = null;
+		this.queuedLinks = null;
+		this.implicitOwnerDependents = null;
+
+		if (immediateLinks !== null) {
+			for (const link of immediateLinks) {
+				link.source = null;
+				link.releaseCleanup();
+			}
 		}
 
-		for (const listenerRecord of getQueuedListeners(this)) {
-			listenerRecord.active = false;
-			this.graph.pendingListeners.delete(listenerRecord as QueuedStateListenerRecord<unknown>);
+		if (queuedLinks !== null) {
+			for (const link of queuedLinks) {
+				link.source = null;
+				link.releaseCleanup();
+			}
 		}
-
-		getImmediateListeners(this).clear();
-		getQueuedListeners(this).clear();
-		this.implicitOwnerDependents.clear();
 	}
 
-	private clearOrphanCheck (): void {
-		if (this.orphanCheckId === null) {
+	private static checkOrphan (state: StateClass<unknown>): void {
+		if (state.disposed || state.owner !== null) {
 			return;
 		}
 
-		this.orphanCheckId.cancel();
-		this.orphanCheckId = null;
+		throw new Error(orphanedStateErrorMessage);
 	}
 
 	private refreshOrphanCheck (): void {
 		if (this.disposed || this.owner !== null) {
-			this.clearOrphanCheck();
+			cancelNextTickCheck(this);
 			return;
 		}
 
-		if (this.orphanCheckId !== null) {
-			return;
+		if (!isNextTickCheckScheduled(this)) {
+			scheduleNextTickCheck(this as StateClass<unknown>, StateClass.checkOrphan);
 		}
-
-		this.orphanCheckId = scheduleTimeoutPromise(() => {
-			this.orphanCheckId = null;
-
-			if (this.disposed || this.owner !== null) {
-				return;
-			}
-
-			throw new Error(orphanedStateErrorMessage);
-		});
 	}
 
 	private setImplicitOwnerCandidate (candidate: Owner): void {
@@ -873,8 +1042,8 @@ class StateClass<T> extends Owner {
 		}
 
 		if (this.isImplicitOwner) {
-			this.releaseOwner();
-			this.releaseOwner = noop;
+			this.ownerLink?.releaseCleanup();
+			this.ownerLink = null;
 			this.owner = null;
 			this.isImplicitOwner = false;
 			this.requiresExplicitOwner = true;
@@ -885,14 +1054,17 @@ class StateClass<T> extends Owner {
 
 		this.owner = candidate;
 		this.isImplicitOwner = true;
-		this.releaseOwner = candidate.onCleanup(() => {
-			this.dispose();
-		});
-		this.clearOrphanCheck();
+		this.ownerLink = new DisposeLink(this);
+		linkCleanup(candidate, this.ownerLink);
+		cancelNextTickCheck(this);
 		this.notifyImplicitOwnerDependents(candidate);
 	}
 
 	private notifyImplicitOwnerDependents (candidate: Owner): void {
+		if (this.implicitOwnerDependents === null) {
+			return;
+		}
+
 		for (const dependent of this.implicitOwnerDependents) {
 			dependent.setImplicitOwnerCandidate(candidate);
 		}
@@ -905,7 +1077,31 @@ class StateClass<T> extends Owner {
 	}
 }
 
+function fixStateValue<T> (fix: StateFixFunction<T>, value: T): T {
+	return fix(value) ?? value;
+}
+
 interface StateClass<T> extends State.Readonly<T>, StateExtensions<T> { }
+
+/** A state with a fixed value: updates are ignored and it needs no owner. */
+class ReadonlyStateClass<T> extends StateClass<T> {
+	constructor (value: T) {
+		super(null, value, {}, false);
+		this["mutable"] = false;
+	}
+
+	override set (nextValue: T): T {
+		return nextValue;
+	}
+
+	override update (): T {
+		return this.value;
+	}
+
+	override clear (): T {
+		return this.value;
+	}
+}
 
 /**
  * Reactive state container that notifies listeners when the value changes.
@@ -963,7 +1159,7 @@ type StateConstructor = {
 	extend<T = unknown> (): ExtendableStateClass;
 	/**
 	 * Creates a new State instance that can never change.
-	 * The returned state has a fixed value and ignores all updates. 
+	 * The returned state has a fixed value and ignores all updates.
 	 * It is not associated with any owner and does not require disposal.
 	 * @param value The fixed value for the readonly state.
 	 * @returns A new readonly state instance with the specified value.
@@ -1005,7 +1201,7 @@ type StateConstructor = {
  * @group State
  */
 export const State = function State<T> (ownerOrValue: Owner | T, valueOrOptions?: T | StateOptions<T>, options?: StateOptions<T>): State<T> {
-	if (ownerOrValue instanceof Owner && arguments.length >= 2) {
+	if (ownerOrValue instanceof OwnerClass && arguments.length >= 2) {
 		return new StateClass(ownerOrValue, valueOrOptions as T, (options ?? {}) as StateInternalOptions<T>);
 	}
 
@@ -1037,17 +1233,11 @@ State.extend = function extend (): ExtendableStateClass {
 
 /**
  * Creates a new State instance that can never change.
- * The returned state has a fixed value and ignores all updates. 
+ * The returned state has a fixed value and ignores all updates.
  * It is not associated with any owner and does not require disposal.
  * @param value The fixed value for the readonly state.
  * @returns A new readonly state instance with the specified value.
  */
 State.Readonly = function Readonly<T> (value: RejectUndefined<T>): State.Readonly<WidenStateValue<T>> {
-	const readonlyState = new StateClass(null, value as WidenStateValue<T>);
-	readonlyState["clearOrphanCheck"]();
-	readonlyState["mutable"] = false;
-	readonlyState.clear = () => readonlyState.value;
-	readonlyState.set = ident;
-	readonlyState.update = () => readonlyState.value;
-	return readonlyState as State.Readonly<WidenStateValue<T>>;
+	return new ReadonlyStateClass(value as WidenStateValue<T>) as State.Readonly<WidenStateValue<T>>;
 };

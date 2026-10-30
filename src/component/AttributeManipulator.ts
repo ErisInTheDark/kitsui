@@ -1,5 +1,6 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
 import type { Falsy } from "./ClassManipulator";
+import { staticPropertySource, type PropertySource } from "./GenericPropertyManipulator";
 
 /**
  * Types accepted as attribute names: a single string, or any iterable of strings.
@@ -117,20 +118,12 @@ function serializeAttributeValue (value: AttributeValueSelection): string | null
 	return String(value);
 }
 
-function toAttributeNameSource (value: AttributeNameInput): State.Readonly<ReactiveAttributeNameSelection> {
-	if (isStateSource<ReactiveAttributeNameSelection>(value)) {
-		return value as unknown as State<ReactiveAttributeNameSelection>;
-	}
-
-	return State.Readonly(value === undefined ? null : value);
-}
-
-function toAttributeValueSource (value: AttributeValueInput): State.Readonly<ReactiveAttributeValueSelection> {
+function toAttributeValueSource (value: AttributeValueInput): PropertySource<ReactiveAttributeValueSelection> {
 	if (isStateSource<ReactiveAttributeValueSelection>(value)) {
-		return value as unknown as State<ReactiveAttributeValueSelection>;
+		return value;
 	}
 
-	return State.Readonly(value === undefined ? null : value);
+	return staticPropertySource(value === undefined ? null : value);
 }
 
 /**
@@ -140,6 +133,7 @@ function toAttributeValueSource (value: AttributeValueInput): State.Readonly<Rea
  */
 export class AttributeManipulator<OWNER extends Owner> {
 	private readonly attributeDeterminers = new Map<string, AttributeDeterminerRecord>();
+	private staticCleanupRegistered = false;
 
 	/**
 	 * @param owner The owner managing this manipulator's cleanup.
@@ -285,6 +279,30 @@ export class AttributeManipulator<OWNER extends Owner> {
 		return argumentsList as AttributeEntry[];
 	}
 
+	/**
+	 * Applies attributes whose names and value never change. Skips the reactive selection machinery entirely;
+	 * one owner cleanup per manipulator removes them when the owner disposes, as reactive determiners do.
+	 */
+	private installStaticAttributes (names: AttributeNameSelection, value: string | null): void {
+		for (const attributeName of resolveAttributeNames(names)) {
+			this.replaceAttributeDeterminer(attributeName, (applyIfCurrent) => {
+				applyIfCurrent(value);
+				return () => {
+					this.element.removeAttribute(attributeName);
+				};
+			});
+		}
+
+		if (!this.staticCleanupRegistered) {
+			this.staticCleanupRegistered = true;
+			this.owner.onCleanup(() => {
+				for (const determiner of [...this.attributeDeterminers.values()]) {
+					determiner.cleanup();
+				}
+			});
+		}
+	}
+
 	private installAttributePresence (
 		attribute: AttributeNameInput,
 		getValue: () => string | null,
@@ -293,9 +311,12 @@ export class AttributeManipulator<OWNER extends Owner> {
 			subscribePresenceChanges?: (listener: CleanupFunction) => CleanupFunction;
 		} = {},
 	): CleanupFunction {
-		const nameSource = toAttributeNameSource(attribute);
+		if (!isStateSource(attribute) && !options.subscribePresenceChanges) {
+			this.installStaticAttributes(attribute as AttributeNameSelection, getValue());
+			return noop;
+		}
 
-		return this.installAttributeSelection(nameSource, getValue, {
+		return this.installAttributeSelection(attribute, getValue, {
 			logDynamicReplacement,
 			subscribeValueChanges: options.subscribePresenceChanges,
 		});
@@ -309,14 +330,18 @@ export class AttributeManipulator<OWNER extends Owner> {
 			subscribePresenceChanges?: (listener: CleanupFunction) => CleanupFunction;
 		} = {},
 	): CleanupFunction {
-		const nameSource = toAttributeNameSource(entry.name);
+		if (!isStateSource(entry.name) && !isStateSource(entry.value) && !options.getPresence && !options.subscribePresenceChanges) {
+			this.installStaticAttributes(entry.name as AttributeNameSelection, serializeAttributeValue(entry.value as AttributeValueSelection));
+			return noop;
+		}
+
 		const valueSource = toAttributeValueSource(entry.value);
 		const getPresence = options.getPresence ?? (() => true);
 		const logDynamicReplacement = options.logDynamicReplacement
 			|| isStateSource(entry.name)
 			|| isStateSource(entry.value);
 
-		return this.installAttributeSelection(nameSource, () => {
+		return this.installAttributeSelection(entry.name, () => {
 			if (!getPresence()) {
 				return null;
 			}
@@ -342,7 +367,7 @@ export class AttributeManipulator<OWNER extends Owner> {
 	}
 
 	private installAttributeSelection (
-		nameSource: State.Readonly<AttributeNameSelection>,
+		nameInput: AttributeNameInput,
 		getValue: () => string | null,
 		options: {
 			logDynamicReplacement?: boolean;
@@ -419,16 +444,17 @@ export class AttributeManipulator<OWNER extends Owner> {
 			}
 		};
 
-		const selectionCleanup = nameSource.subscribe(this.owner, (selection) => {
+		const nameSource = isStateSource<ReactiveAttributeNameSelection>(nameInput) ? nameInput : null;
+		const selectionCleanup = nameSource?.subscribe(this.owner, (selection) => {
 			syncSelection(selection);
-		});
+		}) ?? noop;
 		const valueCleanup = options.subscribeValueChanges?.(() => {
 			for (const entry of entries.values()) {
 				entry.apply();
 			}
 		}) ?? noop;
 
-		syncSelection(nameSource.value);
+		syncSelection(nameSource ? nameSource.value : nameInput as AttributeNameSelection);
 		releaseOwner = this.owner.onCleanup(() => {
 			cleanup();
 		});

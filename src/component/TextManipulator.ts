@@ -1,6 +1,7 @@
 import { State } from "../state/State";
 import type { Component } from "./Component";
-import { GenericPropertyManipulator } from "./GenericPropertyManipulator";
+import { DOMTree } from "./DOMTree";
+import { GenericPropertyManipulator, staticPropertySource, type PropertySource } from "./GenericPropertyManipulator";
 
 /** Serializable values accepted by the text manipulator. */
 export type TextValue = string | number | bigint | boolean;
@@ -43,18 +44,24 @@ export class TextManipulator<OWNER extends Component> extends GenericPropertyMan
 		return super.bind(visible, value);
 	}
 
-	protected override toSource (value: TextInput): State.Readonly<ReactiveTextSelection> {
+	protected override toSource (value: TextInput): PropertySource<ReactiveTextSelection> {
 		if (isTextSource(value)) {
 			return value;
 		}
 
-		return State.Readonly((value ?? null) as ReactiveTextSelection);
+		return staticPropertySource((value ?? null) as ReactiveTextSelection);
 	}
 
 	protected override writeProperty (value: ReactiveTextSelection | undefined): void {
 		const text = String(value ?? "");
-		
+		const element = this.owner.element;
+		const onlyChild = element.firstChild;
+		if (onlyChild === element.lastChild && (onlyChild === null ? text === "" : onlyChild.nodeType === Node.TEXT_NODE && (onlyChild as Text).data === text) && !DOMTree.hasPendingChildChanges(element)) {
+			// Already showing exactly this text, so re-applying it (as keyed re-renders often do) changes nothing.
+			return;
+		}
+
 		this.owner.clear();
-		this.owner.element.textContent = text;
+		element.textContent = text;
 	}
 }

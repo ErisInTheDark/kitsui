@@ -6,6 +6,7 @@ import type { Place } from "../../src/component/extensions/placeExtension";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Style } from "../../src/component/Style";
 import { Owner, State, type CleanupFunction } from "../../src/state/State";
+import { captureOrphanCheck } from "../utility/captureOrphanCheck";
 
 declare module "../../src/component/Component" {
 	interface ComponentExtensions {
@@ -58,56 +59,6 @@ function captureTimeoutCallbacks (): {
 	};
 }
 
-function captureOrphanCheck (): {
-	timeoutHandler: (() => void) | null;
-	orphanCheck: (() => void) | null;
-	queuedError: (() => void) | null;
-	restore: () => void;
-} {
-	let timeoutHandler: (() => void) | null = null;
-	let orphanCheck: (() => void) | null = null;
-	let queuedError: (() => void) | null = null;
-	const originalThen = Promise.prototype.then;
-	const patchedThen: typeof Promise.prototype.then = function patchedThen<TResult1 = any, TResult2 = never> (
-		this: Promise<any>,
-		onFulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
-		onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
-	): Promise<TResult1 | TResult2> {
-		if (typeof onFulfilled === "function") {
-			orphanCheck = onFulfilled as unknown as () => void;
-		}
-
-		return originalThen.call(this, onFulfilled, onRejected) as Promise<TResult1 | TResult2>;
-	};
-	Promise.prototype.then = patchedThen;
-	const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback: VoidFunction) => {
-		queuedError = callback as () => void;
-	});
-	const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler) => {
-		if (typeof handler === "function") {
-			timeoutHandler = handler as unknown as () => void;
-		}
-
-		return 0 as unknown as ReturnType<typeof setTimeout>;
-	}) as unknown as typeof setTimeout);
-
-	return {
-		get timeoutHandler (): (() => void) | null {
-			return timeoutHandler;
-		},
-		get orphanCheck (): (() => void) | null {
-			return orphanCheck;
-		},
-		get queuedError (): (() => void) | null {
-			return queuedError;
-		},
-		restore (): void {
-			Promise.prototype.then = originalThen;
-			queueMicrotaskSpy.mockRestore();
-			setTimeoutSpy.mockRestore();
-		},
-	};
-}
 
 function captureDeferredOrphanErrors (): {
 	readonly queuedErrors: readonly VoidFunction[];
@@ -3461,10 +3412,10 @@ describe("Component", () => {
 
 		try {
 			placementOwner.remove();
+			expect(orphanCheckSpy.orphanCheck, "placement cleanup should schedule deferred cleanup before the reappend clears it").toBeTypeOf("function");
 			newHost.append(child);
 
 			expect(child.disposed, "same-tick reappend should keep the child alive").toBe(false);
-			expect(orphanCheckSpy.orphanCheck, "placement cleanup should still schedule deferred cleanup before the reappend clears it").toBeTypeOf("function");
 			expect(() => orphanCheckSpy.orphanCheck?.(), "reappend before deferred cleanup should keep the child alive").not.toThrow();
 			expect(child.disposed, "managed reappended children should not be disposed by deferred cleanup").toBe(false);
 			expect(orphanCheckSpy.queuedError, "managed reappended children should not queue an orphan error").toBeNull();

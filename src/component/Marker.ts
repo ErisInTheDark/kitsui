@@ -1,6 +1,6 @@
 import { Owner, type CleanupFunction } from "../state/State";
 import { runCleanupSteps } from "../utility/cleanup";
-import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
+import { cancelNextTickCheck, isNextTickCheckScheduled, scheduleNextTickCheck } from "../utility/nextTickCheck";
 import { EventManipulator } from "./EventManipulator";
 import {
 	DOMTree,
@@ -140,7 +140,8 @@ function getOwnerNode (owner: Owner): Node | null {
 
 function getExplicitOwners (owner: Owner): Owner[] {
 	const value = owner as OwnerWithNode;
-	return value.owner && typeof value.owner.getAll === "function"
+	// Owner manipulators are memoized as own properties; reading the prototype getter would create one just to find it empty.
+	return Object.prototype.hasOwnProperty.call(value, "owner") && typeof value.owner?.getAll === "function"
 		? value.owner.getAll()
 		: [];
 }
@@ -211,7 +212,6 @@ class MarkerClass extends Owner {
 	private readonly domTreeRegistration: DOMTreeNodeRegistration;
 	private readonly useHooks = new Set<MarkerUseHook>();
 	private mounted = false;
-	private orphanCheckId: DeferredTimeoutHandle | null = null;
 
 	/**
 	 * Creates a new marker comment with the given identifier text.
@@ -367,12 +367,7 @@ class MarkerClass extends Owner {
 	}
 
 	private clearOrphanCheck (): void {
-		if (this.orphanCheckId === null) {
-			return;
-		}
-
-		this.orphanCheckId.cancel();
-		this.orphanCheckId = null;
+		cancelNextTickCheck(this);
 	}
 
 	/** @internal */
@@ -382,25 +377,9 @@ class MarkerClass extends Owner {
 			return;
 		}
 
-		if (this.orphanCheckId !== null) {
-			return;
+		if (!isNextTickCheckScheduled(this)) {
+			scheduleNextTickCheck(this as MarkerClass, requireManagedMarker);
 		}
-
-		this.orphanCheckId = scheduleTimeoutPromise(() => {
-			this.orphanCheckId = null;
-
-			if (this.disposed) {
-				return;
-			}
-
-			this.refreshPlacementOwner();
-			if (this.isManaged()) {
-				this.dispatchMount();
-				return;
-			}
-
-			throw new Error(orphanedMarkerErrorMessage);
-		});
 	}
 
 	/** @internal Updates Kitsui-derived placement ownership from the current virtual tree. */
@@ -414,7 +393,9 @@ class MarkerClass extends Owner {
 			}
 			current = DOMTree.composedParentOf(current);
 		}
-		this.owner.remove("placement");
+		if (Object.prototype.hasOwnProperty.call(this, "owner")) {
+			this.owner.remove("placement");
+		}
 	}
 
 	private isManaged (): boolean {
@@ -422,11 +403,25 @@ class MarkerClass extends Owner {
 			return true;
 		}
 
-		return this.owner.getAll().some(owner => isManagedOwner(owner, new Set()));
+		return getExplicitOwners(this).some(owner => isManagedOwner(owner, new Set()));
 	}
 }
 
 interface MarkerClass extends MarkerExtensions { }
+
+function requireManagedMarker (marker: MarkerClass): void {
+	if (marker.disposed) {
+		return;
+	}
+
+	marker["refreshPlacementOwner"]();
+	if (marker["isManaged"]()) {
+		marker["dispatchMount"]();
+		return;
+	}
+
+	throw new Error(orphanedMarkerErrorMessage);
+}
 
 /**
  * A wrapper around a DOM comment used where an actual DOM element is not needed.

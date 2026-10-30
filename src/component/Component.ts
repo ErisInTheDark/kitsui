@@ -1,6 +1,6 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
 import { cleanupAndRethrow, runCleanupSteps } from "../utility/cleanup";
-import { scheduleTimeoutPromise, type DeferredTimeoutHandle } from "../utility/timeoutPromise";
+import { cancelNextTickCheck, isNextTickCheckScheduled, scheduleNextTickCheck } from "../utility/nextTickCheck";
 import { AriaManipulator } from "./AriaManipulator";
 import { AttributeManipulator } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
@@ -438,9 +438,54 @@ interface DisposeManagedNodeOptions {
 	retainedPhysicalComponentAction?: RetainedManagedComponentAction;
 }
 
+/** Settles a component's next-tick orphan check: mounts it if managed, otherwise reports it. */
+function requireManagedComponent (component: ComponentClass<HTMLElement>): void {
+	if (settleManagedComponent(component)) {
+		return;
+	}
+
+	throw new Error(orphanedComponentErrorMessage);
+}
+
+/** Settles a component whose placement was cleaned up: mounts it if still managed, otherwise removes it. */
+function removeComponentIfUnmanaged (component: ComponentClass<HTMLElement>): void {
+	if (!settleManagedComponent(component)) {
+		component.remove();
+	}
+}
+
+/** Returns true when the component is disposed or managed (mounting it), false when it is an orphan. */
+function settleManagedComponent (component: ComponentClass<HTMLElement>): boolean {
+	if (component.disposed) {
+		return true;
+	}
+
+	component["refreshPlacementOwner"]();
+	if (component["isManaged"]()) {
+		component.dispatchMount();
+		return true;
+	}
+
+	return false;
+}
+
+function hasOnlyTextChildren (element: HTMLElement): boolean {
+	for (let child = element.firstChild; child; child = child.nextSibling) {
+		if (child.nodeType !== Node.TEXT_NODE) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/** Explicit owners of a component, without creating its owner manipulator when none was ever used. */
+function explicitOwnersOf (component: ComponentClass<HTMLElement>): Owner[] {
+	return Object.prototype.hasOwnProperty.call(component, "owner") ? component.owner.getAll() : [];
+}
+
 function ownerResolvesForComponent (
 	owner: Owner | null,
-	visitedComponents: Set<ComponentClass<HTMLElement>> = new Set(),
+	visitedComponents?: Set<ComponentClass<HTMLElement>>,
 ): boolean {
 	if (!owner || owner.disposed) {
 		return false;
@@ -473,7 +518,7 @@ function resolveExternalComponentManager (
 		current = DOMTree.composedParentOf(current);
 	}
 
-	const explicitOwner = component.owner.getAll()
+	const explicitOwner = explicitOwnersOf(component)
 		.find(owner => owner !== ignoredOwner && ownerResolvesForComponent(owner, visitedComponents));
 	if (explicitOwner) {
 		return { kind: "other", owner: explicitOwner, resolverManaged: false };
@@ -504,14 +549,13 @@ function retainManagedComponent (component: ComponentClass<HTMLElement>, action:
 }
 
 function managedChildNodes (node: Node): Node[] {
-	const childNodes = new Set(isDOMParent(node) ? DOMTree.childrenOf(node) : Array.from(node.childNodes));
+	const childNodes = isDOMParent(node) ? DOMTree.childrenOf(node) : Array.from(node.childNodes);
 	if (node instanceof HTMLElement && node.shadowRoot) {
-		for (const childNode of DOMTree.childrenOf(node.shadowRoot)) {
-			childNodes.add(childNode);
-		}
+		// Light and shadow children are disjoint, so appending needs no deduplication.
+		childNodes.push(...DOMTree.childrenOf(node.shadowRoot));
 	}
 
-	return [...childNodes];
+	return childNodes;
 }
 
 function pendingManagedChildNodes (
@@ -522,11 +566,12 @@ function pendingManagedChildNodes (
 	const pendingNodes: Node[] = [];
 	const visitedNodes = new Set<Node>();
 	const visit = (parent: Node, includeDetachedChildren = false) => {
-		const childNodes = new Set(managedChildNodes(parent));
-		if (includeDetachedChildren && isDOMParent(parent)) {
+		const childNodes = managedChildNodes(parent);
+		if (includeDetachedChildren && DOMTree.active && isDOMParent(parent)) {
+			// Mid-transaction, physical children the virtual tree already detached are still owned here.
 			for (const childNode of DOMTree.physical.childrenOf(parent)) {
 				if (DOMTree.parentOf(childNode) === null) {
-					childNodes.add(childNode);
+					childNodes.push(childNode);
 				}
 			}
 		}
@@ -635,7 +680,6 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	private readonly domTreeRegistration: DOMTreeNodeRegistration;
 	private readonly structuralCleanups = new Set<CleanupFunction>();
 	private mounted = false;
-	private orphanCheckId: DeferredTimeoutHandle | null = null;
 	private retainedResolverOwner: Owner | null = null;
 	private releaseRetainedResolverOwner: CleanupFunction = noop;
 
@@ -1262,6 +1306,12 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	 */
 	clear (): this {
 		this.ensureActive();
+		if (this.structuralCleanups.size === 0 && !DOMTree.hasPendingChildChanges(this.element) && this.element.shadowRoot === null && hasOnlyTextChildren(this.element)) {
+			// Text nodes can't be wrapped or owned, so there is nothing to dispose; just drop them.
+			this.element.textContent = "";
+			return this;
+		}
+
 		runCleanupSteps([
 			() => this.releaseStructuralCleanups(),
 			() => runCleanupSteps(managedChildCleanupSteps(this.element, {
@@ -1387,12 +1437,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 	}
 
 	private clearOrphanCheck (): void {
-		if (this.orphanCheckId === null) {
-			return;
-		}
-
-		this.orphanCheckId.cancel();
-		this.orphanCheckId = null;
+		cancelNextTickCheck(this);
 	}
 
 	private refreshOrphanCheck (): void {
@@ -1401,25 +1446,11 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			return;
 		}
 
-		if (this.orphanCheckId !== null) {
+		if (isNextTickCheckScheduled(this)) {
 			return;
 		}
 
-		this.orphanCheckId = scheduleTimeoutPromise(() => {
-			this.orphanCheckId = null;
-
-			if (this.disposed) {
-				return;
-			}
-
-			this.refreshPlacementOwner();
-			if (this.isManaged()) {
-				this.dispatchMount();
-				return;
-			}
-
-			throw new Error(orphanedComponentErrorMessage);
-		});
+		scheduleNextTickCheck(this as ComponentClass<HTMLElement>, requireManagedComponent);
 	}
 
 	private refreshPlacementOwner (): void {
@@ -1430,7 +1461,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 				const owner = current.component;
 				if (owner && owner !== this) {
 					if (crossedShadowBoundary) this.owner.add(owner, shadowPlacementOwnerClaim);
-					else this.owner.remove(shadowPlacementOwnerClaim);
+					else this.releaseShadowPlacementOwner();
 					return;
 				}
 			}
@@ -1445,7 +1476,13 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			crossedShadowBoundary = true;
 			current = composedParent;
 		}
-		this.owner.remove(shadowPlacementOwnerClaim);
+		this.releaseShadowPlacementOwner();
+	}
+
+	private releaseShadowPlacementOwner (): void {
+		if (Object.prototype.hasOwnProperty.call(this, "owner")) {
+			this.owner.remove(shadowPlacementOwnerClaim);
+		}
 	}
 
 	private bindRetainedResolverOwner (owner: Owner): void {
@@ -1500,43 +1537,30 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		}
 
 		this.clearOrphanCheck();
-		this.orphanCheckId = scheduleTimeoutPromise(() => {
-			this.orphanCheckId = null;
-
-			if (this.disposed) {
-				return;
-			}
-
-			this.refreshPlacementOwner();
-			if (this.isManaged()) {
-				this.dispatchMount();
-				return;
-			}
-
-			this.remove();
-		});
+		scheduleNextTickCheck(this as ComponentClass<HTMLElement>, removeComponentIfUnmanaged);
 	}
 
-	private isManaged (visitedComponents: Set<ComponentClass<HTMLElement>> = new Set()): boolean {
+	private isManaged (visitedComponents?: Set<ComponentClass<HTMLElement>>): boolean {
 		if (DOMTree.isConnected(this.element)) {
 			return true;
 		}
-		if (visitedComponents.has(this)) {
+		const visited = visitedComponents ?? new Set<ComponentClass<HTMLElement>>();
+		if (visited.has(this)) {
 			return false;
 		}
-		visitedComponents.add(this);
+		visited.add(this);
 
-		if (this.owner.getAll().some(owner => this.ownerResolves(owner, visitedComponents))) {
+		if (explicitOwnersOf(this).some(owner => ownerResolvesForComponent(owner, visited))) {
 			return true;
 		}
 
-		if (this.ownerResolves(placementAuthorityOwner(this.element), visitedComponents)) {
+		if (ownerResolvesForComponent(placementAuthorityOwner(this.element), visited)) {
 			return true;
 		}
 
 		let current: Node | null = DOMTree.composedParentOf(this.element);
 		while (current) {
-			if (this.ownerResolves(getWrappedNodeOwner(current), visitedComponents)) {
+			if (ownerResolvesForComponent(getWrappedNodeOwner(current), visited)) {
 				return true;
 			}
 
@@ -1544,16 +1568,12 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 		}
 
 		for (const resolver of componentOwnerResolvers) {
-			if (this.ownerResolves(resolver(this), visitedComponents)) {
+			if (ownerResolvesForComponent(resolver(this), visited)) {
 				return true;
 			}
 		}
 
 		return false;
-	}
-
-	private ownerResolves (owner: Owner | null, visitedComponents: Set<ComponentClass<HTMLElement>>): boolean {
-		return ownerResolvesForComponent(owner, visitedComponents);
 	}
 
 	private resolveNode (child: ComponentChild): Node {

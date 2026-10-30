@@ -1,4 +1,4 @@
-import { Owner, State, StateStaticExtensions, type CleanupFunction, type StateOptions } from "../State";
+import { isOwner, Owner, State, StateStaticExtensions, type CleanupFunction, type StateOptions } from "../State";
 import type { Mapper } from "./mappingExtension";
 
 type GroupedStateObject = Record<string, State.Readonly<any>>;
@@ -255,7 +255,7 @@ export default function groupExtension (): void {
 		mapperOrOptions?: Mapper<GroupedValue<T>, U> | StateOptions<GroupedValue<T>>,
 		maybeOptions?: StateOptions<U>,
 	): State<U> {
-		const owner = ownerOrStates instanceof Owner && arguments.length >= 2 ? ownerOrStates : null;
+		const owner = isOwner(ownerOrStates) && arguments.length >= 2 ? ownerOrStates : null;
 		const states = owner === null
 			? ownerOrStates as T
 			: statesOrMapperOrOptions as T;

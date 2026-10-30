@@ -1,4 +1,4 @@
-import { Owner, State, type CleanupFunction, type StateOptions } from "../State";
+import { DisposeLink, isOwner, linkCleanup, Owner, State, StateLink, type CleanupFunction, type StateOptions } from "../State";
 
 type Nullish = null;
 type ComparableValue<T> = T | State.Readonly<T>;
@@ -131,9 +131,57 @@ const truthyStates = new WeakMap<State<unknown>, MutableRecomputableState<boolea
 const falsyStates = new WeakMap<State<unknown>, MutableRecomputableState<boolean>>();
 
 const createOwnedState = State as unknown as <T>(owner: Owner, initialValue: T, options?: StateOptions<T>) => State<T>;
-const createOwnerlessState = State as unknown as <T>(initialValue: T, options?: StateOptions<T>) => State<T>;
 
 let patched = false;
+
+type StateClassConstructor = new (owner: Owner | null, initialValue: unknown, options?: StateOptions<unknown>) => State<unknown>;
+
+let MappedStateClass: (new (source: State<unknown>, owner: Owner | null, mapValue: Mapper<unknown, unknown>, options?: StateOptions<unknown>) => MutableRecomputableState<unknown>) | null = null;
+
+/** Pushes each source change through the mapper into the mapped state. */
+class MappedLink extends StateLink<unknown> {
+	constructor (
+		private readonly target: State<unknown>,
+		private readonly mapValue: Mapper<unknown, unknown>,
+	) {
+		super(true);
+	}
+
+	notify (value: unknown, previousValue: unknown): void {
+		this.target.set(this.mapValue(value, previousValue));
+	}
+}
+
+function defineMappedStateClass (): NonNullable<typeof MappedStateClass> {
+	const StateClass = State.extend() as unknown as StateClassConstructor;
+
+	return class MappedState extends StateClass {
+		// Unset while super() runs; a disposed owner disposes the state before construction finishes.
+		private readonly sourceDisposal: DisposeLink | undefined;
+
+		constructor (
+			private readonly source: State<unknown>,
+			owner: Owner | null,
+			private readonly mapValue: Mapper<unknown, unknown>,
+			options?: StateOptions<unknown>,
+		) {
+			super(owner, mapValue(source.value), { ...options, graph: source.getGraph() } as StateOptions<unknown>);
+			this._registerImplicitOwnerDependent(source);
+			source._link(this, new MappedLink(this, mapValue));
+			this.sourceDisposal = new DisposeLink(this);
+			linkCleanup(source, this.sourceDisposal);
+		}
+
+		recompute (): void {
+			this.set(this.mapValue(this.source.value, this.source.value));
+		}
+
+		protected beforeDispose (): void {
+			super["beforeDispose"]();
+			this.sourceDisposal?.releaseCleanup();
+		}
+	} as unknown as NonNullable<typeof MappedStateClass>;
+}
 
 function createMappedState<T, TMapped> (
 	source: State<T>,
@@ -141,33 +189,13 @@ function createMappedState<T, TMapped> (
 	mapValue: Mapper<T, TMapped>,
 	options?: StateOptions<TMapped>,
 ): MutableRecomputableState<TMapped> {
-	const stateOptions = {
-		...options,
-		graph: source.getGraph(),
-	};
-	const mapped = (owner
-		? createOwnedState(owner, mapValue(source.value) as Exclude<TMapped, undefined>, stateOptions as StateOptions<Exclude<TMapped, undefined>>)
-		: createOwnerlessState(mapValue(source.value) as Exclude<TMapped, undefined>, stateOptions as StateOptions<Exclude<TMapped, undefined>>)
+	MappedStateClass ??= defineMappedStateClass();
+	return new MappedStateClass(
+		source as State<unknown>,
+		owner,
+		mapValue as Mapper<unknown, unknown>,
+		options as StateOptions<unknown> | undefined,
 	) as unknown as MutableRecomputableState<TMapped>;
-	const releaseImplicitOwnerPropagation = ((mapped as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(source)) ?? (() => undefined);
-	const releaseSourceSubscription = source.subscribeImmediate(mapped, (value, oldValue) => {
-		mapped.set(mapValue(value, oldValue));
-	});
-	const releaseSourceCleanup = source.onCleanup(() => {
-		mapped.dispose();
-	});
-
-	mapped.onCleanup(() => {
-		releaseImplicitOwnerPropagation();
-		releaseSourceCleanup();
-		releaseSourceSubscription();
-	});
-
-	mapped.recompute = () => {
-		mapped.set(mapValue(source.value, source.value));
-	};
-
-	return mapped;
 }
 
 function createAsyncMappingState<T, U, E> (
@@ -321,7 +349,7 @@ export default function mappingExtension (): void {
 		maybeMapValueOrOptions?: Mapper<unknown, TMapped> | StateOptions<TMapped>,
 		maybeOptions?: StateOptions<TMapped>,
 	): RecomputableState<TMapped> {
-		if (ownerOrMapValue instanceof Owner) {
+		if (isOwner(ownerOrMapValue)) {
 			return createMappedState(this, ownerOrMapValue, maybeMapValueOrOptions as Mapper<unknown, TMapped>, maybeOptions);
 		}
 

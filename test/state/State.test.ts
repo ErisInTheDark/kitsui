@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Owner, State } from "../../src/state/State";
+import { captureOrphanCheck } from "../utility/captureOrphanCheck";
 
 if (false) {
 	// @ts-expect-error State<string | undefined> should no longer be accepted.
@@ -31,7 +32,12 @@ function mountedOwner<NAME extends keyof HTMLElementTagNameMap = "div">(tagName:
 }
 
 function cleanupRegistrationCount (owner: Owner): number {
-	return (owner as unknown as { cleanupFunctions: Set<() => void> }).cleanupFunctions.size;
+	type Link = { cleanupOwner: unknown; nextCleanup: Link | null };
+	let count = 0;
+	for (let link = (owner as unknown as { cleanupHead: Link | null }).cleanupHead; link; link = link.nextCleanup) {
+		if (link.cleanupOwner === owner) count++;
+	}
+	return count;
 }
 
 async function flushEffects (): Promise<void> {
@@ -49,56 +55,6 @@ async function flushEffects (): Promise<void> {
 	await Promise.resolve();
 }
 
-function captureOrphanCheck (): {
-	timeoutHandler: (() => void) | null;
-	orphanCheck: (() => void) | null;
-	queuedError: (() => void) | null;
-	restore: () => void;
-} {
-	let timeoutHandler: (() => void) | null = null;
-	let orphanCheck: (() => void) | null = null;
-	let queuedError: (() => void) | null = null;
-	const originalThen = Promise.prototype.then;
-	const patchedThen: typeof Promise.prototype.then = function patchedThen<TResult1 = any, TResult2 = never> (
-		this: Promise<any>,
-		onFulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
-		onRejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
-	): Promise<TResult1 | TResult2> {
-		if (typeof onFulfilled === "function") {
-			orphanCheck = onFulfilled as unknown as () => void;
-		}
-
-		return originalThen.call(this, onFulfilled, onRejected) as Promise<TResult1 | TResult2>;
-	};
-	Promise.prototype.then = patchedThen;
-	const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback: VoidFunction) => {
-		queuedError = callback as () => void;
-	});
-	const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler) => {
-		if (typeof handler === "function") {
-			timeoutHandler = handler as unknown as () => void;
-		}
-
-		return 0 as unknown as ReturnType<typeof setTimeout>;
-	}) as unknown as typeof setTimeout);
-
-	return {
-		get timeoutHandler (): (() => void) | null {
-			return timeoutHandler;
-		},
-		get orphanCheck (): (() => void) | null {
-			return orphanCheck;
-		},
-		get queuedError (): (() => void) | null {
-			return queuedError;
-		},
-		restore (): void {
-			Promise.prototype.then = originalThen;
-			queueMicrotaskSpy.mockRestore();
-			setTimeoutSpy.mockRestore();
-		},
-	};
-}
 
 describe("Owner", () => {
 	it("creates distinct standalone owner scopes", () => {
@@ -1687,12 +1643,12 @@ describe("State", () => {
 
 		try {
 			const state = State(1);
-			const owner = mountedOwner();
+			expect(orphanCheckSpy.orphanCheck, "ownerless state should schedule an orphan check before gaining an owner").not.toBeNull();
 
+			const owner = mountedOwner();
 			state.subscribe(owner, () => undefined);
 
-			expect(orphanCheckSpy.orphanCheck, "ownerless state should schedule an orphan check before gaining an owner").not.toBeNull();
-			expect(() => orphanCheckSpy.orphanCheck!(), "the orphan check should not throw after an implicit owner is assigned").not.toThrow();
+			expect(() => orphanCheckSpy.orphanCheck?.(), "the orphan check should not throw after an implicit owner is assigned").not.toThrow();
 			expect(orphanCheckSpy.queuedError, "the orphan check should not queue an error after ownership is assigned").toBeNull();
 
 			owner.remove();
@@ -1792,12 +1748,12 @@ describe("State", () => {
 
 			expect(grouped.value, "ownerless State.Group mapper overload should derive the grouped value").toBe("one:1");
 			expect(grouped.getOwner(), "ownerless State.Group should start without an owner").toBeNull();
+			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group should schedule an orphan check before gaining an owner").not.toBeNull();
 
 			grouped.subscribe(owner, () => undefined);
 
 			expect(grouped.getOwner(), "a subscribing Component should become the grouped state's implicit owner").toBe(owner);
-			expect(orphanCheckSpy.orphanCheck, "ownerless State.Group should schedule an orphan check before gaining an owner").not.toBeNull();
-			expect(() => orphanCheckSpy.orphanCheck!(), "the orphan check should not throw after an implicit owner is assigned").not.toThrow();
+			expect(() => orphanCheckSpy.orphanCheck?.(), "the orphan check should not throw after an implicit owner is assigned").not.toThrow();
 			expect(orphanCheckSpy.queuedError, "the orphan check should not queue an error after ownership is assigned").toBeNull();
 		}
 		finally {
@@ -2150,5 +2106,116 @@ describe("State", () => {
 		finally {
 			orphanCheckSpy.restore();
 		}
+	});
+});
+
+describe("cleanup and notification ordering", () => {
+	it("runs cleanups in registration order and skips ones unregistered by an earlier cleanup", () => {
+		const owner = Owner();
+		const calls: string[] = [];
+		let releaseThird = (): void => undefined;
+
+		owner.onCleanup(() => calls.push("first"));
+		owner.onCleanup(() => {
+			calls.push("second");
+			releaseThird();
+		});
+		releaseThird = owner.onCleanup(() => calls.push("third"));
+		owner.onCleanup(() => calls.push("fourth"));
+
+		owner.dispose();
+
+		expect(calls).toEqual(["first", "second", "fourth"]);
+		expect(cleanupRegistrationCount(owner)).toBe(0);
+	});
+
+	it("runs a cleanup registered while the owner disposes immediately", () => {
+		const owner = Owner();
+		const calls: string[] = [];
+
+		owner.onCleanup(() => {
+			calls.push("outer");
+			owner.onCleanup(() => calls.push("late"));
+			calls.push("after late");
+		});
+		owner.dispose();
+
+		expect(calls).toEqual(["outer", "late", "after late"]);
+	});
+
+	it("does not deliver the current change to an immediate listener added while it is delivered", () => {
+		const owner = Owner();
+		const state = State(owner, 0);
+		const late = vi.fn();
+
+		state.subscribeImmediate(owner, () => {
+			state.subscribeImmediate(owner, late);
+		});
+		state.set(1);
+
+		expect(late).not.toHaveBeenCalled();
+
+		state.set(2);
+		expect(late).toHaveBeenCalledWith(2, 1);
+		owner.dispose();
+	});
+
+	it("does not call an immediate listener removed earlier in the same delivery", () => {
+		const owner = Owner();
+		const state = State(owner, 0);
+		const removed = vi.fn();
+		let unsubscribe = (): void => undefined;
+
+		state.subscribeImmediate(owner, () => unsubscribe());
+		unsubscribe = state.subscribeImmediate(owner, removed);
+		state.set(1);
+
+		expect(removed).not.toHaveBeenCalled();
+		owner.dispose();
+	});
+
+	it("delivers a change made by a listener after the current change finishes, to every listener in order", () => {
+		const owner = Owner();
+		const state = State(owner, 0);
+		const seen: string[] = [];
+
+		state.subscribeImmediate(owner, (value) => {
+			seen.push(`a${value}`);
+			if (value === 1) state.set(2);
+		});
+		state.subscribeImmediate(owner, (value) => seen.push(`b${value}`));
+		state.set(1);
+
+		expect(seen).toEqual(["a1", "b1", "a2", "b2"]);
+		owner.dispose();
+	});
+
+	it("maps onto an already-disposed owner by returning a disposed state", () => {
+		const sourceOwner = Owner();
+		const source = State(sourceOwner, 2);
+		const disposedOwner = Owner();
+		disposedOwner.dispose();
+
+		const mapped = source.map(disposedOwner, value => value * 2);
+
+		expect(mapped.disposed).toBe(true);
+		source.set(3);
+		expect(mapped.value).toBe(4);
+		sourceOwner.dispose();
+	});
+
+	it("releases a subscription's owner registration when the state disposes first", () => {
+		const subscriber = Owner();
+		const stateOwner = Owner();
+		const state = State(stateOwner, 0);
+
+		state.subscribe(subscriber, () => undefined);
+		state.subscribeImmediate(subscriber, () => undefined);
+		expect(cleanupRegistrationCount(subscriber)).toBe(2);
+
+		stateOwner.dispose();
+
+		expect(cleanupRegistrationCount(subscriber)).toBe(0);
+		subscriber.dispose();
 	});
 });

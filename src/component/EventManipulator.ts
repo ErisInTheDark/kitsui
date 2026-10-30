@@ -1,4 +1,4 @@
-import { Owner, State, type CleanupFunction } from "../state/State";
+import { CleanupLink, linkCleanup, Owner, State, type CleanupFunction } from "../state/State";
 import type { Component } from "./Component";
 
 type HostedEvent<TEvent extends Event, THost extends Owner, THostKey extends string> = TEvent & {
@@ -81,10 +81,6 @@ export interface OwnedEventManipulator<THost extends Component> {
 	readonly off: EventOffProxy<THost>;
 }
 
-interface ListenerRecord {
-	cleanup: CleanupFunction;
-}
-
 const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
@@ -132,6 +128,81 @@ function defineHostedEvent<THost extends Owner, THostKey extends string, TEvent 
 	return event as HostedEvent<TEvent, THost, THostKey>;
 }
 
+type EventRecords = Map<string, Map<ListenerKey, ListenerRecord>>;
+
+/**
+ * One installed listener. It is its own DOM listener object and its own owner cleanup link,
+ * so installing a listener allocates one record rather than a set of closures.
+ */
+class ListenerRecord extends CleanupLink implements EventListenerObject {
+	releaseSource: CleanupFunction = noop;
+	private listener: ((event: Event) => unknown) | null = null;
+	private attached = false;
+	private active = true;
+
+	constructor (
+		private readonly target: EventTarget,
+		private readonly eventName: string,
+		private readonly owner: Owner,
+		private readonly host: Owner,
+		private readonly hostPropertyName: string,
+		private readonly records: EventRecords,
+		private readonly key: ListenerKey,
+	) {
+		super();
+	}
+
+	handleEvent (event: Event): void {
+		// Call through a local so the listener runs without a `this`, exactly like a plain function listener.
+		const listener = this.listener;
+		listener?.(defineHostedEvent(event, this.host, this.hostPropertyName));
+	}
+
+	/** Swaps the active listener; a new listener is re-registered last, as a fresh `addEventListener` would be. */
+	apply (listener: ((event: never) => unknown) | null | undefined): void {
+		this.releaseCleanup();
+		this.detach();
+		this.listener = (listener ?? null) as ((event: Event) => unknown) | null;
+		if (this.listener === null) {
+			return;
+		}
+
+		this.target.addEventListener(this.eventName, this);
+		this.attached = true;
+		linkCleanup(this.owner, this);
+	}
+
+	runCleanup (): void {
+		this.cleanup();
+	}
+
+	cleanup (): void {
+		if (!this.active) {
+			return;
+		}
+
+		this.active = false;
+		this.releaseSource();
+		this.releaseCleanup();
+		this.detach();
+
+		const eventRecords = this.records.get(this.eventName);
+		if (eventRecords?.get(this.key) === this) {
+			eventRecords.delete(this.key);
+			if (eventRecords.size === 0) {
+				this.records.delete(this.eventName);
+			}
+		}
+	}
+
+	private detach (): void {
+		if (this.attached) {
+			this.attached = false;
+			this.target.removeEventListener(this.eventName, this);
+		}
+	}
+}
+
 /**
  * Manages event listeners for a host owner with automatic cleanup and reactive listener support.
  * 
@@ -139,33 +210,50 @@ function defineHostedEvent<THost extends Owner, THostKey extends string, TEvent 
  * along with typed custom-event authoring through `.emit.*` and `.dispatch.*`.
  */
 export class EventManipulator<THost extends Owner = Component, THostKey extends string = "component", TEventMap = ComponentHTMLElementEventMap> {
-	readonly dispatch: EventDispatchProxyFor<TEventMap>;
-	readonly emit: EventDispatchProxyFor<TEventMap>;
-	readonly on: EventOnProxyFor<THost, THostKey, TEventMap>;
-	readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
-	readonly owned: {
+	private emitProxy: EventDispatchProxyFor<TEventMap> | null = null;
+	private onProxy: EventOnProxyFor<THost, THostKey, TEventMap> | null = null;
+	private offProxy: EventOffProxyFor<THost, THostKey, TEventMap> | null = null;
+	private ownedProxies: {
 		readonly on: OwnedEventOnProxyFor<THost, THostKey, TEventMap>;
 		readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
-	};
- 
-	private readonly listenerRecords = new Map<string, Map<ListenerKey, ListenerRecord>>();
+	} | null = null;
+
+	private readonly listenerRecords: EventRecords = new Map();
 
 	constructor (
 		private readonly owner: THost,
 		private readonly target: EventTarget,
 		private readonly hostPropertyName: THostKey = "component" as THostKey,
 	) {
-		this.emit = this.createDispatchProxy();
-		this.dispatch = this.emit;
-		this.on = this.createOnProxy(false);
-		this.off = this.createOffProxy();
-		this.owned = {
-			off: this.off,
-			on: this.createOwnedOnProxy(),
-		};
 		this.owner.onCleanup(() => {
 			this.releaseAllListeners();
 		});
+	}
+
+	get dispatch (): EventDispatchProxyFor<TEventMap> {
+		return this.emit;
+	}
+
+	get emit (): EventDispatchProxyFor<TEventMap> {
+		return this.emitProxy ??= this.createDispatchProxy();
+	}
+
+	get on (): EventOnProxyFor<THost, THostKey, TEventMap> {
+		return this.onProxy ??= this.createOnProxy(false);
+	}
+
+	get off (): EventOffProxyFor<THost, THostKey, TEventMap> {
+		return this.offProxy ??= this.createOffProxy();
+	}
+
+	get owned (): {
+		readonly on: OwnedEventOnProxyFor<THost, THostKey, TEventMap>;
+		readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
+	} {
+		return this.ownedProxies ??= {
+			off: this.off,
+			on: this.createOwnedOnProxy(),
+		};
 	}
 
 	private createDispatchProxy (): EventDispatchProxyFor<TEventMap> {
@@ -192,16 +280,16 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 	}
 
 	private releaseAllListeners (): void {
-		const cleanups: CleanupFunction[] = [];
+		const records: ListenerRecord[] = [];
 
 		for (const eventRecords of this.listenerRecords.values()) {
 			for (const record of eventRecords.values()) {
-				cleanups.push(record.cleanup);
+				records.push(record);
 			}
 		}
 
-		for (const cleanup of cleanups) {
-			cleanup();
+		for (const record of records) {
+			record.cleanup();
 		}
 	}
 
@@ -277,60 +365,18 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 		this.listenerRecords.set(eventName, eventRecords);
 		eventRecords.get(key)?.cleanup();
 
-		let cleanup = noop;
-		let active = true;
-		let releaseDom = noop;
-		let releaseOwner = noop;
-		let releaseSource = noop;
-
-		const trackedCleanup = () => {
-			if (!active) {
-				return;
-			}
-
-			active = false;
-			releaseSource();
-			releaseOwner();
-			releaseDom();
-			eventRecords.delete(key);
-			if (eventRecords.size === 0) {
-				this.listenerRecords.delete(eventName);
-			}
-			cleanup();
-		};
-
-		const applyResolvedListener = (nextListener: EventListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>) => {
-			releaseOwner();
-			releaseDom();
-
-			if (!nextListener) {
-				releaseOwner = noop;
-				releaseDom = noop;
-				return;
-			}
-
-			const handleEvent = (event: EventMapValue<TEventMap, TEventName>) => {
-				nextListener(defineHostedEvent(event, this.owner, this.hostPropertyName));
-			};
-
-			this.target.addEventListener(eventName, handleEvent as EventListener);
-			releaseDom = () => {
-				this.target.removeEventListener(eventName, handleEvent as EventListener);
-			};
-			releaseOwner = owner.onCleanup(trackedCleanup);
-		};
-
-		eventRecords.set(key, { cleanup: trackedCleanup });
+		const record = new ListenerRecord(this.target, eventName, owner, this.owner, this.hostPropertyName, this.listenerRecords, key);
+		eventRecords.set(key, record);
 
 		if (isListenerSource(listener)) {
-			releaseSource = listener.subscribe(owner, (nextValue) => {
-				applyResolvedListener(resolveListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>(nextValue));
+			record.releaseSource = listener.subscribe(owner, (nextValue) => {
+				record.apply(resolveListenerValue(nextValue));
 			});
-			applyResolvedListener(resolveListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>(listener.value));
+			record.apply(resolveListenerValue(listener.value));
 			return;
 		}
 
-		applyResolvedListener(resolveListenerValue<THost, THostKey, EventMapValue<TEventMap, TEventName>>(listener));
+		record.apply(resolveListenerValue(listener));
 	}
 
 	private removeListener<TEventName extends keyof TEventMap & string> (

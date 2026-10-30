@@ -118,25 +118,14 @@ function physicalParentOf (node: Node): DOMParent | null {
 	return isDOMParent(node.parentNode) ? node.parentNode : null;
 }
 
-function physicalChildrenOf (parent: DOMParent): Node[] {
-	const children: Node[] = [];
-	let child = parent.firstChild;
-	while (child) {
-		children.push(child);
-		child = child.nextSibling;
-	}
-	return children;
-}
-
 function physicalContains (node: Node, candidate: Node): boolean {
+	// The physical composed tree is acyclic, so walking ancestors needs no visited set.
 	let current: Node | null = candidate;
-	const visited = new Set<Node>();
-	while (current && !visited.has(current)) {
+	while (current) {
 		if (current === node) {
 			return true;
 		}
 
-		visited.add(current);
 		current = resolveComposedParent(current);
 	}
 	return false;
@@ -191,14 +180,15 @@ function isPlacementTargetDisposed (
 	let current: Node | null = placement.type === "append" || placement.type === "prepend"
 		? placement.parent
 		: placement.reference;
-	const visited = new Set<Node>();
+	// Guards against cycles a virtual tree could report mid-transaction; physical walks never revisit a node.
+	const visited: Set<Node> | null = parentOf === physicalParentOf ? null : new Set();
 
-	while (current && !visited.has(current)) {
+	while (current && !visited?.has(current)) {
 		if (isDisposedNode(current)) {
 			return true;
 		}
 
-		visited.add(current);
+		visited?.add(current);
 		current = parentOf(current) ?? shadowHostOf(current);
 	}
 
@@ -586,62 +576,133 @@ function createVirtualTree (operations: readonly DOMTreeOperation[]): VirtualDOM
 	}
 }
 
+/** Live, deduplicated nodes to place, with fragments expanded and invalid targets reported and dropped. */
+function collectPlacementNodes (nodes: readonly Node[], parent: DOMParent, reference: Node | null): PlacementNode[] {
+	const placementNodes: PlacementNode[] = [];
+	const seen = new Set<Node>();
+	const consider = (node: Node): void => {
+		if (node === reference || seen.has(node)) {
+			return;
+		}
+
+		seen.add(node);
+		const placementNode = snapshotPlacementNode(node);
+		if (!isPlacementNodeLive(placementNode)) {
+			return;
+		}
+
+		if (physicalContains(node, parent)) {
+			console.error(recursiveTreeErrorMessage);
+			return;
+		}
+
+		placementNodes.push(placementNode);
+	};
+
+	for (const node of nodes) {
+		if (isConsumableDocumentFragment(node)) {
+			for (const child of Array.from(node.childNodes)) {
+				consider(child);
+			}
+		} else {
+			consider(node);
+		}
+	}
+
+	return placementNodes;
+}
+
+/** The first sibling from `start` onwards that is not itself being placed. */
+function firstUnplacedSibling (start: Node | null, placementNodes: readonly PlacementNode[]): Node | null {
+	const placed = placementNodes.length === 1 ? null : new Set(placementNodes.map(placementNode => placementNode.node));
+	let anchor = start;
+	while (anchor !== null && (placed ? placed.has(anchor) : anchor === placementNodes[0].node)) {
+		anchor = anchor.nextSibling;
+	}
+	return anchor;
+}
+
+/** The sibling the nodes are inserted before, skipping nodes that are themselves being placed. */
+function placementAnchor (parent: DOMParent, placement: DOMPlacement, placementNodes: readonly PlacementNode[]): Node | null {
+	switch (placement.type) {
+		case "append":
+			return null;
+		case "before":
+			return placement.reference;
+		case "prepend":
+			return firstUnplacedSibling(parent.firstChild, placementNodes);
+		case "after":
+			return firstUnplacedSibling(placement.reference.nextSibling, placementNodes);
+	}
+}
+
+/** Whether the nodes already sit, in order, exactly where the placement would put them. */
+function isPlacementSatisfied (parent: DOMParent, placement: DOMPlacement, placementNodes: readonly PlacementNode[]): boolean {
+	const count = placementNodes.length;
+	if (placement.type === "append" || placement.type === "before") {
+		let sibling: Node | null = placement.type === "append" ? parent.lastChild : placement.reference.previousSibling;
+		for (let index = count - 1; index >= 0; index--) {
+			const node = placementNodes[index].node;
+			if (sibling !== node) return false;
+			sibling = node.previousSibling;
+		}
+		return true;
+	}
+
+	let sibling: Node | null = placement.type === "prepend" ? parent.firstChild : placement.reference.nextSibling;
+	for (let index = 0; index < count; index++) {
+		const node = placementNodes[index].node;
+		if (sibling !== node) return false;
+		sibling = node.nextSibling;
+	}
+	return true;
+}
+
 function placePhysically (nodes: readonly Node[], placement: DOMPlacement, onPlaced: (node: Node) => void): void {
 	if (isPlacementTargetDisposed(placement)) {
 		return;
 	}
 
-	const parent = placement.type === "append" || placement.type === "prepend"
-		? placement.parent
-		: physicalParentOf(placement.reference);
+	const reference = placement.type === "before" || placement.type === "after" ? placement.reference : null;
+	const parent = reference === null
+		? (placement as { parent: DOMParent }).parent
+		: physicalParentOf(reference);
 	if (!parent) {
 		return;
 	}
 
-	const seen = new Set<Node>();
-	const placementNodes = nodes
-		.flatMap(node => isConsumableDocumentFragment(node) ? Array.from(node.childNodes) : [node])
-		.map(snapshotPlacementNode)
-		.filter(isPlacementNodeLive)
-		.filter(({ node }) => {
-			if (seen.has(node)) return false;
-			seen.add(node);
-			return (placement.type !== "before" && placement.type !== "after") || node !== placement.reference;
-		})
-		.filter(({ node }) => {
-			if (!physicalContains(node, parent)) return true;
-			console.error(recursiveTreeErrorMessage);
-			return false;
-		});
+	const placementNodes = collectPlacementNodes(nodes, parent, reference);
 	if (placementNodes.length === 0) return;
 
-	const nodeSet = new Set(placementNodes.map(({ node }) => node));
-	const current = physicalChildrenOf(parent);
-	const remaining = current.filter(node => !nodeSet.has(node));
-	let insertionIndex: number;
-	if (placement.type === "append") insertionIndex = remaining.length;
-	else if (placement.type === "prepend") insertionIndex = 0;
-	else {
-		const referenceIndex = remaining.indexOf(placement.reference);
-		if (referenceIndex < 0) return;
-		insertionIndex = placement.type === "before" ? referenceIndex : referenceIndex + 1;
-	}
-	const anchor = remaining[insertionIndex] ?? null;
-	const desired = [...remaining.slice(0, insertionIndex), ...placementNodes.map(({ node }) => node), ...remaining.slice(insertionIndex)];
-	const alreadySatisfied = current.length === desired.length && current.every((node, index) => node === desired[index]);
+	const alreadySatisfied = isPlacementSatisfied(parent, placement, placementNodes);
+	const anchor = alreadySatisfied ? null : placementAnchor(parent, placement, placementNodes);
 	const placedNodes: PlacementNode[] = [];
 	for (const placementNode of placementNodes) {
-		const node = placementNode.node;
-		if (alreadySatisfied || physicalMove(parent, node, anchor)) {
+		if (alreadySatisfied || physicalMove(parent, placementNode.node, anchor)) {
 			placedNodes.push(placementNode);
 		}
 	}
 
-	runCleanupSteps(placedNodes.map(placementNode => () => {
-		if (physicalParentOf(placementNode.node) === parent) {
-			runPlacementCallbacks(placementNode, onPlaced);
+	let failed = false;
+	let firstError: unknown;
+	for (const placementNode of placedNodes) {
+		if (physicalParentOf(placementNode.node) !== parent) {
+			continue;
 		}
-	}));
+
+		try {
+			runPlacementCallbacks(placementNode, onPlaced);
+		} catch (error) {
+			if (!failed) {
+				failed = true;
+				firstError = error;
+			}
+		}
+	}
+
+	if (failed) {
+		throw firstError;
+	}
 }
 
 function removeImmediately (node: Node): void {
@@ -824,8 +885,13 @@ export const DOMTree = {
 		const tree = currentTree();
 		return resolveComposedParent(node, candidate => tree ? tree.parentOf(candidate) : physicalParentOf(candidate));
 	},
+	/** Whether the open transaction has changed this parent's children, so its physical children are not the virtual ones. */
+	hasPendingChildChanges (parent: Node): boolean {
+		return currentTree()?.affectedParents.has(parent as DOMParent) ?? false;
+	},
 	childrenOf (parent: DOMParent): Node[] {
-		return [...(currentTree()?.childrenOf(parent) ?? Array.from(parent.childNodes))];
+		const tree = currentTree();
+		return tree ? [...tree.childrenOf(parent)] : Array.from(parent.childNodes);
 	},
 	firstChildOf (parent: DOMParent): Node | null {
 		return this.childrenOf(parent)[0] ?? null;

@@ -1,4 +1,4 @@
-import { Owner, State, type CleanupFunction, type StateOptions } from "../State";
+import { isOwner, Owner, State, type CleanupFunction, type StateOptions } from "../State";
 import { scheduleTimeout, type ScheduledTimeoutHandle } from "../../utility/timer";
 
 type ImplicitOwnerLinkedState = State<unknown> & {
@@ -174,13 +174,13 @@ export default function temporalExtension (): void {
 	const prototype = StateClass.prototype;
 
 	prototype.debounce = function debounce (ownerOrMilliseconds: Owner | number, maybeMilliseconds?: number): State.Readonly<unknown> {
-		const owner = ownerOrMilliseconds instanceof Owner ? ownerOrMilliseconds : null;
+		const owner = isOwner(ownerOrMilliseconds) ? ownerOrMilliseconds : null;
 		const milliseconds = typeof ownerOrMilliseconds === "number" ? ownerOrMilliseconds : maybeMilliseconds as number;
 		return createDebouncedState(this, owner, milliseconds);
 	};
 
 	prototype.throttle = function throttle (ownerOrMilliseconds: Owner | number, maybeMilliseconds?: number): State.Readonly<unknown> {
-		const owner = ownerOrMilliseconds instanceof Owner ? ownerOrMilliseconds : null;
+		const owner = isOwner(ownerOrMilliseconds) ? ownerOrMilliseconds : null;
 		const milliseconds = typeof ownerOrMilliseconds === "number" ? ownerOrMilliseconds : maybeMilliseconds as number;
 		return createThrottledState(this, owner, milliseconds);
 	};
