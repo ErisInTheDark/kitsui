@@ -55,6 +55,8 @@ type ParentPlan = {
 };
 
 export const recursiveTreeErrorMessage = "Cannot move a node into itself or one of its descendants.";
+/** Far deeper than any real document; ancestor walks stop here rather than trusting the tree to be acyclic. */
+const maximumTreeDepth = 100_000;
 const registrations = new WeakMap<Node, DOMTreeNodeRegistration>();
 
 export function registerDOMTreeNode (node: Node, owner: DOMTreeNodeOwner): DOMTreeNodeRegistration {
@@ -218,24 +220,21 @@ class VirtualDOMTree {
 	}
 
 	contains (node: Node, candidate: Node): boolean {
+		// Replay rejects recursive placements, so the virtual tree has no cycles; the depth cap only bounds a broken invariant.
 		let current: Node | null = candidate;
-		const visited = new Set<Node>();
-		while (current && !visited.has(current)) {
+		for (let depth = 0; current && depth < maximumTreeDepth; depth++) {
 			if (current === node) {
 				return true;
 			}
 
-			visited.add(current);
-			current = resolveComposedParent(current, candidateNode => this.getVirtualParent(candidateNode));
+			current = this.getVirtualParent(current) ?? shadowHostOf(current);
 		}
 		return false;
 	}
 
 	isConnected (node: Node): boolean {
 		let current: Node | null = node;
-		const visited = new Set<Node>();
-		while (current && !visited.has(current)) {
-			visited.add(current);
+		for (let depth = 0; current && depth < maximumTreeDepth; depth++) {
 			const hadVirtualParent = this.virtualParents.has(current);
 			const parent = this.getVirtualParent(current);
 			if (parent) {
@@ -329,6 +328,47 @@ class VirtualDOMTree {
 		this.virtualParents.set(node, null);
 	}
 
+	/**
+	 * Live, deduplicated nodes an operation still controls, with fragments expanded.
+	 * A node moved again by a later operation belongs to that operation instead.
+	 */
+	private collectReplayNodes (operation: PlacementOperation, operationIndex: number): PlacementNode[] {
+		const collected: PlacementNode[] = [];
+		// Most operations place one node; only allocate a set when there can be duplicates to skip.
+		const onlyNode = operation.nodes.length === 1 ? operation.nodes[0].node : null;
+		const seen = onlyNode === null || isConsumableDocumentFragment(onlyNode) ? new Set<Node>() : null;
+		const consider = (placementNode: PlacementNode): void => {
+			if (!isPlacementNodeLive(placementNode) || seen?.has(placementNode.node)) {
+				return;
+			}
+
+			const latestOperation = this.operationByNode.get(placementNode.node);
+			if (latestOperation && latestOperation.operationIndex > operationIndex) {
+				return;
+			}
+
+			seen?.add(placementNode.node);
+			collected.push(placementNode);
+		};
+
+		for (const placementNode of operation.nodes) {
+			if (!isConsumableDocumentFragment(placementNode.node)) {
+				consider(placementNode);
+				continue;
+			}
+
+			if (!isPlacementNodeLive(placementNode)) {
+				continue;
+			}
+
+			for (const child of [...this.initialiseParent(placementNode.node)]) {
+				consider(snapshotPlacementNode(child));
+			}
+		}
+
+		return collected;
+	}
+
 	private replayPlacement (operation: PlacementOperation, operationIndex: number): void {
 		const targetNode = placementTargetNode(operation.placement);
 		if (operation.targetRegistration && registrations.get(targetNode) !== operation.targetRegistration) {
@@ -339,32 +379,8 @@ class VirtualDOMTree {
 			return;
 		}
 
-		const seenNodes = new Set<Node>();
-		const placementNodes = operation.nodes.flatMap((placementNode) => {
-			if (!isPlacementNodeLive(placementNode)) {
-				return [];
-			}
-
-			if (!isConsumableDocumentFragment(placementNode.node)) {
-				return [placementNode];
-			}
-
-			return [...this.initialiseParent(placementNode.node)]
-				.map(snapshotPlacementNode)
-				.filter(isPlacementNodeLive);
-		}).filter((placementNode) => {
-			const latestOperation = this.operationByNode.get(placementNode.node);
-			return !latestOperation || latestOperation.operationIndex <= operationIndex;
-		}).filter((placementNode) => {
-			if (seenNodes.has(placementNode.node)) {
-				return false;
-			}
-
-			seenNodes.add(placementNode.node);
-			return true;
-		});
-		const nodes = placementNodes.map(placementNode => placementNode.node);
-		if (nodes.length === 0) {
+		const placementNodes = this.collectReplayNodes(operation, operationIndex);
+		if (placementNodes.length === 0) {
 			return;
 		}
 
@@ -381,7 +397,7 @@ class VirtualDOMTree {
 			return;
 		}
 
-		if (reference !== null && nodes.includes(reference)) {
+		if (reference !== null && placementNodes.some(placementNode => placementNode.node === reference)) {
 			const withoutReference = placementNodes.filter(placementNode => placementNode.node !== reference);
 			if (withoutReference.length > 0) {
 				this.replayPlacement({ ...operation, nodes: withoutReference }, operationIndex);

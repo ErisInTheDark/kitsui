@@ -13,71 +13,68 @@ export interface PlacementAuthorityAuthor {
 	claim (node: Node, owner?: Owner | null): PlacementAuthority | null;
 }
 
-type AuthorityRecord = {
-	active: boolean;
-	cleanup: ((preservePosition: boolean) => void) | null;
-	cleanupAssigned: boolean;
-	owner: Owner | null;
-	preservePosition: boolean;
-	readonly node: Node;
-};
-
 const authorities = new WeakMap<Node, AuthorityRecord>();
 const authoringGenerations = new WeakMap<Node, number>();
 let nextAuthoringGeneration = 0;
 
-function releaseRecord (record: AuthorityRecord, preservePosition: boolean): void {
-	if (record.active) {
-		record.active = false;
-		record.preservePosition = preservePosition;
-		if (authorities.get(record.node) === record) {
-			authorities.delete(record.node);
+/** The current right to place one node, held by whichever placement flow claimed it last. */
+class AuthorityRecord implements PlacementAuthority {
+	private active = true;
+	private cleanup: ((preservePosition: boolean) => void) | null = null;
+	private cleanupAssigned = false;
+	private preservePosition = true;
+
+	constructor (
+		readonly node: Node,
+		readonly owner: Owner | null,
+	) { }
+
+	isCurrent (): boolean {
+		return this.active && authorities.get(this.node) === this;
+	}
+
+	relinquish (): void {
+		if (!this.active) return;
+		this.active = false;
+		if (authorities.get(this.node) === this) authorities.delete(this.node);
+		this.cleanup = null;
+	}
+
+	release (preservePosition = false): void {
+		if (this.active) {
+			this.active = false;
+			this.preservePosition = preservePosition;
+			if (authorities.get(this.node) === this) {
+				authorities.delete(this.node);
+			}
+		}
+
+		const cleanup = this.cleanup;
+		if (cleanup) {
+			this.cleanup = null;
+			cleanup(this.preservePosition);
 		}
 	}
 
-	const cleanup = record.cleanup;
-	if (cleanup) {
-		record.cleanup = null;
-		cleanup(record.preservePosition);
+	setCleanup (cleanup: (preservePosition: boolean) => void): void {
+		if (this.cleanupAssigned) {
+			throw new Error("Placement authority cleanup can only be assigned once.");
+		}
+		this.cleanupAssigned = true;
+		this.cleanup = cleanup;
+		if (!this.isCurrent()) {
+			this.release(true);
+		}
 	}
 }
 
 function installPlacementAuthority (node: Node, owner: Owner | null, generation: number): PlacementAuthority {
 	const previous = authorities.get(node);
-	const record: AuthorityRecord = {
-		active: true,
-		cleanup: null,
-		cleanupAssigned: false,
-		node,
-		owner,
-		preservePosition: true,
-	};
+	const record = new AuthorityRecord(node, owner);
 	authoringGenerations.set(node, generation);
 	authorities.set(node, record);
-	previous && releaseRecord(previous, true);
-
-	return {
-		owner,
-		node,
-		isCurrent: () => record.active && authorities.get(node) === record,
-		relinquish: () => {
-			if (!record.active) return;
-			record.active = false;
-			if (authorities.get(node) === record) authorities.delete(node);
-			record.cleanup = null;
-		},
-		release: (preservePosition = false) => releaseRecord(record, preservePosition),
-		setCleanup: (cleanup) => {
-			if (record.cleanupAssigned) {
-				throw new Error("Placement authority cleanup can only be assigned once.");
-			}
-			record.cleanupAssigned = true;
-			record.cleanup = cleanup;
-			if (!record.active || authorities.get(node) !== record) {
-				releaseRecord(record, true);
-			}
-		},
-	};
+	previous?.release(true);
+	return record;
 }
 
 export function createPlacementAuthorityAuthor (): PlacementAuthorityAuthor {
@@ -99,13 +96,10 @@ export function replacePlacementAuthority (node: Node, owner: Owner | null = nul
 }
 
 export function releasePlacementAuthority (node: Node, preservePosition = true): void {
-	const authority = authorities.get(node);
-	if (authority) {
-		releaseRecord(authority, preservePosition);
-	}
+	authorities.get(node)?.release(preservePosition);
 }
 
 export function placementAuthorityOwner (node: Node): Owner | null {
 	const authority = authorities.get(node);
-	return authority?.active ? authority.owner : null;
+	return authority?.isCurrent() ? authority.owner : null;
 }
