@@ -1,19 +1,20 @@
-import { access, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildProject } from "../scripts/build";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "..");
-const distDirectory = path.join(projectRoot, "dist");
-const bundleFile = path.join(distDirectory, "kitsui.umd.js");
-const esmBundleFile = path.join(distDirectory, "kitsui.esm.js");
-const umdSourceMapFile = path.join(distDirectory, "kitsui.umd.js.map");
-const esmSourceMapFile = path.join(distDirectory, "kitsui.esm.js.map");
-const rawDeclarationFile = path.join(distDirectory, "index.d.ts");
-const bundledDeclarationFile = path.join(distDirectory, "kitsui.d.ts");
 const packageJsonPath = path.join(projectRoot, "package.json");
+
+// Build into a temp directory: the shared dist/ may be in use by the watch task or a linked project.
+let distDirectory: string;
+
+beforeEach(async () => {
+	distDirectory = await mkdtemp(path.join(os.tmpdir(), "kitsui-build-test-"));
+});
 
 afterEach(async () => {
 	await rm(distDirectory, { force: true, recursive: true });
@@ -37,7 +38,13 @@ describe("build output", () => {
 			types: "./dist/kitsui.d.ts"
 		});
 
-		await buildProject();
+		await buildProject(false, distDirectory);
+		const bundleFile = path.join(distDirectory, "kitsui.umd.js");
+		const esmBundleFile = path.join(distDirectory, "kitsui.esm.js");
+		const umdSourceMapFile = path.join(distDirectory, "kitsui.umd.js.map");
+		const esmSourceMapFile = path.join(distDirectory, "kitsui.esm.js.map");
+		const rawDeclarationFile = path.join(distDirectory, "index.d.ts");
+		const bundledDeclarationFile = path.join(distDirectory, "kitsui.d.ts");
 
 		await expect(access(bundleFile)).resolves.toBeUndefined();
 		await expect(access(esmBundleFile)).resolves.toBeUndefined();

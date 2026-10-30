@@ -38,6 +38,8 @@ async function copyFileIfExists (from: string, to: string): Promise<void> {
 
 export interface BuildDocsOptions {
 	outputDirectory?: string;
+	/** Where the library build the docs bundle is copied from goes; defaults to the shared `dist/`. */
+	distDirectory?: string;
 	skipTypedoc?: boolean;
 	reloadPort?: number;
 }
@@ -264,11 +266,12 @@ export async function buildDocsSite (options: BuildDocsOptions = {}): Promise<vo
 	}
 
 	// Bundle kitsui ESM for runtime usage
-	await buildProject(isDev);
+	const libraryDirectory = options.distDirectory ?? distDirectory;
+	await buildProject(isDev, libraryDirectory);
 
-	await copyFile(path.join(distDirectory, "kitsui.d.ts"), path.join(docsOutputDirectory, "kitsui.d.ts"));
-	await copyFile(path.join(distDirectory, "kitsui.esm.js"), path.join(docsOutputDirectory, "kitsui.esm.js"));
-	await copyFileIfExists(path.join(distDirectory, "kitsui.esm.js.map"), path.join(docsOutputDirectory, "kitsui.esm.js.map"));
+	await copyFile(path.join(libraryDirectory, "kitsui.d.ts"), path.join(docsOutputDirectory, "kitsui.d.ts"));
+	await copyFile(path.join(libraryDirectory, "kitsui.esm.js"), path.join(docsOutputDirectory, "kitsui.esm.js"));
+	await copyFileIfExists(path.join(libraryDirectory, "kitsui.esm.js.map"), path.join(docsOutputDirectory, "kitsui.esm.js.map"));
 
 	// Bundle client-side JS
 	await esbuild.build({

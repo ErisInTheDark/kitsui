@@ -129,7 +129,8 @@ function readonlyConsumerQuickInfoDocumentation (declarationPath: string, declar
 
 beforeAll(async () => {
 	docsDirectory = await mkdtemp(path.join(os.tmpdir(), "kitsui-docs-test-"));
-	await buildDocsSite({ outputDirectory: docsDirectory });
+	// Keep the library build out of the shared dist/, which other projects may be reading.
+	await buildDocsSite({ distDirectory: path.join(docsDirectory, ".dist"), outputDirectory: docsDirectory });
 }, 30_000);
 
 afterAll(async () => {

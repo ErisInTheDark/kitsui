@@ -8,9 +8,7 @@ import { writeDeclarationBundle } from "./dts";
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, "..");
-const distDirectory = path.join(projectRoot, "dist");
-const outputFile = path.join(distDirectory, "kitsui.umd.js");
-const esmOutputFile = path.join(distDirectory, "kitsui.esm.js");
+const defaultDistDirectory = path.join(projectRoot, "dist");
 const tsgoBinary = path.join(projectRoot, "node_modules", "@typescript", "native-preview", "bin", "tsgo.js");
 const execFileAsync = promisify(execFile);
 const umdBanner = `(function (root, factory) {
@@ -27,7 +25,13 @@ const umdFooter = `
   return __kitsui_factory__;
 });`;
 
-export async function buildProject (isDev = false): Promise<void> {
+/**
+ * Builds the bundles and declarations into `distDirectory`.
+ * Other projects may read the shared `dist/` directly, so tests should pass their own directory.
+ */
+export async function buildProject (isDev = false, distDirectory = defaultDistDirectory): Promise<void> {
+	const outputFile = path.join(distDirectory, "kitsui.umd.js");
+	const esmOutputFile = path.join(distDirectory, "kitsui.esm.js");
 	await rm(distDirectory, { force: true, recursive: true });
 	await mkdir(distDirectory, { recursive: true });
 
@@ -56,17 +60,18 @@ export async function buildProject (isDev = false): Promise<void> {
 			sourcemap: "linked",
 			target: "es2020",
 		}),
-		execFileAsync(process.execPath, [tsgoBinary, "-p", "tsconfig.build.json"], {
+		execFileAsync(process.execPath, [tsgoBinary, "-p", "tsconfig.build.json", "--outDir", distDirectory], {
 			cwd: projectRoot,
 		}),
 	]);
 
 	await writeDeclarationBundle({
 		log: false,
+		outputFile: path.join(distDirectory, "kitsui.d.ts"),
 		sourceDirectory: distDirectory,
 	});
 
-	console.log(`Built ${path.relative(projectRoot, outputFile)}, ${path.relative(projectRoot, esmOutputFile)}, dist/index.d.ts, and dist/kitsui.d.ts`);
+	console.log(`Built kitsui.umd.js, kitsui.esm.js, index.d.ts, and kitsui.d.ts in ${path.relative(projectRoot, distDirectory) || "."}`);
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
