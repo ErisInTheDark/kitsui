@@ -1,3 +1,5 @@
+import { reportUncaught } from "./reportUncaught";
+
 /** A cancellable callback scheduled on kitsui's shared deadline timer. */
 export interface ScheduledTimeoutHandle {
 	cancel (): void;
@@ -139,9 +141,7 @@ function runDueTimeouts (): void {
 			callback();
 		}
 		catch (error) {
-			queueMicrotask(() => {
-				throw error;
-			});
+			reportUncaught(error);
 		}
 	}
 }

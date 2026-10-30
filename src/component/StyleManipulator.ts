@@ -2,6 +2,7 @@ import { Owner, State, type CleanupFunction } from "../state/State";
 import type { StyleValue } from "./Style";
 import { staticPropertySource, type PropertySource } from "./GenericPropertyManipulator";
 import { compileStyleValue, toCssPropertyName } from "./styleValue";
+import { reportUncaught } from "../utility/reportUncaught";
 
 /** Inline style values accepted by {@link StyleManipulator}. */
 export type StyleAttributeValue = StyleValue | null | undefined;
@@ -44,10 +45,16 @@ interface LayerPropertyRecord {
 /** @hidden */
 interface LayerRecord {
 	active: boolean;
+	/** A static definition defines the same properties forever, so it permanently shadows earlier layers on them. */
+	staticDefinition: boolean;
 	properties: Map<string, LayerPropertyRecord>;
 	releaseDefinition: CleanupFunction;
+	releaseOwner: CleanupFunction;
 	releaseSource: CleanupFunction;
 }
+
+/** Live reactive style definitions on one component past which the buildup is reported as a likely leak. */
+const reactiveLayerLeakThreshold = 50;
 
 const noop: CleanupFunction = () => {
 	// Intentionally empty.
@@ -91,6 +98,7 @@ function serializeStyleValue (value: StyleAttributeValue): string | null {
  */
 export class StyleManipulator<OWNER extends Owner> {
 	private readonly layers: LayerRecord[] = [];
+	private reportedReactiveLayerBuildup = false;
 
 	/**
 	 * @param owner The owner managing this manipulator's lifecycle.
@@ -113,8 +121,10 @@ export class StyleManipulator<OWNER extends Owner> {
 		const definitionSource = toStyleAttributeSource(value);
 		const layer: LayerRecord = {
 			active: true,
+			staticDefinition: !isStateSource(value),
 			properties: new Map(),
 			releaseDefinition: noop,
+			releaseOwner: noop,
 			releaseSource: noop,
 		};
 
@@ -134,11 +144,68 @@ export class StyleManipulator<OWNER extends Owner> {
 		layer.releaseSource = definitionSource.subscribe(this.owner, (nextValue) => {
 			applyDefinition(nextValue);
 		});
-		this.owner.onCleanup(() => {
+		layer.releaseOwner = this.owner.onCleanup(() => {
 			this.releaseLayer(layer);
 		});
 
+		if (layer.staticDefinition) {
+			this.pruneShadowedLayers();
+		}
+		else {
+			this.reportReactiveLayerBuildup();
+		}
+
 		return this.owner;
+	}
+
+	/**
+	 * Reactive layers can't be pruned (their property sets can change), so they live until the owner disposes.
+	 * Many on one component almost always means `style.set(state)` is being called repeatedly instead of once.
+	 */
+	private reportReactiveLayerBuildup (): void {
+		if (this.reportedReactiveLayerBuildup) {
+			return;
+		}
+
+		let reactiveLayers = 0;
+		for (const layer of this.layers) {
+			if (!layer.staticDefinition) reactiveLayers++;
+		}
+
+		if (reactiveLayers >= reactiveLayerLeakThreshold) {
+			this.reportedReactiveLayerBuildup = true;
+			reportUncaught(new Error(`A component holds ${reactiveLayers} reactive style definitions. Each style.set(state) call stays active until the component is removed, so call it once and update the State instead.`));
+		}
+	}
+
+	/**
+	 * Drops static layers that can never win a property again: every property they define is also defined by a later
+	 * static layer. Reactive-definition layers are kept, since their property set can change. Without this, repeatedly
+	 * restyling a component (e.g. once per Breakdown pass) would keep every past layer alive until disposal.
+	 */
+	private pruneShadowedLayers (): void {
+		const shadowed = new Set<string>();
+		for (let index = this.layers.length - 1; index >= 0; index--) {
+			const layer = this.layers[index];
+			if (!layer.staticDefinition) {
+				continue;
+			}
+
+			let fullyShadowed = true;
+			for (const propertyName of layer.properties.keys()) {
+				if (!shadowed.has(propertyName)) {
+					fullyShadowed = false;
+					shadowed.add(propertyName);
+				}
+			}
+
+			if (fullyShadowed) {
+				this.layers.splice(index, 1);
+				layer.releaseOwner();
+				// Each property re-resolves to the later layer that shadows it, so the element ends up unchanged.
+				this.releaseLayer(layer);
+			}
+		}
 	}
 
 	private installDefinition (
@@ -197,6 +264,7 @@ export class StyleManipulator<OWNER extends Owner> {
 		}
 
 		layer.active = false;
+		layer.releaseOwner = noop;
 		layer.releaseSource();
 		layer.releaseSource = noop;
 		this.releaseLayerProperties(layer);

@@ -1,3 +1,4 @@
+import { reportUncaught } from "./reportUncaught";
 import { scheduleTimeout, type ScheduledTimeoutHandle } from "./timer";
 
 /** Verifies a target once, after the tick it was scheduled in settles. */
@@ -29,10 +30,8 @@ function flush (batch: Batch): void {
 			try {
 				check(target);
 			} catch (error) {
-				// Rethrow outside the batch so one failed check neither stops the others nor goes unreported.
-				queueMicrotask(() => {
-					throw error;
-				});
+				// One failed check must neither stop the others nor go unreported.
+				reportUncaught(error);
 			}
 		}
 	} finally {

@@ -1,11 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import { type StyleValue } from "../../src/component/Style";
 import { StyleManipulator, type StyleAttributeDefinition } from "../../src/component/StyleManipulator";
 import placeExtension from "../../src/component/extensions/placeExtension";
-import { State } from "../../src/state/State";
+import { Owner, State } from "../../src/state/State";
 
 placeExtension();
+
+function cleanupRegistrationCount (owner: Owner): number {
+	type Link = { cleanupOwner: unknown; nextCleanup: Link | null };
+	let count = 0;
+	for (let link = (owner as unknown as { cleanupHead: Link | null }).cleanupHead; link; link = link.nextCleanup) {
+		if (link.cleanupOwner === owner) count++;
+	}
+	return count;
+}
 
 function mountedComponent<NAME extends keyof HTMLElementTagNameMap = "div">(tagName: NAME = "div" as NAME): Component<HTMLElementTagNameMap[NAME]> {
 	return Component(tagName).appendTo(document.body);
@@ -208,6 +217,89 @@ describe("StyleManipulator", () => {
 		expect(component.element.style.getPropertyValue("background-color"), "earlier concern properties should remain after the later definition clears").toBe("white");
 		expect(component.element.style.getPropertyValue("border-color"), "properties with no remaining concern should be removed").toBe("");
 		expect(component.element.style.getPropertyValue("color"), "the restored earlier concern should remain active after the later definition clears").toBe("tomato");
+	});
+
+	it("does not accumulate registrations when static sets keep overriding the same properties", () => {
+		const component = mountedComponent("div");
+		const external = Owner();
+		component.style.set({ color: "red" });
+		const settled = cleanupRegistrationCount(component);
+
+		for (let index = 0; index < 50; index++) {
+			component.style.set({ color: State<StyleValue | null>(external, `hsl(${index} 50% 50%)`), $cardGap: `${index}px` });
+		}
+		component.style.set({ color: "blue", $cardGap: "4px" });
+
+		expect(component.element.style.getPropertyValue("color")).toBe("blue");
+		expect(component.element.style.getPropertyValue("--card-gap")).toBe("4px");
+		expect(cleanupRegistrationCount(component), "fully overridden static layers should release their subscriptions and cleanups").toBeLessThanOrEqual(settled + 1);
+		external.dispose();
+	});
+
+	it("drops static sets that define nothing", () => {
+		const component = mountedComponent("div");
+		component.style.set({ color: "red" });
+		const settled = cleanupRegistrationCount(component);
+
+		for (let index = 0; index < 20; index++) {
+			component.style.set({});
+		}
+
+		expect(cleanupRegistrationCount(component)).toBe(settled);
+		expect(component.element.style.getPropertyValue("color")).toBe("red");
+	});
+
+	it("still falls back through reactive concerns to the latest static concern for each property", async () => {
+		const component = mountedComponent("div");
+		const overlay = State<StyleAttributeDefinition | null>(component, { color: "green" });
+
+		component.style.set({ color: "red", width: "10px" });
+		component.style.set({ color: "blue" });
+		component.style.set(overlay);
+		expect(component.element.style.getPropertyValue("color")).toBe("green");
+
+		overlay.set(null);
+		await flushEffects();
+
+		expect(component.element.style.getPropertyValue("color"), "the latest static concern for color should be restored").toBe("blue");
+		expect(component.element.style.getPropertyValue("width"), "properties only the earliest concern defines should survive").toBe("10px");
+	});
+
+	it("reports an uncaught leak error once when reactive definitions pile up on one component", () => {
+		const reported: VoidFunction[] = [];
+		const queueMicrotaskSpy = vi.spyOn(globalThis, "queueMicrotask").mockImplementation((callback: VoidFunction) => {
+			reported.push(callback);
+		});
+		const component = mountedComponent("div");
+
+		try {
+			for (let index = 0; index < 49; index++) {
+				component.style.set(State<StyleAttributeDefinition | null>(component, { color: "red" }));
+			}
+			expect(reported).toHaveLength(0);
+
+			for (let index = 0; index < 30; index++) {
+				component.style.set(State<StyleAttributeDefinition | null>(component, { color: "red" }));
+			}
+			expect(reported).toHaveLength(1);
+			expect(reported[0]).toThrow("reactive style definitions");
+		} finally {
+			queueMicrotaskSpy.mockRestore();
+		}
+	});
+
+	it("never prunes a static layer that a reactive definition shadows, since the reactive one can stop shadowing", async () => {
+		const component = mountedComponent("div");
+		const middle = State<StyleAttributeDefinition | null>(component, { color: "green" });
+
+		component.style.set({ color: "red" });
+		component.style.set(middle);
+		component.style.set({ width: "5px" });
+
+		middle.set(null);
+		await flushEffects();
+
+		expect(component.element.style.getPropertyValue("color")).toBe("red");
 	});
 
 	it("expands variable shorthand in inline style values", () => {
