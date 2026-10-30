@@ -1,26 +1,40 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
-import os from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildProject } from "../scripts/build";
+import { describe, expect, it } from "vitest";
+import { buildProject, type BuildOutput } from "../scripts/build";
+import { heldTree, withAppended, withReplaced } from "./utility/heldTree";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "..");
 const packageJsonPath = path.join(projectRoot, "package.json");
 
-// Build into a temp directory: the shared dist/ may be in use by the watch task or a linked project.
-let distDirectory: string;
-
-beforeEach(async () => {
-	distDirectory = await mkdtemp(path.join(os.tmpdir(), "kitsui-build-test-"));
-});
-
-afterEach(async () => {
-	await rm(distDirectory, { force: true, recursive: true });
-});
+function text (output: BuildOutput, file: string): string {
+	const contents = output.get(file);
+	expect(contents, `builds ${file}`).toBeDefined();
+	return typeof contents === "string" ? contents : Buffer.from(contents!).toString("utf8");
+}
 
 describe("build output", () => {
+	it("bundles and declares the arc view's held files instead of disk", async () => {
+		const tree = heldTree({
+			"src/index.ts": await withAppended("src/index.ts", "export const arcViewMarker = \"held-by-another-thread\";"),
+			"src/component/TextManipulator.ts": await withReplaced("src/component/TextManipulator.ts", "override set (value: TextInput): OWNER {", "override set (value: TextInput, heldParameter?: boolean): OWNER {"),
+		});
+
+		const output = await buildProject({ tree, write: false });
+
+		expect(text(output, "kitsui.esm.js")).toContain("held-by-another-thread");
+		expect(text(output, "kitsui.umd.js")).toContain("held-by-another-thread");
+		expect(text(output, "index.d.ts")).toContain("arcViewMarker");
+		expect(text(output, "component/TextManipulator.d.ts")).toContain("heldParameter?: boolean");
+		expect(text(output, "kitsui.d.ts")).toContain("heldParameter?: boolean");
+	});
+
+	it("fails to build when the arc view lacks a source file", async () => {
+		await expect(buildProject({ tree: heldTree({ "src/utility/reportUncaught.ts": null }), write: false })).rejects.toThrow();
+	});
+
 	it("emits declarations and exposes them through package.json", async () => {
 		const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
 			types?: string;
@@ -38,33 +52,20 @@ describe("build output", () => {
 			types: "./dist/kitsui.d.ts"
 		});
 
-		await buildProject(false, distDirectory);
-		const bundleFile = path.join(distDirectory, "kitsui.umd.js");
-		const esmBundleFile = path.join(distDirectory, "kitsui.esm.js");
-		const umdSourceMapFile = path.join(distDirectory, "kitsui.umd.js.map");
-		const esmSourceMapFile = path.join(distDirectory, "kitsui.esm.js.map");
-		const rawDeclarationFile = path.join(distDirectory, "index.d.ts");
-		const bundledDeclarationFile = path.join(distDirectory, "kitsui.d.ts");
+		const output = await buildProject({ write: false });
 
-		await expect(access(bundleFile)).resolves.toBeUndefined();
-		await expect(access(esmBundleFile)).resolves.toBeUndefined();
-		await expect(access(umdSourceMapFile)).resolves.toBeUndefined();
-		await expect(access(esmSourceMapFile)).resolves.toBeUndefined();
-		await expect(access(rawDeclarationFile)).resolves.toBeUndefined();
-		await expect(access(bundledDeclarationFile)).resolves.toBeUndefined();
-
-		const umdBundleContents = await readFile(bundleFile, "utf8");
-		const esmBundleContents = await readFile(esmBundleFile, "utf8");
-		const umdSourceMapContents = JSON.parse(await readFile(umdSourceMapFile, "utf8")) as {
+		const umdBundleContents = text(output, "kitsui.umd.js");
+		const esmBundleContents = text(output, "kitsui.esm.js");
+		const umdSourceMapContents = JSON.parse(text(output, "kitsui.umd.js.map")) as {
 			sources?: string[];
 			version?: number;
 		};
-		const esmSourceMapContents = JSON.parse(await readFile(esmSourceMapFile, "utf8")) as {
+		const esmSourceMapContents = JSON.parse(text(output, "kitsui.esm.js.map")) as {
 			sources?: string[];
 			version?: number;
 		};
-		const rawDeclarationContents = await readFile(rawDeclarationFile, "utf8");
-		const bundledDeclarationContents = await readFile(bundledDeclarationFile, "utf8");
+		const rawDeclarationContents = text(output, "index.d.ts");
+		const bundledDeclarationContents = text(output, "kitsui.d.ts");
 
 		expect(umdBundleContents.includes("//# sourceMappingURL=kitsui.umd.js.map"), "links UMD sourcemap").toBe(true);
 		expect(esmBundleContents.includes("//# sourceMappingURL=kitsui.esm.js.map"), "links ESM sourcemap").toBe(true);

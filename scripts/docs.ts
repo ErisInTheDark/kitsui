@@ -1,17 +1,15 @@
+import { arcTree, type WorkbenchArcTree } from "@inthedark/wb";
 import esbuild from "esbuild";
-import { execFile } from "node:child_process";
-import { copyFile, cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { promisify } from "node:util";
-import { JSONOutput } from "typedoc";
+import { Application, JSONOutput, normalizePath, TSConfigReader, TypeDocReader } from "typedoc";
+import arcSourcePlugin from "./arc/arcSourcePlugin";
 import { buildProject } from "./build";
 import type { DocumentBuilderWithExtras, DocumentExtraLinks } from "./docs/Document";
 import { createManipulatorPageBuilder } from "./docs/manipulatorPage";
 import { prepareModuleSections, type PrepareModuleSectionsOptions } from "./docs/modulePage/reflection";
 import { listManipulatorModules, manipulatorModuleShortName } from "./docs/navigation";
-
-const execFileAsync = promisify(execFile);
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const docsSourceDirectory = path.resolve(scriptDirectory, "docs");
@@ -21,27 +19,38 @@ const projectRoot = path.resolve(scriptDirectory, "..");
 const defaultDocsOutputDirectory = path.join(projectRoot, "docs");
 const distDirectory = path.join(projectRoot, "dist");
 const srcDirectory = path.join(projectRoot, "src");
-const typedocBinary = path.join(projectRoot, "node_modules", "typedoc", "bin", "typedoc");
 const typedocConfigPath = path.join(projectRoot, "typedoc.json");
+const typedocModelFile = "kitsui.json";
 
-async function copyFileIfExists (from: string, to: string): Promise<void> {
-	try {
-		await copyFile(from, to);
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			return;
-		}
-
-		throw error;
-	}
-}
+/** Docs site files keyed by path relative to the docs output directory. */
+export type DocsOutput = Map<string, string | Uint8Array>;
 
 export interface BuildDocsOptions {
 	outputDirectory?: string;
 	/** Where the library build the docs bundle is copied from goes; defaults to the shared `dist/`. */
 	distDirectory?: string;
+	/** Reuse the TypeDoc model already written to `outputDirectory` instead of regenerating it. Requires `write`. */
 	skipTypedoc?: boolean;
 	reloadPort?: number;
+	/**
+	 * Write the site to `outputDirectory` and the library build to `distDirectory`. Off, nothing touches disk and the
+	 * returned site omits the third-party Monaco assets. Defaults to true.
+	 */
+	write?: boolean;
+	/** The arc view to build from; loaded for the calling agent when omitted. */
+	tree?: WorkbenchArcTree;
+}
+
+/** Generates the TypeDoc JSON model in memory through TypeDoc's API. */
+async function generateTypedocModel (): Promise<JSONOutput.ProjectReflection> {
+	// Explicit readers: the defaults also parse process.argv, which belongs to whoever is running this.
+	const app = await Application.bootstrapWithPlugins({ options: typedocConfigPath }, [new TypeDocReader(), new TSConfigReader()]);
+	const project = await app.convert();
+	if (!project || app.logger.hasErrors()) {
+		throw new Error("TypeDoc failed while generating the docs model.");
+	}
+
+	return app.serializer.projectToObject(project, normalizePath(projectRoot));
 }
 
 async function listPageFiles (directory: string): Promise<string[]> {
@@ -96,26 +105,58 @@ function resolveCliOutputDirectory (): string | undefined {
 	return undefined;
 }
 
-export async function buildDocsSite (options: BuildDocsOptions = {}): Promise<void> {
+/**
+ * Builds the docs site from the calling agent's arc view.
+ * @returns every site file except the copied Monaco assets.
+ */
+export async function buildDocsSite (options: BuildDocsOptions = {}): Promise<DocsOutput> {
 	const docsOutputDirectory = options.outputDirectory ?? defaultDocsOutputDirectory;
-	const typedocJsonPath = path.join(docsOutputDirectory, "kitsui.json");
-
-	if (!options.skipTypedoc) {
-		await rm(docsOutputDirectory, { force: true, recursive: true });
-		await mkdir(docsOutputDirectory, { recursive: true });
-
-		try {
-			await execFileAsync(process.execPath, [typedocBinary, "--options", typedocConfigPath, "--json", typedocJsonPath], {
-				cwd: projectRoot,
-			});
-		} catch (error) {
-			throw new Error("TypeDoc failed while generating docs/kitsui.json.", {
-				cause: error,
-			});
-		}
+	const write = options.write ?? true;
+	if (options.skipTypedoc && !write) {
+		throw new Error("skipTypedoc reuses the model on disk, so it requires write.");
 	}
 
-	const kitsuiTypedoc = JSON.parse(await readFile(typedocJsonPath, "utf-8")) as JSONOutput.ProjectReflection;
+	const tree = options.tree ?? await arcTree({ cwd: projectRoot });
+	try {
+		const site = await buildSiteFiles(options, docsOutputDirectory, tree);
+		if (write) {
+			await writeSite(docsOutputDirectory, site, !options.skipTypedoc);
+		}
+
+		return site;
+	} finally {
+		if (!options.tree) {
+			await tree.dispose();
+		}
+	}
+}
+
+async function writeSite (docsOutputDirectory: string, site: DocsOutput, clean: boolean): Promise<void> {
+	if (clean) {
+		await rm(docsOutputDirectory, { force: true, recursive: true });
+	}
+
+	for (const [relativePath, contents] of site) {
+		const filePath = path.join(docsOutputDirectory, relativePath);
+		await mkdir(path.dirname(filePath), { recursive: true });
+		await writeFile(filePath, contents);
+	}
+
+	// Copy Monaco editor from node_modules so the playground works offline without a CDN
+	try {
+		await cp(path.join(projectRoot, "node_modules", "monaco-editor", "min", "vs"), path.join(docsOutputDirectory, "vs"), { recursive: true });
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		// monaco-editor not installed — playground will fall back to degraded mode
+	}
+}
+
+async function buildSiteFiles (options: BuildDocsOptions, docsOutputDirectory: string, tree: WorkbenchArcTree): Promise<DocsOutput> {
+	const site: DocsOutput = new Map();
+	const kitsuiTypedoc = options.skipTypedoc
+		? JSON.parse(await readFile(path.join(docsOutputDirectory, typedocModelFile), "utf-8")) as JSONOutput.ProjectReflection
+		: await generateTypedocModel();
+	site.set(typedocModelFile, JSON.stringify(kitsuiTypedoc));
 	const sitePages = await listPageFiles(docsPublicDirectory);
 
 	// Clear cached modules under scripts/docs/ so watch rebuilds pick up changes
@@ -201,10 +242,6 @@ export async function buildDocsSite (options: BuildDocsOptions = {}): Promise<vo
 	// Second pass: render each page with peer pages' link maps available as extras
 	const extraLinks: DocumentExtraLinks = { declarationLinks: allLinksByName, declarationLinksById: allLinksById };
 	for (const { page, renderPage, outputRelativePath } of pageModules) {
-		const outputPath = path.join(docsOutputDirectory, outputRelativePath);
-		const outputDirectory = path.dirname(outputPath);
-
-		await mkdir(outputDirectory, { recursive: true });
 		let html: string;
 
 		try {
@@ -225,56 +262,37 @@ export async function buildDocsSite (options: BuildDocsOptions = {}): Promise<vo
 			html = html.replace("</body>", reloadScript + "</body>");
 		}
 
-		await writeFile(outputPath, html, "utf-8");
-		console.log(`Built docs/${toDocumentPath(outputRelativePath)}`);
+		site.set(toDocumentPath(outputRelativePath), html);
 	}
 
 	const isDev = !!options.reloadPort;
 
-	// Copy examples to docs/examples/ and generate examples.json manifest
+	// Examples ship as sources, listed by examples.json
 	const examplesSourceDirectory = path.join(docsSourceDirectory, "examples");
-	const examplesOutputDirectory = path.join(docsOutputDirectory, "examples");
-	await mkdir(examplesOutputDirectory, { recursive: true });
-
-	const exampleEntries = await readdir(examplesSourceDirectory, { withFileTypes: true });
 	const exampleFiles: string[] = [];
-
-	for (const entry of exampleEntries) {
+	for (const entry of await readdir(examplesSourceDirectory, { withFileTypes: true })) {
 		if (!entry.isFile() || path.extname(entry.name) !== ".ts") continue;
-		await copyFile(
-			path.join(examplesSourceDirectory, entry.name),
-			path.join(examplesOutputDirectory, entry.name),
-		);
+		site.set(`examples/${entry.name}`, await tree.readFile(path.join(examplesSourceDirectory, entry.name)));
 		exampleFiles.push(entry.name);
 	}
 
 	exampleFiles.sort((a, b) => a.localeCompare(b));
-	await writeFile(
-		path.join(examplesOutputDirectory, "examples.json"),
-		JSON.stringify({ examples: exampleFiles }, null, "\t"),
-		"utf-8",
-	);
+	site.set("examples/examples.json", JSON.stringify({ examples: exampleFiles }, null, "\t"));
 
-	// Copy Monaco editor from node_modules so the playground works offline without a CDN
-	const monacoSource = path.join(projectRoot, "node_modules", "monaco-editor", "min", "vs");
-	const monacoOutput = path.join(docsOutputDirectory, "vs");
-	try {
-		await cp(monacoSource, monacoOutput, { recursive: true });
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		// monaco-editor not installed — playground will fall back to degraded mode
+	// The kitsui runtime and its declarations for the playground; a written site also refreshes the library build
+	const library = await buildProject({
+		isDev,
+		outputDirectory: options.distDirectory ?? distDirectory,
+		tree,
+		write: options.write ?? true,
+	});
+	for (const file of ["kitsui.d.ts", "kitsui.esm.js", "kitsui.esm.js.map"]) {
+		const contents = library.get(file);
+		if (contents !== undefined) site.set(file, contents);
 	}
 
-	// Bundle kitsui ESM for runtime usage
-	const libraryDirectory = options.distDirectory ?? distDirectory;
-	await buildProject(isDev, libraryDirectory);
-
-	await copyFile(path.join(libraryDirectory, "kitsui.d.ts"), path.join(docsOutputDirectory, "kitsui.d.ts"));
-	await copyFile(path.join(libraryDirectory, "kitsui.esm.js"), path.join(docsOutputDirectory, "kitsui.esm.js"));
-	await copyFileIfExists(path.join(libraryDirectory, "kitsui.esm.js.map"), path.join(docsOutputDirectory, "kitsui.esm.js.map"));
-
 	// Bundle client-side JS
-	await esbuild.build({
+	const client = await esbuild.build({
 		absWorkingDir: projectRoot,
 		bundle: true,
 		entryPoints: [docsClientEntry],
@@ -291,9 +309,15 @@ export async function buildDocsSite (options: BuildDocsOptions = {}): Promise<vo
 					external: true,
 				}));
 			},
-		}],
+		}, arcSourcePlugin(tree)],
 		target: "es2020",
+		write: false,
 	});
+	for (const file of client.outputFiles) {
+		site.set(path.relative(docsOutputDirectory, file.path).replaceAll("\\", "/"), file.contents);
+	}
+
+	return site;
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {

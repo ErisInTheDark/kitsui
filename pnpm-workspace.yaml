@@ -1,2 +1,6 @@
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - "@inthedark/wb"
+  - typescript
+  - "@typescript/typescript-*"

@@ -107,11 +107,11 @@ async function main (args: string[]): Promise<void> {
 	if (mode === "--prepare-version") {
 		process.stdout.write(`${await prepareVersion(projectRoot, value)}\n`);
 	} else if (mode === "--stage" && flag === undefined) {
-		await buildProject();
+		await buildProject({});
 		await stagePackage();
 	} else if (mode === "--publish" && value) {
 		await assertCommittedVersion(value);
-		await buildProject();
+		await buildProject({});
 		pnpm(["publish", await stagePackage(), "--provenance", "--no-git-checks"]);
 	} else {
 		throw new Error(usage);

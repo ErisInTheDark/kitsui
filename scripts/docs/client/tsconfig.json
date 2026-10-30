@@ -2,8 +2,6 @@
 	"extends": "../../../tsconfig.json",
 	"compilerOptions": {
 		"target": "esnext",
-		"rootDir": ".",
-		"outDir": "../../../docs",
 		"paths": {
 			"@inthedark/kitsui": ["../../../src/index.ts"],
 		}

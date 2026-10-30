@@ -7,31 +7,26 @@ const projectRoot = path.resolve(scriptDirectory, "..");
 const distDirectory = path.join(projectRoot, "dist");
 const defaultOutputFile = path.join(distDirectory, "kitsui.d.ts");
 
-export interface BuildDeclarationBundleOptions {
-	outputFile?: string;
-	sourceDirectory?: string;
-	log?: boolean;
-}
+/** Emitted declaration files keyed by path relative to the declaration root, e.g. `component/Component.d.ts`. */
+export type DeclarationFiles = ReadonlyMap<string, string>;
 
 type ModuleExportMap = Map<string, Set<string>>;
 
-async function collectDeclarationFiles (directory: string): Promise<string[]> {
-	const entries = await readdir(directory, { withFileTypes: true });
-	const declarations: string[] = [];
-
-	for (const entry of entries) {
-		const entryPath = path.join(directory, entry.name);
-
-		if (entry.isDirectory()) {
-			declarations.push(...await collectDeclarationFiles(entryPath));
-			continue;
+/** Reads every `.d.ts` under `directory` into {@link DeclarationFiles}. */
+async function readDeclarationDirectory (directory: string): Promise<Map<string, string>> {
+	const declarations = new Map<string, string>();
+	const visit = async (current: string): Promise<void> => {
+		for (const entry of await readdir(current, { withFileTypes: true })) {
+			const entryPath = path.join(current, entry.name);
+			if (entry.isDirectory()) {
+				await visit(entryPath);
+			} else if (entry.isFile() && entry.name.endsWith(".d.ts")) {
+				declarations.set(path.relative(directory, entryPath).replaceAll("\\", "/"), await readFile(entryPath, "utf-8"));
+			}
 		}
+	};
 
-		if (entry.isFile() && entry.name.endsWith(".d.ts")) {
-			declarations.push(entryPath);
-		}
-	}
-
+	await visit(directory);
 	return declarations;
 }
 
@@ -470,33 +465,19 @@ function orderIncludedModules (exportsByModule: ModuleExportMap, includedModules
 	return orderedModules;
 }
 
-export async function buildDeclarationBundle (options: BuildDeclarationBundleOptions = {}): Promise<string> {
-	const sourceDirectory = options.sourceDirectory ?? distDirectory;
-	const declarationFiles = await collectDeclarationFiles(sourceDirectory);
-	const indexPath = path.join(sourceDirectory, "index.d.ts");
-	let indexSourceText: string;
-
-	try {
-		indexSourceText = await readFile(indexPath, "utf-8");
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-			throw new Error(`Cannot bundle declarations because '${path.relative(projectRoot, indexPath)}' does not exist. Run the main build first so raw declarations are emitted.`, {
-				cause: error,
-			});
-		}
-
-		throw error;
+/** Flattens emitted declarations into one ambient `declare module "@inthedark/kitsui"` bundle. */
+export function bundleDeclarations (declarationFiles: DeclarationFiles): string {
+	const indexSourceText = declarationFiles.get("index.d.ts");
+	if (indexSourceText === undefined) {
+		throw new Error("Cannot bundle declarations because 'index.d.ts' was not emitted.");
 	}
 
 	const exportsByModule = parseIndexExports(indexSourceText);
 	const declarationTexts = new Map<string, string>();
-	for (const declarationFile of declarationFiles) {
-		if (path.resolve(declarationFile) === path.resolve(indexPath)) {
-			continue;
+	for (const [relativePath, sourceText] of declarationFiles) {
+		if (relativePath !== "index.d.ts") {
+			declarationTexts.set(normalizeModulePath(relativePath), sourceText);
 		}
-
-		const modulePath = normalizeModulePath(path.relative(sourceDirectory, declarationFile));
-		declarationTexts.set(modulePath, await readFile(declarationFile, "utf-8"));
 	}
 
 	const includedModules = new Set<string>(exportsByModule.keys());
@@ -523,7 +504,7 @@ export async function buildDeclarationBundle (options: BuildDeclarationBundleOpt
 	for (const modulePath of orderIncludedModules(exportsByModule, includedModules)) {
 		const sourceText = declarationTexts.get(modulePath);
 		if (!sourceText) {
-			throw new Error(`Cannot bundle declarations because '${modulePath}.d.ts' was not found in '${path.relative(projectRoot, sourceDirectory)}'.`);
+			throw new Error(`Cannot bundle declarations because '${modulePath}.d.ts' was not emitted.`);
 		}
 
 		const selectedExports = exportsByModule.get(modulePath) ?? new Set<string>();
@@ -541,18 +522,12 @@ export async function buildDeclarationBundle (options: BuildDeclarationBundleOpt
 	return `declare module "@inthedark/kitsui" {\n${renderedStatements.join("\n\n")}\n}\n`;
 }
 
-export async function writeDeclarationBundle (options: BuildDeclarationBundleOptions = {}): Promise<string> {
-	const outputFile = options.outputFile ?? defaultOutputFile;
-	const declarationBundle = await buildDeclarationBundle(options);
-
+/** Re-bundles the declarations an earlier build left in `dist/`. */
+async function writeDistDeclarationBundle (outputFile = defaultOutputFile): Promise<void> {
+	const bundle = bundleDeclarations(await readDeclarationDirectory(distDirectory));
 	await mkdir(path.dirname(outputFile), { recursive: true });
-	await writeFile(outputFile, declarationBundle, "utf-8");
-
-	if (options.log !== false) {
-		console.log(`Built ${path.relative(projectRoot, outputFile)}`);
-	}
-
-	return outputFile;
+	await writeFile(outputFile, bundle, "utf-8");
+	console.log(`Built ${path.relative(projectRoot, outputFile)}`);
 }
 
 function resolveCliOutputFile (): string | undefined {
@@ -576,9 +551,7 @@ function resolveCliOutputFile (): string | undefined {
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-	void writeDeclarationBundle({
-		outputFile: resolveCliOutputFile(),
-	}).catch((error: unknown) => {
+	void writeDistDeclarationBundle(resolveCliOutputFile()).catch((error: unknown) => {
 		console.error(error);
 		process.exitCode = 1;
 	});

@@ -1,16 +1,15 @@
-import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
-import os from "node:os";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ReflectionKind, TypeScript } from "typedoc";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildDocsSite } from "../scripts/docs";
+import { beforeAll, describe, expect, it } from "vitest";
+import { buildDocsSite, type DocsOutput } from "../scripts/docs";
 import { createSectionAnchorId } from "../scripts/docs/components/ApiModulePage";
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDirectory, "..");
 const docsPublicDirectory = path.join(projectRoot, "scripts", "docs", "public");
-let docsDirectory = "";
+let site: DocsOutput = new Map();
 
 interface DocsDeclaration {
 	children?: DocsDeclaration[];
@@ -128,59 +127,55 @@ function readonlyConsumerQuickInfoDocumentation (declarationPath: string, declar
 }
 
 beforeAll(async () => {
-	docsDirectory = await mkdtemp(path.join(os.tmpdir(), "kitsui-docs-test-"));
-	// Keep the library build out of the shared dist/, which other projects may be reading.
-	await buildDocsSite({ distDirectory: path.join(docsDirectory, ".dist"), outputDirectory: docsDirectory });
+	// Built in memory: nothing touches the shared docs/ or dist/, which other projects may be reading.
+	site = await buildDocsSite({ write: false });
 }, 30_000);
 
-afterAll(async () => {
-	if (!docsDirectory) {
-		return;
-	}
+function hasDocsFile (relativePath: string): boolean {
+	return site.has(relativePath.replaceAll("\\", "/"));
+}
 
-	await rm(docsDirectory, { force: true, recursive: true });
-});
+function readDocsFile (relativePath: string): string {
+	const contents = site.get(relativePath.replaceAll("\\", "/"));
+	expect(contents, `Missing docs/${relativePath}`).toBeDefined();
+	return typeof contents === "string" ? contents : Buffer.from(contents!).toString("utf8");
+}
 
 describe("build:docs pipeline", () => {
 	it("emits the docs site, the typedoc json model, and every expected page", async () => {
-		const docsJsonPath = path.join(docsDirectory, "kitsui.json");
-		const kitsuiDeclarationPath = path.join(docsDirectory, "kitsui.d.ts");
-		const exampleSourcePath = path.join(docsDirectory, "examples", "highly-accurate-fishing-simulator.ts");
-		const examplesJsonPath = path.join(docsDirectory, "examples", "examples.json");
-		await expect(access(docsDirectory)).resolves.toBeUndefined();
-		await expect(access(docsJsonPath)).resolves.toBeUndefined();
-		await expect(access(kitsuiDeclarationPath)).resolves.toBeUndefined();
-		await expect(access(exampleSourcePath)).resolves.toBeUndefined();
+		// A path only the TypeScript QuickInfo probe below sees; the declaration bundle itself stays in memory.
+		const kitsuiDeclarationPath = path.join(projectRoot, "docs-in-memory", "kitsui.d.ts");
+		expect(hasDocsFile("examples/highly-accurate-fishing-simulator.ts"), "Missing docs/examples/highly-accurate-fishing-simulator.ts").toBe(true);
 
 		const expectedPages = await listPublicPages(docsPublicDirectory);
 		for (const page of expectedPages) {
-			await expect(access(path.join(docsDirectory, page))).resolves.toBeUndefined();
+			expect(hasDocsFile(page), `Missing docs/${page}`).toBe(true);
 		}
 
-		const docsJson = JSON.stringify(JSON.parse(await readFile(docsJsonPath, "utf8")));
-		const examplesJson = await readFile(examplesJsonPath, "utf8");
-		const clientJs = await readFile(path.join(docsDirectory, "client.js"), "utf8");
-		const kitsuiDeclaration = await readFile(kitsuiDeclarationPath, "utf8");
-		const docsModel = JSON.parse(await readFile(docsJsonPath, "utf8")) as { children?: DocsDeclaration[] };
-		const indexHtml = await readFile(path.join(docsDirectory, "index.html"), "utf8");
-		const notFoundHtml = await readFile(path.join(docsDirectory, "404.html"), "utf8");
-		const playgroundHtml = await readFile(path.join(docsDirectory, "playground.html"), "utf8");
-		const componentHtml = await readFile(path.join(docsDirectory, "Component.html"), "utf8");
-		const stateHtml = await readFile(path.join(docsDirectory, "State.html"), "utf8");
-		const styleHtml = await readFile(path.join(docsDirectory, "Style.html"), "utf8");
-		const markerHtml = await readFile(path.join(docsDirectory, "Marker.html"), "utf8");
-		const ownerManipulatorHtml = await readFile(path.join(docsDirectory, "OwnerManipulator.html"), "utf8");
-		const eventHtml = await readFile(path.join(docsDirectory, "EventManipulator.html"), "utf8");
+		const docsJson = JSON.stringify(JSON.parse(readDocsFile("kitsui.json")));
+		const examplesJson = readDocsFile("examples/examples.json");
+		const clientJs = readDocsFile("client.js");
+		const kitsuiDeclaration = readDocsFile("kitsui.d.ts");
+		const docsModel = JSON.parse(readDocsFile("kitsui.json")) as { children?: DocsDeclaration[] };
+		const indexHtml = readDocsFile("index.html");
+		const notFoundHtml = readDocsFile("404.html");
+		const playgroundHtml = readDocsFile("playground.html");
+		const componentHtml = readDocsFile("Component.html");
+		const stateHtml = readDocsFile("State.html");
+		const styleHtml = readDocsFile("Style.html");
+		const markerHtml = readDocsFile("Marker.html");
+		const ownerManipulatorHtml = readDocsFile("OwnerManipulator.html");
+		const eventHtml = readDocsFile("EventManipulator.html");
 		const manipulatorModules = (docsModel.children ?? [])
 			.filter(child => child.name.startsWith("component/") && child.name.endsWith("Manipulator"))
 			.map(child => child.name.slice(child.name.lastIndexOf("/") + 1))
 			.sort((left, right) => left.localeCompare(right));
 		expect(manipulatorModules.length, "Expected at least one component manipulator module in TypeDoc output").toBeGreaterThan(0);
 		for (const manipulatorModule of manipulatorModules) {
-			await expect(access(path.join(docsDirectory, `${manipulatorModule}.html`))).resolves.toBeUndefined();
+			expect(hasDocsFile(`${manipulatorModule}.html`), `Missing docs/${manipulatorModule}.html`).toBe(true);
 		}
 		const firstManipulator = manipulatorModules[0];
-		const firstManipulatorHtml = await readFile(path.join(docsDirectory, `${firstManipulator}.html`), "utf8");
+		const firstManipulatorHtml = readDocsFile(`${firstManipulator}.html`);
 		expect(indexHtml.includes('<html lang="en">'), "Missing html element with lang attribute").toBe(true);
 		expect(examplesJson.includes("highly-accurate-fishing-simulator.ts"), "Expected docs/examples/examples.json to list highly-accurate-fishing-simulator.ts").toBe(true);
 		expect(kitsuiDeclaration.includes('declare module "@inthedark/kitsui" {'), "Missing kitsui module declaration bundle for Monaco").toBe(true);
