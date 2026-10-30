@@ -1,6 +1,6 @@
 import { arcTree, type WorkbenchArcTree } from "@inthedark/wb";
 import { build, type BuildOptions } from "esbuild";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import arcSourcePlugin from "./arc/arcSourcePlugin";
@@ -107,12 +107,23 @@ async function buildOutputs (tree: WorkbenchArcTree, outputDirectory: string, is
 	}
 }
 
+/**
+ * Overwrites outputs in place, then removes files the build no longer produces. Linked projects read `dist/`
+ * directly, so it is never emptied: a reader sees the old or the new build, not a missing package.
+ */
 async function writeOutputs (outputDirectory: string, output: BuildOutput): Promise<void> {
-	await rm(outputDirectory, { force: true, recursive: true });
 	for (const [relativePath, contents] of output) {
 		const filePath = path.join(outputDirectory, relativePath);
 		await mkdir(path.dirname(filePath), { recursive: true });
 		await writeFile(filePath, contents);
+	}
+
+	const produced = new Set([...output.keys()].map(relativePath => path.join(outputDirectory, relativePath)));
+	for (const entry of await readdir(outputDirectory, { recursive: true, withFileTypes: true })) {
+		const filePath = path.join(entry.parentPath, entry.name);
+		if (entry.isFile() && !produced.has(filePath)) {
+			await rm(filePath, { force: true });
+		}
 	}
 }
 
