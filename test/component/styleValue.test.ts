@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { compileStyleValue } from "../../src/component/styleValue";
+import { compileStyleValue, toCssPropertyName } from "../../src/component/styleValue";
+
+describe("css property names", () => {
+	it("separates a digit run from the letter before it in variable names", () => {
+		expect(toCssPropertyName("$buttonSlideWidth2")).toBe("--button-slide-width-2");
+		expect(toCssPropertyName("$gap12Large")).toBe("--gap-12-large");
+		expect(toCssPropertyName("$size2x")).toBe("--size-2x");
+		expect(toCssPropertyName("$gap-2")).toBe("--gap-2");
+	});
+
+	it("names value references the same way as declarations", () => {
+		expect(compileStyleValue("$buttonSlideWidth2 ${gap2: 1px}")).toBe("var(--button-slide-width-2) var(--gap-2, 1px)");
+	});
+
+	it("leaves raw custom property names as written", () => {
+		expect(toCssPropertyName("--gap2")).toBe("--gap2");
+	});
+});
 
 describe("style value compilation", () => {
 	it("preserves numbers and values without shorthand", () => {

@@ -25,7 +25,9 @@ export function toCssPropertyName (propertyName: string): string {
 	}
 
 	if (propertyName.startsWith("$")) {
-		propertyName = `--${propertyName.slice(1)}`;
+		return `--${propertyName.slice(1)}`
+			.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`)
+			.replace(/([a-z])([0-9])/g, "$1-$2");
 	}
 
 	return propertyName.replace(/[A-Z]/g, (character) => `-${character.toLowerCase()}`);

@@ -116,6 +116,7 @@ export {
 export type { AnimationMarker, FontFaceDefinition, KeyframesDefinition, QueryExpression, StyleDefinition, StyleValue } from "./component/Style";
 export { StyleManipulator } from "./component/StyleManipulator";
 export type { StyleAttributeDefinition, StyleAttributeInput, StyleAttributeValue, StyleAttributeValueInput } from "./component/StyleManipulator";
+export { StyleTokens } from "./component/StyleTokens";
 export { Sortable } from "./component/Sortable";
 export type {
     SortableExtensions,

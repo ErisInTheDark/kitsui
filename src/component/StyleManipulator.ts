@@ -2,6 +2,7 @@ import { Owner, State, type CleanupFunction } from "../state/State";
 import type { StyleValue } from "./Style";
 import { staticPropertySource, type PropertySource } from "./GenericPropertyManipulator";
 import { compileStyleValue, toCssPropertyName } from "./styleValue";
+import { resolveStyleTokenReference } from "./StyleTokens";
 import { reportUncaught } from "../utility/reportUncaught";
 
 /** Inline style values accepted by {@link StyleManipulator}. */
@@ -219,7 +220,7 @@ export class StyleManipulator<OWNER extends Owner> {
 		const cleanups: CleanupFunction[] = [];
 
 		for (const [propertyName, input] of Object.entries(definition)) {
-			const valueSource = toStyleValueSource(input);
+			const valueSource = toStyleValueSource(input === propertyName ? resolveStyleTokenReference(definition, propertyName) ?? input : input);
 			const property: LayerPropertyRecord = {
 				cleanup: noop,
 				value: valueSource.value,

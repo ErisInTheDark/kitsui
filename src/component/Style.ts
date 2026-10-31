@@ -2,6 +2,7 @@ import { Marker } from "../component/Marker";
 import { Owner } from "../state/State";
 import Arrays from "../utility/Arrays";
 import { compileStyleValue, toCssPropertyName } from "./styleValue";
+import { resolveStyleTokenReference, type StyleTokens } from "./StyleTokens";
 
 /**
  * A CSS property value that can be a string or number.
@@ -23,7 +24,8 @@ export type KeyframesDefinition = Record<string, StyleDefinition | null | undefi
 /**
  * CSS style property definition. Supports:
  * - Standard CSS properties (camelCase, e.g., `backgroundColor`)
- * - Custom CSS variables (prefixed with `$`, e.g., `$cardGap` becomes `--card-gap`)
+ * - Custom CSS variables (prefixed with `$`, e.g., `$cardGap` becomes `--card-gap` and `$cardGap2` becomes `--card-gap-2`)
+ * - Spread {@link StyleTokens} sets, which declare their tokens' base values
  * - Variable shorthand in values (e.g., `gap: "$cardGap"` or `gap: "${varName: fallback}"`)
  * - Calculation shorthand in values (e.g., `width: "[100% - $cardGap]"`)
  * - Literal square brackets escaped by doubling them (e.g., `gridTemplateColumns: "[[content]] 1fr"`)
@@ -234,7 +236,7 @@ function serializeRules (selector: string, definition: StyleDefinition): string[
 			continue;
 		}
 
-		ownProperties.push([key, value as StyleValue | readonly AnimationMarker[]]);
+		ownProperties.push([key, value === key ? resolveStyleTokenReference(definition, key) ?? value : value as StyleValue | readonly AnimationMarker[]]);
 	}
 
 	if (ownProperties.length > 0) {
