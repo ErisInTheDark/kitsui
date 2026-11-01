@@ -29,6 +29,10 @@ jobs:
       - uses: pnpm/setup@v3
         with:
           cache: true
+      - name: test
+        run: pnpm run test:run
+      - name: typecheck
+        run: pnpm run typecheck
       - name: prepare version
         id: release
         env:
@@ -79,11 +83,30 @@ jobs:
       - uses: pnpm/setup@v3
         with:
           cache: true
-      - name: test
-        run: pnpm run test:run
-      - name: typecheck
-        run: pnpm run typecheck
       - name: publish
         env:
           EXPECTED_VERSION: ${{ github.event.client_payload.version }}
         run: pnpm exec tsx scripts/publish-package.ts --publish --version "$EXPECTED_VERSION"
+
+  docs:
+    needs: publish
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+      - name: build docs
+        run: pnpm run build:docs
+      - name: deploy pages branch
+        working-directory: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          git init -q -b pages
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "docs @inthedark/kitsui $VERSION ($GITHUB_SHA)"
+          git push --force "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" pages

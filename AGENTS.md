@@ -19,7 +19,7 @@
 
 - npm package `@inthedark/kitsui`; import specifier everywhere (types bundle, docs, examples) is `@inthedark/kitsui`.
 - `pnpm run build:package` stages publishable contents in `build/` (`scripts/publish-package.ts` owns what ships).
-- `.github/workflows/publish-package.yml` (manual dispatch) bumps version on main, then publishes via npm trusted publishing.
+- `.github/workflows/publish-package.yml` (manual dispatch) verifies, bumps version on main, publishes via npm trusted publishing, then deploys docs to the `pages` branch. No push CI.
 - Node + pnpm versions pinned in `package.json` via `vp env pin`.
 
 ## ⚡ PERFORMANCE

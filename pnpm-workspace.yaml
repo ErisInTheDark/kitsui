@@ -4,3 +4,4 @@ minimumReleaseAgeExclude:
   - "@inthedark/wb"
   - typescript
   - "@typescript/typescript-*"
+runtime: false
