@@ -1,0 +1,15 @@
+{
+	"examples": [
+		"append-when.ts",
+		"bind-manipulators.ts",
+		"composition.ts",
+		"counter.ts",
+		"draggable.ts",
+		"drop-target.ts",
+		"highly-accurate-fishing-simulator.ts",
+		"mount-dispose.ts",
+		"place-iframe.ts",
+		"sortable.ts",
+		"state-group.ts"
+	]
+}

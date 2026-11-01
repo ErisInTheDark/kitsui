@@ -1,0 +1,2430 @@
+declare module "@inthedark/kitsui" {
+export type AriaRole = "alert" | "alertdialog" | "application" | "article" | "banner" | "blockquote" | "button" | "caption" | "cell" | "checkbox" | "code" | "columnheader" | "combobox" | "complementary" | "contentinfo" | "definition" | "deletion" | "dialog" | "directory" | "document" | "emphasis" | "feed" | "figure" | "form" | "generic" | "grid" | "gridcell" | "group" | "heading" | "img" | "insertion" | "link" | "list" | "listbox" | "listitem" | "log" | "main" | "marquee" | "math" | "menu" | "menubar" | "menuitem" | "menuitemcheckbox" | "menuitemradio" | "meter" | "navigation" | "none" | "note" | "option" | "paragraph" | "presentation" | "progressbar" | "radio" | "radiogroup" | "region" | "row" | "rowgroup" | "rowheader" | "scrollbar" | "search" | "searchbox" | "separator" | "slider" | "spinbutton" | "status" | "strong" | "subscript" | "superscript" | "switch" | "tab" | "table" | "tablist" | "tabpanel" | "term" | "textbox" | "time" | "timer" | "toolbar" | "tooltip" | "tree" | "treegrid" | "treeitem";
+
+export type AriaText = string | null | undefined;
+
+export type AriaTextInput = AriaText | State.Readonly<string | null>;
+
+export type AriaRoleInput = AriaRole | null | undefined | State.Readonly<AriaRole | null>;
+
+export type AriaBooleanInput = boolean | null | undefined | State.Readonly<boolean | null>;
+
+export type AriaBooleanMixed = boolean | "mixed" | null | undefined;
+
+export type AriaBooleanMixedInput = AriaBooleanMixed | State.Readonly<boolean | "mixed" | null>;
+
+export type AriaCurrent = boolean | "page" | "step" | "location" | "date" | "time" | null | undefined;
+
+export type AriaCurrentInput = AriaCurrent | State.Readonly<boolean | "page" | "step" | "location" | "date" | "time" | null>;
+
+export type AriaLive = "off" | "polite" | "assertive" | null | undefined;
+
+export type AriaLiveInput = AriaLive | State.Readonly<"off" | "polite" | "assertive" | null>;
+
+export type AriaReference = string | HTMLElement | {
+    readonly element: HTMLElement;
+} | Falsy;
+
+export type AriaReferenceSelection = AriaReference | Iterable<AriaReference>;
+
+export type AriaReferenceInput = AriaReferenceSelection | State.Readonly<AriaReferenceSelection>;
+
+export class AriaManipulator<OWNER extends Owner> {
+    private readonly owner;
+    private readonly attribute;
+    constructor(owner: OWNER, attribute: AttributeManipulator<OWNER>);
+    /**
+     * Set the ARIA role.
+     * @param value The role value or reactive State.
+     */
+    role(value: AriaRoleInput): OWNER;
+    /**
+     * Set the ARIA label.
+     * @param value The label text or reactive State.
+     */
+    label(value: AriaTextInput): OWNER;
+    /**
+     * Set the ARIA description.
+     * @param value The description text or reactive State.
+     */
+    description(value: AriaTextInput): OWNER;
+    /**
+     * Set the ARIA role description.
+     * @param value The role description text or reactive State.
+     */
+    roleDescription(value: AriaTextInput): OWNER;
+    /**
+     * Set aria-labelledby: elements that label this element.
+     * @param value Element reference(s) or reactive State.
+     */
+    labelledBy(value: AriaReferenceInput): OWNER;
+    /**
+     * Set aria-describedby: elements that describe this element.
+     * @param value Element reference(s) or reactive State.
+     */
+    describedBy(value: AriaReferenceInput): OWNER;
+    /**
+     * Set aria-controls: elements controlled by this element.
+     * @param value Element reference(s) or reactive State.
+     */
+    controls(value: AriaReferenceInput): OWNER;
+    /**
+     * Set aria-details: elements that provide details for this element.
+     * @param value Element reference(s) or reactive State.
+     */
+    details(value: AriaReferenceInput): OWNER;
+    /**
+     * Set aria-owns: elements owned by this element.
+     * @param value Element reference(s) or reactive State.
+     */
+    owns(value: AriaReferenceInput): OWNER;
+    /**
+     * Set aria-flowto: elements that follow this element.
+     * @param value Element reference(s) or reactive State.
+     */
+    flowTo(value: AriaReferenceInput): OWNER;
+    /**
+     * Set aria-hidden: whether this element is hidden from assistive technology.
+     * @param value The boolean value or reactive State.
+     */
+    hidden(value: AriaBooleanInput): OWNER;
+    /**
+     * Set aria-disabled: whether this element is disabled.
+     * @param value The boolean value or reactive State.
+     */
+    disabled(value: AriaBooleanInput): OWNER;
+    /**
+     * Set aria-expanded: whether this element is expanded.
+     * @param value The boolean value or reactive State.
+     */
+    expanded(value: AriaBooleanInput): OWNER;
+    /**
+     * Set aria-busy: whether this element is busy/loading.
+     * @param value The boolean value or reactive State.
+     */
+    busy(value: AriaBooleanInput): OWNER;
+    /**
+     * Set aria-selected: whether this element is selected.
+     * @param value The boolean value or reactive State.
+     */
+    selected(value: AriaBooleanInput): OWNER;
+    /**
+     * Set aria-checked: whether this element is checked (true, false, or "mixed").
+     * @param value The boolean/mixed value or reactive State.
+     */
+    checked(value: AriaBooleanMixedInput): OWNER;
+    /**
+     * Set aria-pressed: whether this element is pressed (true, false, or "mixed").
+     * @param value The boolean/mixed value or reactive State.
+     */
+    pressed(value: AriaBooleanMixedInput): OWNER;
+    /**
+     * Set aria-current: mark this element or one of its descendants as the current page/step/location.
+     * @param value The current value (true, false, or a location type) or reactive State.
+     */
+    current(value: AriaCurrentInput): OWNER;
+    /**
+     * Set aria-live: announce dynamic content updates (off, polite, or assertive).
+     * @param value The politeness level or reactive State.
+     */
+    live(value: AriaLiveInput): OWNER;
+    private set;
+}
+
+export type AttributeNameSelection = string | Falsy | Iterable<string | Falsy>;
+
+type ReactiveAttributeNameSelection = Exclude<AttributeNameSelection, undefined>;
+
+export type AttributeValue = string | number | bigint | boolean;
+
+export type AttributeValueSelection = AttributeValue | null | undefined;
+
+type ReactiveAttributeValueSelection = Exclude<AttributeValueSelection, undefined>;
+
+export type AttributeNameInput = AttributeNameSelection | State.Readonly<ReactiveAttributeNameSelection>;
+
+export type AttributeValueInput = AttributeValueSelection | State.Readonly<ReactiveAttributeValueSelection>;
+
+export interface AttributeEntry {
+    name: AttributeNameInput;
+    value: AttributeValueInput;
+}
+
+export class AttributeManipulator<OWNER extends Owner> {
+    private readonly owner;
+    private readonly element;
+    private readonly attributeDeterminers;
+    private staticCleanupRegistered;
+    /**
+     * @param owner The owner managing this manipulator's cleanup.
+     * @param element The DOM element whose attributes are managed.
+     */
+    constructor(owner: OWNER, element: HTMLElement);
+    /**
+     * Adds valueless attributes to the element. Multiple names can be passed as separate arguments or as an iterable.
+     * @param attributes Attribute names to add.
+     * @returns The owner of this manipulator.
+     */
+    add(...attributes: AttributeNameInput[]): OWNER;
+    /**
+     * Sets attribute values using either a (name, value) pair or entries with name and value.
+     * Values or names can be subscribable sources that update automatically.
+     * @param name - Attribute name or source.
+     * @param value - Attribute value or source.
+     * @returns The owner of this manipulator.
+     */
+    set(name: AttributeNameInput, value: AttributeValueInput): OWNER;
+    /**
+     * Sets attribute values using entries with name and value pairs.
+     * Values or names can be subscribable sources that update automatically.
+     * @param entries - Objects with `name` and `value` properties.
+     * @returns The owner of this manipulator.
+     */
+    set(...entries: AttributeEntry[]): OWNER;
+    /**
+     * Removes attributes from the element. Multiple names can be passed as separate arguments or as an iterable.
+     * @param attributes Attribute names to remove.
+     * @returns The owner of this manipulator.
+     */
+    remove(...attributes: AttributeNameInput[]): OWNER;
+    /**
+     * Toggles valueless attributes on the element based on a boolean.
+     * @param attribute Attribute name or names to toggle.
+     * @param enabled Whether the attributes should be present.
+     * @returns The owner of this manipulator.
+     */
+    toggle(attribute: AttributeNameInput, enabled: boolean): OWNER;
+    /**
+     * Binds valueless attributes to a boolean state, adding/removing them based on state value.
+     * @param state A subscribable boolean state.
+     * @param attributes Attribute names to bind.
+     * @returns The owner of this manipulator.
+     */
+    bind(state: State.Readonly<boolean>, ...attributes: AttributeNameInput[]): OWNER;
+    /**
+     * Binds attribute entries to a boolean state, setting/removing them based on state value.
+     * When state is true, attributes are set; when false, they are removed.
+     * @param state A subscribable boolean state.
+     * @param entries Objects with `name` and `value` properties.
+     * @returns The owner of this manipulator.
+     */
+    bind(state: State.Readonly<boolean>, ...entries: AttributeEntry[]): OWNER;
+    private ensureActive;
+    private resolveSetEntries;
+    /**
+     * Applies attributes whose names and value never change. Skips the reactive selection machinery entirely;
+     * one owner cleanup per manipulator removes them when the owner disposes, as reactive determiners do.
+     */
+    private installStaticAttributes;
+    private installAttributePresence;
+    private installAttributeValue;
+    private installAttributeSelection;
+    private replaceAttributeDeterminer;
+}
+
+export type Falsy = false | 0 | 0n | "" | null | undefined;
+
+export type StyleSelection = Style.Class | Falsy | Iterable<Style.Class | Falsy>;
+
+export type StyleInput = Style.Class | Falsy | State.Readonly<StyleSelection>;
+
+export class ClassManipulator<OWNER extends Owner> {
+    private readonly owner;
+    private readonly element;
+    private readonly styleDeterminers;
+    /**
+     * @param owner The owner managing this manipulator's lifecycle.
+     * @param element The HTML element to manipulate.
+     */
+    constructor(owner: OWNER, element: HTMLElement);
+    /**
+     * Adds one or more styles to the element. Each style replaces any prior determiner
+     * for that class. Falsy values and values in iterables are ignored.
+     *
+     * @param classes Static or reactive styles to add. Accepts individual styles,
+     * falsy values for conditional logic, or reactive style sources (States).
+     * @returns The owner of this manipulator.
+     * @throws If the owner is disposed.
+     *
+     * @example
+     * // Static
+     * component.class.add(primaryStyle);
+     *
+     * // Conditional
+     * component.class.add(isPrimary ? primaryStyle : null);
+     *
+     * // Reactive
+     * const selection = State(component, null);
+     * component.class.add(selection);
+     */
+    add(...classes: StyleInput[]): OWNER;
+    /**
+     * Removes one or more styles from the element. Each style replaces any prior determiner
+     * for that class. Falsy values and values in iterables are ignored.
+     *
+     * @param classes Static or reactive styles to remove. Accepts individual styles,
+     * falsy values for conditional logic, or reactive style sources (States).
+     * @returns The owner of this manipulator.
+     * @throws If the owner is disposed.
+     */
+    remove(...classes: StyleInput[]): OWNER;
+    /**
+     * Binds one or more styles to a boolean State. The classes are added when the
+     * state value is true, and removed when false. Each style replaces any prior
+     * determiner for that class. Falsy values are ignored.
+     *
+     * @param state A boolean State controlling the visibility of the classes.
+     * @param classes Styles to bind to the state. Accepts individual styles, falsy
+     * values, or reactive style sources.
+     * @returns The owner of this manipulator.
+     * @throws If the owner is disposed.
+     *
+     * @example
+     * const isActive = State(component, false);
+     * component.class.bind(isActive, activeStyle);
+     * // activeStyle is present iff isActive.value is true
+     */
+    bind(state: State.Readonly<boolean>, ...classes: StyleInput[]): OWNER;
+    /**
+     * Adds one or more styles under the ownership of another Owner. The styles are
+     * automatically removed when that owner is cleaned up. Falsy values and values
+     * in iterables are ignored.
+     *
+     * @param owner The external owner managing the lifetime of these class additions.
+     * @param classes Static or reactive styles to add.
+     * @returns The owner of this manipulator.
+     * @throws If this manipulator's owner is disposed.
+     *
+     * @example
+     * const externalOwner = ComponentOwner(); // some lifecycle manager
+     * component.class.addFrom(externalOwner, externalStyle);
+     * // externalStyle is removed when externalOwner is cleaned up
+     */
+    addFrom(owner: Owner, ...classes: StyleInput[]): OWNER;
+    private ensureActive;
+    private installAddInput;
+    /** Statically adds or removes a class, reusing the existing determiner when it already statically decides the same thing. */
+    private installStaticPresence;
+    private installRemoveInput;
+    private installStateDrivenStyles;
+    private replaceDeterminer;
+}
+
+export type ComponentChild = Component | Node | string | Falsy;
+
+export type ComponentChildren = ComponentChild | Iterable<ComponentChild> | ComponentSelectionState;
+
+export type ComponentRender<TValue, TComponent extends Component = Component> = (value: TValue, component: TComponent) => void;
+
+export type ComponentSource = Component | keyof HTMLElementTagNameMap | HTMLElement;
+
+export type ComponentFromSource<SOURCE extends ComponentSource> = SOURCE extends Component ? SOURCE : SOURCE extends keyof HTMLElementTagNameMap ? HTMLElementTagNameMap[SOURCE] extends infer ELEMENT extends HTMLElement ? Component<ELEMENT> : Component<HTMLElement> : SOURCE extends HTMLElement ? Component<SOURCE> : never;
+
+export type ComponentBuilderFunction<PARAMS extends unknown[] = unknown[], RESULT extends Component = Component> = (this: Component | void, ...params: PARAMS) => RESULT;
+
+export type ComponentExtensionFactory<TComponent extends Component, TExtensions extends object> = (component: TComponent & TExtensions) => TExtensions & ThisType<TComponent & TExtensions>;
+
+export type InsertWhere = "before" | "after";
+
+export type ComponentSelection = Component | Falsy | Iterable<Component | Falsy>;
+
+export interface ComponentSelectionState {
+    readonly value: ComponentSelection;
+    subscribe(owner: Owner, listener: (value: ComponentSelection) => void): CleanupFunction;
+}
+
+interface ComponentExtensions {
+}
+
+interface ComponentStaticExtensions {
+}
+
+type ExtendableComponentClass = ComponentConstructor & ComponentStaticExtensions;
+
+type ComponentConstructor = {
+    /**
+     * @returns A new component that wraps a <span> element.
+     */
+    (): Component<HTMLSpanElement>;
+    /**
+     * @param tagName - An HTML tag name (creates new element).
+     * @returns A new component that wraps a DOM element.
+     */
+    <NAME extends keyof HTMLElementTagNameMap>(tagName: NAME): Component<HTMLElementTagNameMap[NAME]>;
+    /**
+     * @param element - An existing HTMLElement to wrap.
+     * @returns A new component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
+    /**
+     * @param source - A Component to return, an HTML tag name to create, or an HTMLElement to wrap.
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns A marked component resolved from the source.
+     */
+    <SOURCE extends ComponentSource>(source: SOURCE, builder: Function): ComponentFromSource<SOURCE>;
+    new (): Component<HTMLSpanElement>;
+    /**
+     * @param tagName - An HTML tag name (creates new element).
+     * @returns A new component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    new <NAME extends keyof HTMLElementTagNameMap>(tagName: NAME): Component<HTMLElementTagNameMap[NAME]>;
+    /**
+     * @param element - An existing HTMLElement to wrap.
+     * @returns A new component that wraps a DOM element.
+     * @throws If wrapping an element that already has a component.
+     */
+    new <ELEMENT extends HTMLElement>(element: ELEMENT): Component<ELEMENT>;
+    /**
+     * @param source - A Component to return, an HTML tag name to create, or an HTMLElement to wrap.
+     * @param builder - Function identity that marks the component as having been built by that function.
+     * @returns A marked component resolved from the source.
+     * @throws If wrapping an element that already has a component.
+     */
+    new <SOURCE extends ComponentSource>(source: SOURCE, builder: Function): ComponentFromSource<SOURCE>;
+    prototype: Component;
+    /**
+     * Selects the first element in the document matching the CSS selector and wraps it in a component (or returns the existing).
+     * @param selector - A CSS selector string to match the element.
+     * @returns A component wrapping the matched element, or null if no element is found.
+     */
+    query(selector: string): Component | null;
+    /**
+     * Returns a component wrapping an element created from the provided HTML string.
+     * @param html - A string of HTML to parse and create an element from. Should contain a single root element.
+     * @returns A component wrapping the created element.
+     * @throws If the HTML string is invalid or contains multiple root elements.
+     */
+    fromHTML(html: string): Component;
+    /**
+     * Returns the extendable Component class for adding custom methods to all component instances.
+     * Used to define custom extensions that should be available on every component.
+     * @returns The Component class prototype that can be extended.
+     * @example
+     * declare module "kitsui/Component" {
+     *   interface ComponentExtensions {
+     *     custom (): string;
+     *   }
+     * }
+     * const ComponentClass = Component.extend();
+     * ComponentClass.prototype.custom = function() { return "custom"; };
+     */
+    extend(): ExtendableComponentClass;
+};
+
+type ComponentOwnerResolver = (component: Component) => Owner | null;
+
+function registerComponentOwnerResolver(resolver: ComponentOwnerResolver): CleanupFunction;
+
+class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
+    /**
+     * The underlying DOM element managed by this component.
+     */
+    readonly element: ELEMENT;
+    private readonly domTreeRegistration;
+    private readonly structuralCleanups;
+    private mounted;
+    private retainedResolverOwner;
+    private releaseRetainedResolverOwner;
+    constructor(tagNameOrElement: string | HTMLElement);
+    /**
+     * Lazily creates and memoizes a ClassManipulator for adding/removing CSS classes.
+     */
+    get class(): ClassManipulator<this>;
+    /**
+     * Lazily creates and memoizes an AttributeManipulator for managing element attributes.
+     */
+    get attribute(): AttributeManipulator<this>;
+    /**
+     * Lazily creates and memoizes a StyleManipulator for managing inline styles.
+     */
+    get style(): StyleManipulator<this>;
+    /**
+     * Lazily creates and memoizes an AriaManipulator for managing ARIA attributes.
+     */
+    get aria(): AriaManipulator<this>;
+    /**
+     * Lazily creates and memoizes an OwnerManipulator for managing explicit owners.
+     */
+    get owner(): OwnerManipulator<this>;
+    /**
+     * Lazily creates and memoizes a TextManipulator for managing text content.
+     */
+    get text(): TextManipulator<this>;
+    /**
+     * Lazily creates and memoizes an EventManipulator for managing host event listeners.
+     */
+    get event(): EventManipulator<this>;
+    /**
+     * Appends children to this component's element.
+     * Strings are converted to text nodes. Falsy values are ignored.
+     * Components are owned by this component and removed when this component is removed.
+     * @param children - Nodes, components, strings, iterables, or ComponentSelectionState.
+     * @returns This component for chaining.
+     */
+    append(...children: ComponentChildren[]): this;
+    /**
+     * Prepends children to this component's element, before existing content.
+     * Strings are converted to text nodes. Falsy values are ignored.
+     * Components are owned by this component and removed when this component is removed.
+     * @param children - Nodes, components, strings, iterables, or ComponentSelectionState.
+     * @returns This component for chaining.
+     */
+    prepend(...children: ComponentChildren[]): this;
+    /**
+     * Inserts children before or after this component (relative to its parent).
+     * Strings are converted to text nodes. Falsy values are filtered out. Useful for inserting siblings.
+     * @param where - "before" to insert before this component, or "after" to insert after.
+     * @param nodes - One or more nodes, strings, iterables, or ComponentSelectionState to insert.
+     * @returns This component for chaining.
+     * @throws If this component has no parent node.
+     */
+    insert(where: InsertWhere, ...nodes: ComponentChildren[]): this;
+    /**
+     * Appends children conditionally based on state.
+     * When the state becomes true, children are inserted. When false, they are parked in storage and placeholders remain in-flow.
+     * @param state - A State<boolean> that controls visibility.
+     * @param nodes - Nodes or iterables of nodes to append conditionally.
+     * @returns This component for chaining.
+     */
+    appendWhen(state: State.Readonly<boolean>, ...nodes: ComponentChildren[]): this;
+    /**
+     * Prepends children conditionally based on state.
+     * When the state becomes true, children are inserted before the current first child.
+     * @param state - A State<boolean> that controls visibility.
+     * @param nodes - Nodes or iterables of nodes to prepend conditionally.
+     * @returns This component for chaining.
+     */
+    prependWhen(state: State.Readonly<boolean>, ...nodes: ComponentChildren[]): this;
+    /**
+     * Inserts children conditionally before or after this component, based on state.
+     * When the state becomes true, children are inserted. When false, they're stored but stay in the DOM as a placeholder.
+     * @param state - A State<boolean> that controls visibility.
+     * @param where - "before" to insert before this component, or "after" to insert after.
+     * @param nodes - Nodes or iterables of nodes to insert conditionally.
+     * @returns This component for chaining.
+     */
+    insertWhen(state: State.Readonly<boolean>, where: InsertWhere, ...nodes: ComponentChildren[]): this;
+    private attachConditionalSelectionState;
+    /**
+     * Clears all child nodes from this component.
+     * @returns This component for chaining.
+     */
+    clear(): this;
+    /**
+     * Runs a setup callback against this component, or subscribes a render function to a state.
+     * The stateful form invokes the render immediately with the current value, then again each time the state changes.
+     * @param setup A setup callback that can perform additional fluent configuration.
+     * @returns This component for chaining.
+     */
+    use<PARAMS extends any[]>(setup: (component: this, ...params: PARAMS) => unknown, ...params: PARAMS): this;
+    /**
+     * Subscribes this component to state changes and re-renders when the state updates.
+     * The render function is called immediately with the current state value, then again each time the state changes.
+     * The subscription is automatically cleaned up when this component is removed.
+     * @typeParam TValue - The type of state value being rendered.
+     * @param state - The state to subscribe to.
+     * @param render - Function called with the state value and this component, for each update.
+     * @returns This component for chaining.
+     */
+    use<TValue>(state: State.Readonly<TValue>, render: ComponentRender<TValue, this>): this;
+    /**
+     * Assigns instance-specific members onto this component and returns the same narrowed component.
+     * The extension factory receives this component typed as the final intersection.
+     * @param extensions Builds the object members to assign onto this component.
+     * @returns This component narrowed with the assigned extension members.
+     */
+    extend<TExtensions extends object>(extensions: ComponentExtensionFactory<this, TExtensions>): this & TExtensions;
+    /**
+     * Removes this component from the DOM and disposes its resources.
+     * Owned child components are also removed.
+     * The component cannot be modified after removal.
+     */
+    remove(): void;
+    /** @internal Dispatches the Mount event if this component has never been mounted. */
+    dispatchMount(): void;
+    protected beforeDispose(): void;
+    protected afterDispose(): void;
+    private ensureActive;
+    private clearOrphanCheck;
+    private refreshOrphanCheck;
+    private refreshPlacementOwner;
+    private releaseShadowPlacementOwner;
+    private bindRetainedResolverOwner;
+    private disposeIfUnmanagedAfterPlacementCleanup;
+    private isManaged;
+    private resolveNode;
+    private expandChildren;
+    private expandConditionalChildren;
+    private processPreparedChildren;
+    private prepareComponentChildren;
+    private disposePreparedChild;
+    private trackStructuralCleanup;
+    private releaseStructuralCleanups;
+    private attachConditionalNode;
+    private attachStatefulChildren;
+    private resolveComponentSelection;
+}
+
+interface ComponentClass<ELEMENT extends HTMLElement> extends ComponentExtensions {
+}
+
+export type Component<ELEMENT extends HTMLElement = HTMLElement> = ComponentClass<ELEMENT>;
+
+export namespace Component {
+    type EventMap<TEvents extends {
+        readonly [K in keyof TEvents]: Event;
+    }> = ComponentHTMLElementEventMap & TEvents;
+    interface WithEvents<TEvents extends {
+        readonly [K in keyof TEvents]: Event;
+    }> extends Component {
+        readonly event: EventManipulator<this, "component", EventMap<TEvents>>;
+    }
+}
+
+export const Component: ComponentConstructor & ComponentStaticExtensions;
+
+export type DragPhase = "idle" | "pending" | "dragging";
+
+export interface DragPoint {
+    readonly x: number;
+    readonly y: number;
+}
+
+export type DragInputSource = {
+    readonly type: "pointer";
+    readonly pointerId: number;
+    readonly pointerType: string;
+} | {
+    readonly type: "external";
+    readonly id?: string;
+};
+
+export interface DragPosition {
+    readonly initial: DragPoint;
+    readonly current: DragPoint;
+    readonly previous: DragPoint | null;
+    readonly offset: DragPoint;
+    readonly delta: DragPoint;
+    readonly source: DragInputSource;
+}
+
+export interface DragStartContext<TComponent extends Component = Component> {
+    readonly component: DraggableHost<TComponent>;
+    readonly event?: Event;
+    readonly localPosition: DragPoint;
+    readonly position: DragPoint;
+    readonly rect: DOMRectReadOnly;
+    readonly source: DragInputSource;
+}
+
+export interface DragPreviewContext<TComponent extends Component = Component> extends DragStartContext<TComponent> {
+}
+
+export type DragPreviewRenderer<TComponent extends Component = Component> = (context: DragPreviewContext<TComponent>) => Component;
+
+export interface DragInputStart {
+    readonly event?: Event;
+    readonly localPosition?: DragPoint;
+    readonly position: DragPoint;
+    readonly source: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputMove {
+    readonly event?: Event;
+    readonly position: DragPoint;
+    readonly source?: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputEnd {
+    readonly event?: Event;
+    readonly position?: DragPoint;
+    readonly source?: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputCancel {
+    readonly event?: Event;
+    readonly position?: DragPoint;
+    readonly source?: DragInputSource;
+    readonly target?: Component;
+}
+
+export interface DragInputReceiver {
+    start(input: DragInputStart): boolean;
+    move(input: DragInputMove): void;
+    end(input: DragInputEnd): void;
+    cancel(input?: DragInputCancel): void;
+}
+
+export type DragInputAdapter<TComponent extends Component = Component> = (component: DraggableHost<TComponent>, receiver: DragInputReceiver) => CleanupFunction | void;
+
+export interface DraggableOptions<TComponent extends Component = Component> {
+    readonly canStart?: (context: DragStartContext<TComponent>) => boolean;
+    readonly input?: DragInputAdapter<TComponent>;
+    readonly renderPreview?: false | DragPreviewRenderer<TComponent>;
+    readonly threshold?: number;
+}
+
+export interface DraggableExtensions {
+    readonly draggable: Draggable;
+}
+
+export interface Draggable {
+    readonly active: State.Readonly<boolean>;
+    readonly pending: State.Readonly<boolean>;
+    readonly phase: State.Readonly<DragPhase>;
+    readonly position: State.Readonly<DragPosition | null>;
+    readonly preview: State.Readonly<Component | null>;
+    cancel(): void;
+    dispose(): void;
+    end(): void;
+}
+
+export interface DragEventDetail<TComponent extends Component = Component> {
+    readonly component: DraggableHost<TComponent>;
+    readonly event?: Event;
+    readonly position: DragPosition;
+    readonly target?: Component;
+}
+
+export interface DraggableEvents<TComponent extends Component = Component> {
+    DragCancel: CustomEvent<DragEventDetail<TComponent>>;
+    DragEnd: CustomEvent<DragEventDetail<TComponent>>;
+    DragMove: CustomEvent<DragEventDetail<TComponent>>;
+    DragStart: CustomEvent<DragEventDetail<TComponent>>;
+    DragStartRequested: CustomEvent<DragStartContext<TComponent>>;
+}
+
+export interface DraggableComponent<TComponent extends Component = Component> extends Component.WithEvents<DraggableEvents<TComponent>>, DraggableExtensions {
+}
+
+type DraggableHost<TComponent extends Component = Component> = TComponent & DraggableComponent<TComponent>;
+
+export type DragComponentEvent<TComponent extends Component = Component> = ComponentEvent<CustomEvent<DragEventDetail<TComponent>>, DraggableHost<TComponent>>;
+
+type DraggableConstructor = ComponentBuilderFunction<[DraggableOptions?], DraggableComponent> & {
+    Input<TComponent extends Component = Component>(input: DragInputAdapter<TComponent>): DragInputAdapter<TComponent>;
+};
+
+export const Draggable: DraggableConstructor;
+
+export interface DropTargetExtensions {
+    readonly dropTarget: DropTarget;
+}
+
+export interface DropTarget {
+    readonly accepting: State.Readonly<boolean>;
+    readonly draggable: State.Readonly<DraggableComponent | null>;
+    readonly hovering: State.Readonly<boolean>;
+    dispose(): void;
+}
+
+export interface DropTargetContext<TTarget extends Component = Component, TDraggable extends DraggableComponent = DraggableComponent> {
+    readonly draggable: TDraggable;
+    readonly position: DragPoint;
+    readonly source: DragInputSource;
+    readonly target: TTarget & DropTargetExtensions;
+}
+
+export interface DropTargetOptions<TTarget extends Component = Component, TDraggable extends DraggableComponent = DraggableComponent> {
+    accepts(context: DropTargetContext<TTarget, TDraggable>): boolean;
+    drop(context: DropTargetContext<TTarget, TDraggable>): void;
+}
+
+interface ResolvedDropTarget {
+    readonly controller: DropTargetController;
+    readonly target: Component & DropTargetExtensions;
+    drop(): void;
+}
+
+function resolveDropTarget(draggable: DraggableComponent, position: DragPoint, source: DragInputSource, explicitTarget?: Component): ResolvedDropTarget | null;
+
+function setActiveDropTarget(documentRef: Document, controller: DropTargetController | null, draggable: DraggableComponent | null): void;
+
+function clearDropTargetState(documentRef: Document): void;
+
+function handleDropTargetDrop(event: Event | null, draggable: DraggableComponent, position: DragPoint, source: DragInputSource, explicitTarget?: Component): boolean;
+
+class DropTargetController implements DropTarget {
+    readonly component: Component & DropTargetExtensions;
+    private readonly options;
+    readonly accepting: State<boolean>;
+    readonly draggable: State<DraggableComponent | null>;
+    readonly hovering: State<boolean>;
+    private cleanupRegistration;
+    private disposedValue;
+    constructor(component: Component & DropTargetExtensions, options: DropTargetOptions);
+    accepts(draggable: DraggableComponent, position: DragPoint, source: DragInputSource): boolean;
+    dispose(): void;
+    setAccepting(accepting: boolean): void;
+    setHovering(hovering: boolean, draggable: DraggableComponent | null): void;
+    toResolved(draggable: DraggableComponent, position: DragPoint, source: DragInputSource): ResolvedDropTarget;
+}
+
+type DropTargetConstructor = ComponentBuilderFunction<[DropTargetOptions], Component & DropTargetExtensions>;
+
+export const DropTarget: DropTargetConstructor;
+
+type HostedEvent<TEvent extends Event, THost extends Owner, THostKey extends string> = TEvent & {
+    readonly [KEY in THostKey]: THost;
+};
+
+type EventListenerFor<THost extends Owner, THostKey extends string, TEvent extends Event> = (event: HostedEvent<TEvent, THost, THostKey>) => unknown;
+
+type EventListenerInputFor<THost extends Owner, THostKey extends string, TEvent extends Event> = EventListenerFor<THost, THostKey, TEvent> | State.Readonly<EventListenerFor<THost, THostKey, TEvent> | null> | null | undefined;
+
+type EventMapValue<TEventMap, TEventName extends keyof TEventMap & string> = TEventMap[TEventName] extends Event ? TEventMap[TEventName] : Event;
+
+type EventOnProxyFor<THost extends Owner, THostKey extends string, TEventMap> = {
+    [KEventName in keyof TEventMap & string]: (owner: Owner, listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
+};
+
+type EventOffProxyFor<THost extends Owner, THostKey extends string, TEventMap> = {
+    [KEventName in keyof TEventMap & string]: (listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
+};
+
+type OwnedEventOnProxyFor<THost extends Owner, THostKey extends string, TEventMap> = {
+    [KEventName in keyof TEventMap & string]: (listener: EventListenerInputFor<THost, THostKey, EventMapValue<TEventMap, KEventName>>) => THost;
+};
+
+type CustomEventMapValue<TEventMap, TEventName extends keyof TEventMap & string> = Extract<EventMapValue<TEventMap, TEventName>, CustomEvent>;
+
+type CustomEventDetail<TEvent extends CustomEvent> = TEvent extends CustomEvent<infer TDetail> ? TDetail : never;
+
+type EventDispatchOptions<TEvent extends CustomEvent> = Omit<CustomEventInit<CustomEventDetail<TEvent>>, "detail"> & {
+    readonly tweak?: (event: TEvent) => unknown;
+};
+
+type EventDispatchArguments<TEvent extends CustomEvent> = undefined extends CustomEventDetail<TEvent> ? [detail?: CustomEventDetail<TEvent>, options?: EventDispatchOptions<TEvent>] : [detail: CustomEventDetail<TEvent>, options?: EventDispatchOptions<TEvent>];
+
+type EventDispatchMethod<TEvent extends CustomEvent> = {
+    dispatch(...args: EventDispatchArguments<TEvent>): boolean;
+}["dispatch"];
+
+type EventDispatchProxyMap<TEventMap> = {
+    [KEventName in keyof TEventMap & string]: EventMapValue<TEventMap, KEventName> extends CustomEvent ? EventDispatchMethod<CustomEventMapValue<TEventMap, KEventName>> : never;
+};
+
+type EventDispatchProxyFor<TEventMap> = EventDispatchProxyMap<ComponentHTMLElementEventMap> & EventDispatchProxyMap<TEventMap>;
+
+export type ComponentEvent<TEvent extends Event, THost extends Component = Component> = HostedEvent<TEvent, THost, "component">;
+
+export type ComponentEventListener<THost extends Component, TEvent extends Event> = EventListenerFor<THost, "component", TEvent>;
+
+export type EventListenerInput<THost extends Component, TEvent extends Event> = EventListenerInputFor<THost, "component", TEvent>;
+
+interface ComponentHTMLElementEventMap extends HTMLElementEventMap {
+    Mount: CustomEvent;
+    Dispose: CustomEvent;
+}
+
+type EventOnProxy<THost extends Component> = EventOnProxyFor<THost, "component", ComponentHTMLElementEventMap>;
+
+type EventOffProxy<THost extends Component> = EventOffProxyFor<THost, "component", ComponentHTMLElementEventMap>;
+
+type OwnedEventOnProxy<THost extends Component> = OwnedEventOnProxyFor<THost, "component", ComponentHTMLElementEventMap>;
+
+interface OwnedEventManipulator<THost extends Component> {
+    readonly on: OwnedEventOnProxy<THost>;
+    readonly off: EventOffProxy<THost>;
+}
+
+export class EventManipulator<THost extends Owner = Component, THostKey extends string = "component", TEventMap = ComponentHTMLElementEventMap> {
+    private readonly owner;
+    private readonly target;
+    private readonly hostPropertyName;
+    private emitProxy;
+    private onProxy;
+    private offProxy;
+    private ownedProxies;
+    private readonly listenerRecords;
+    constructor(owner: THost, target: EventTarget, hostPropertyName?: THostKey);
+    get dispatch(): EventDispatchProxyFor<TEventMap>;
+    get emit(): EventDispatchProxyFor<TEventMap>;
+    get on(): EventOnProxyFor<THost, THostKey, TEventMap>;
+    get off(): EventOffProxyFor<THost, THostKey, TEventMap>;
+    get owned(): {
+        readonly on: OwnedEventOnProxyFor<THost, THostKey, TEventMap>;
+        readonly off: EventOffProxyFor<THost, THostKey, TEventMap>;
+    };
+    private createDispatchProxy;
+    private releaseAllListeners;
+    private createOnProxy;
+    private createOwnedOnProxy;
+    private createOffProxy;
+    private installListener;
+    private replaceListener;
+    private removeListener;
+    private ensureActive;
+    private ensureEmittable;
+}
+
+export type PlacementTarget = Node | Component | Marker | Place | Falsy;
+
+type PlacementParent = ParentNode & Node;
+
+type PlaceConstructor = {
+    (): Place;
+    new (): Place;
+    prototype: Place;
+};
+
+export type PlacerFunction = (Place: PlaceConstructor) => State.Readonly<Place | null>;
+
+type PlacementContainer = Component | PlacementParent;
+
+class PlaceClass {
+    readonly owner: Owner;
+    readonly marker: Marker;
+    constructor(owner: Owner, marker: Marker);
+    /**
+     * Moves this placement marker to the end of the target component or DOM parent.
+     * @param target The target component or DOM parent.
+     * @returns This place for chaining.
+     */
+    appendTo(target: PlacementContainer): this;
+    /**
+     * Moves this placement marker to the start of the target component or DOM parent.
+     * @param target The target component or DOM parent.
+     * @returns This place for chaining.
+     */
+    prependTo(target: PlacementContainer): this;
+    /**
+     * Moves this placement marker before or after a reference node/component/place.
+     * @param where "before" or "after" the target.
+     * @param target The reference node, component, or place.
+     * @returns This place for chaining, or this unchanged if target does not exist.
+     * @throws If the target's parent is not a valid insert location.
+     */
+    insertTo(where: InsertWhere, target: PlacementTarget): this;
+    /**
+     * Removes this placement marker from the DOM.
+     */
+    remove(): void;
+}
+
+export type Place = PlaceClass;
+
+type Claimant = Owner | State<boolean>;
+
+export abstract class GenericClaimManipulator<OWNER extends Owner> {
+    protected readonly owner: OWNER;
+    private readonly anonymousClaims;
+    private readonly claimsByClaimant;
+    private readonly keyedClaims;
+    private activeClaimCount;
+    /**
+     * True while any registered claim is currently active.
+     * Subclasses can observe or bind this state through their own public API.
+     */
+    protected readonly hasClaim: State<boolean>;
+    constructor(owner: OWNER);
+    /**
+     * Registers a claim against this manipulator.
+     * A non-null id reserves a single slot, so later claims with the same id replace the previous claimant.
+     * A null id registers an anonymous claim that overlaps with any number of other anonymous claims.
+     * Owner claims stay active until that owner is cleaned up, and State claims stay active while their value is true.
+     * @param id Unique claim slot to replace, or null to register an overlapping anonymous claim.
+     * @param claim Owner or boolean state contributing the claim.
+     */
+    protected registerClaim(id: string | null, claim: Claimant): void;
+    /** Returns the claimant registered in a keyed slot, if any. */
+    protected getRegisteredClaimant(id: string): Claimant | null;
+    /** Returns whether the claimant has an anonymous registration. */
+    protected hasAnonymousClaim(claimant: Claimant): boolean;
+    /** Returns every registered claimant in keyed-then-anonymous order. */
+    protected getRegisteredClaimants(): Claimant[];
+    /** Runs after the registered claim set changes. */
+    protected onClaimsChanged(_disposedClaimantRemoved?: boolean): void;
+    /**
+     * Deregisters claims by claimant, by keyed id, or by the `(id, claimant)` composite used during registration.
+     * When `id` is null, the composite form removes all anonymous claims currently registered for that claimant.
+     * @param claimant Owner or boolean state whose claims should be removed.
+     */
+    protected deregisterClaim(claimant: Claimant): void;
+    /**
+     * Deregisters the currently registered keyed claim for the provided id.
+     * @param id Unique keyed claim id.
+     */
+    protected deregisterClaim(id: string): void;
+    /**
+     * Deregisters the claim matching the provided registration composite.
+     * @param id Unique claim slot, or null for anonymous claims.
+     * @param claimant Owner or boolean state contributing the claim.
+     */
+    protected deregisterClaim(id: string | null, claimant: Claimant): void;
+    private createClaimRecord;
+    private createOwnerClaimRecord;
+    private createStateClaimRecord;
+    private cleanupMatchingClaims;
+    private trackClaimant;
+    private untrackClaimant;
+    private setClaimActive;
+    private syncHasClaim;
+    private ensureActive;
+}
+
+interface PropertySource<SELECTION> {
+    readonly value: SELECTION;
+    subscribe(owner: Owner, listener: (value: SELECTION) => void): CleanupFunction;
+}
+
+function staticPropertySource<SELECTION>(value: SELECTION): PropertySource<SELECTION>;
+
+export abstract class GenericPropertyManipulator<OWNER extends Owner, INPUT, SELECTION> {
+    protected readonly owner: OWNER;
+    private determiner;
+    constructor(owner: OWNER);
+    /**
+     * Sets the property from a direct value or subscribable source.
+     * @param value Direct or reactive property input.
+     * @returns The owner of this manipulator.
+     */
+    set(value: INPUT): OWNER;
+    /**
+     * Applies the property while visible and clears it while hidden.
+     * @param visible Boolean source controlling whether the property is shown.
+     * @param value Direct or reactive property input.
+     * @returns The owner of this manipulator.
+     */
+    bind(visible: State.Readonly<boolean>, value: INPUT): OWNER;
+    /**
+     * Converts a public input value into the source used by the determiner lifecycle.
+     * Return a State for reactive inputs, or {@link staticPropertySource} for direct values.
+     * @param value Direct or reactive property input.
+     * @returns A source that yields concrete property selections.
+     */
+    protected abstract toSource(value: INPUT): PropertySource<SELECTION>;
+    /**
+     * Writes the current selection to the underlying component property.
+     * Undefined is used internally to clear the property when a binding is hidden or replaced.
+     * @param value Concrete property selection or undefined to clear the property.
+     */
+    protected abstract writeProperty(value: SELECTION | undefined): void;
+    private replaceDeterminer;
+    private ensureActive;
+}
+
+export interface MarkerEventMap {
+    Mount: CustomEvent;
+    Dispose: CustomEvent;
+}
+
+export interface MarkerExtensions {
+}
+
+export interface MarkerStaticExtensions {
+}
+
+export type ExtendableMarkerClass = MarkerConstructor & MarkerStaticExtensions;
+
+interface MarkerBuilderDefinition<A extends any[]> {
+    /**
+     * Returns the identifier text to store in the marker's comment node.
+     * @param args The arguments passed into the generated marker factory.
+     * @returns The comment text for the created marker.
+     */
+    id(...args: A): string;
+    /**
+     * Runs when the marker mounts and may return disposal cleanup.
+     * @param marker The marker instance created by the factory.
+     * @param args The arguments passed into the generated marker factory.
+     * @returns Optional cleanup to run when the marker disposes.
+     */
+    build(marker: Marker, ...args: A): CleanupFunction;
+}
+
+type MarkerConstructor = {
+    (id: string): Marker;
+    new (id: string): Marker;
+    prototype: Marker;
+    /**
+     * Returns the underlying Marker class for prototype extension.
+     * Use this when adding methods through module augmentation.
+     */
+    extend(): ExtendableMarkerClass;
+    /**
+     * Creates a marker factory from an id/build definition pair.
+     * The returned function creates markers lazily and wires their mount/dispose lifecycle automatically.
+     */
+    builder<A extends any[]>(definition: MarkerBuilderDefinition<A>): (...args: A) => Marker;
+};
+
+class MarkerClass extends Owner {
+    /** The underlying DOM comment node that this marker wraps. */
+    readonly node: Comment;
+    private readonly domTreeRegistration;
+    private readonly useHooks;
+    private mounted;
+    /**
+     * Creates a new marker comment with the given identifier text.
+     * @param id The comment text to store in the marker node.
+     */
+    constructor(id: string);
+    /** Lazily creates the marker's event manipulator for mount and dispose lifecycle events. */
+    get event(): EventManipulator<this, "marker", MarkerEventMap>;
+    /** Lazily creates and memoizes an OwnerManipulator for managing explicit owners. */
+    get owner(): OwnerManipulator<this>;
+    /** Disposes the marker and removes its comment node from the DOM. */
+    remove(): void;
+    /**
+     * Registers mount and optional dispose hooks tied to this marker's lifecycle events.
+     * @param onMount Called when the marker mounts. May return a cleanup function.
+     * @param onDispose Called after the marker disposes.
+     * @returns This marker for chaining.
+     */
+    use(onMount: () => CleanupFunction | undefined, onDispose?: () => unknown): this;
+    protected beforeDispose(): void;
+    protected afterDispose(): void;
+    /** @internal */
+    private dispatchMount;
+    private settleUseHook;
+    private ensureActive;
+    private clearOrphanCheck;
+    /** @internal */
+    refreshOrphanCheck(): void;
+    /** @internal Updates Kitsui-derived placement ownership from the current virtual tree. */
+    private refreshPlacementOwner;
+    private isManaged;
+}
+
+interface MarkerClass extends MarkerExtensions {
+}
+
+export type Marker = MarkerClass;
+
+export const Marker: MarkerConstructor & MarkerStaticExtensions;
+
+export class OwnerManipulator<HOST extends Owner & {
+    remove(): void;
+}> extends GenericClaimManipulator<HOST> {
+    private readonly refreshManagement;
+    constructor(owner: HOST, refreshManagement: () => void);
+    /**
+     * Adds an explicit owner claim to the host.
+     * A non-null id replaces any previous claim registered in the same slot.
+     * Anonymous claims are deduplicated by owner.
+     * @param owner Explicit owner to register.
+     * @param id Optional keyed claim slot.
+     * @returns The owning host for fluent chaining.
+     * @throws If the host attempts to own itself.
+     */
+    add(owner: Owner, id?: string | null): HOST;
+    /**
+     * Removes explicit owner claims by owner, by keyed id, or by the `(id, owner)` composite.
+     * @param owner Explicit owner whose claims should be removed.
+     * @returns The owning host for fluent chaining.
+     */
+    remove(owner: Owner): HOST;
+    /**
+     * Removes the explicit owner claim registered for a keyed id.
+     * @param id Keyed claim slot to clear.
+     * @returns The owning host for fluent chaining.
+     */
+    remove(id: string): HOST;
+    /**
+     * Removes the explicit owner claim matching the provided composite.
+     * When `id` is null, this removes the anonymous claim for that owner if present.
+     * @param id Keyed claim slot, or null for the anonymous owner slot.
+     * @param owner Explicit owner that registered the claim.
+     * @returns The owning host for fluent chaining.
+     */
+    remove(id: string | null, owner: Owner): HOST;
+    /**
+     * Returns one explicit owner if any are registered.
+     * When multiple owners are present, which owner is returned is not guaranteed.
+     * @returns One explicit owner or null when no owners are registered.
+     */
+    get(): Owner | null;
+    /**
+     * Returns every currently registered explicit owner without duplicates.
+     * @returns All explicit owners currently managing the host.
+     */
+    getAll(): Owner[];
+    protected onClaimsChanged(disposedOwnerRemoved?: boolean): void;
+}
+
+export type StyleValue = string | number;
+
+export type QueryExpression = `(${string})`;
+
+export interface AnimationMarker extends Marker {
+    readonly name: string;
+}
+
+export type KeyframesDefinition = Record<string, StyleDefinition | null | undefined>;
+
+export type StyleDefinition = ({
+    [KEY in keyof CSSStyleDeclaration as CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never]?: StyleValue | null | undefined;
+} & {
+    [KEY in `$${string}`]?: StyleValue | null | undefined;
+} & {
+    [KEY in `{${string}}`]?: StyleDefinition | null | undefined;
+} & {
+    animationName?: readonly AnimationMarker[] | AnimationMarker | "none" | null | undefined;
+});
+
+type StyleContainerSize = "inline-size" | "size";
+
+interface StyleContainerCapabilities {
+    size?: StyleContainerSize;
+    style?: true;
+    scrollState?: true;
+}
+
+type StyleContainerOptions = ({
+    size: StyleContainerSize;
+    style?: true;
+    scrollState?: true;
+} | {
+    size?: never;
+    style: true;
+    scrollState?: true;
+} | {
+    size?: never;
+    style?: true;
+    scrollState: true;
+});
+
+type StyleContainerFactory<CAPABILITIES extends StyleContainerCapabilities = object> = ({
+    readonly inlineSize: StyleContainerFactory<Omit<CAPABILITIES, "size"> & {
+        size: "inline-size";
+    }>;
+    readonly scrollState: StyleContainerFactory<Omit<CAPABILITIES, "scrollState"> & {
+        scrollState: true;
+    }>;
+    readonly size: StyleContainerFactory<Omit<CAPABILITIES, "size"> & {
+        size: "size";
+    }>;
+    readonly style: StyleContainerFactory<Omit<CAPABILITIES, "style"> & {
+        style: true;
+    }>;
+} & (CAPABILITIES extends StyleContainerOptions ? {
+    name(name: string): StyleContainer<CAPABILITIES>;
+} : object));
+
+type StyleContainerStuckSide = "block-end" | "block-start" | "bottom" | "inline-end" | "inline-start" | "left" | "none" | "right" | "top";
+
+type StyleContainerSnappedAxis = "block" | "both" | "inline" | "none" | "x" | "y";
+
+type StyleContainerScrollDirection = Exclude<StyleContainerStuckSide, "none"> | "block" | "inline" | "none" | "x" | "y";
+
+type StyleContainerPropertyName = `$${string}` | `--${string}`;
+
+type StyleContainerDefinition = {
+    readonly containerName: string;
+    readonly containerType?: string;
+};
+
+interface StyleContainerSizeQueries {
+    query(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+}
+
+interface StyleContainerStyleQueries {
+    style(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+    styleProperty(propertyName: StyleContainerPropertyName, value: StyleValue, definition: StyleDefinition): StyleDefinition;
+}
+
+interface StyleContainerScrollStateQueries {
+    scrollState(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+    scrolled(direction: StyleContainerScrollDirection, definition: StyleDefinition): StyleDefinition;
+    scrollable(direction: StyleContainerScrollDirection, definition: StyleDefinition): StyleDefinition;
+    snapped(axis: StyleContainerSnappedAxis, definition: StyleDefinition): StyleDefinition;
+    stuck(definition: StyleDefinition): StyleDefinition;
+    stuck(side: StyleContainerStuckSide, definition: StyleDefinition): StyleDefinition;
+}
+
+type StyleContainer<OPTIONS extends StyleContainerOptions> = (StyleContainerDefinition & (OPTIONS extends {
+    size: StyleContainerSize;
+} ? StyleContainerSizeQueries : object) & (OPTIONS extends {
+    style: true;
+} ? StyleContainerStyleQueries : object) & (OPTIONS extends {
+    scrollState: true;
+} ? StyleContainerScrollStateQueries : object));
+
+type StyleClassConstructor = {
+    (className: string, definition: StyleDefinition): Style.Class;
+    new (className: string, definition: StyleDefinition): Style.Class;
+    prototype: Style.Class;
+};
+
+class StyleClass {
+    readonly className: string;
+    readonly afterClassNames: readonly string[];
+    readonly definition: Readonly<StyleDefinition>;
+    readonly cssText: string;
+    constructor(className: string, definition: StyleDefinition, cssText: string, afterClassNames: readonly string[]);
+    toString(): string;
+}
+
+function mountStylesheet(): void;
+
+function unmountStylesheet(): void;
+
+export function resetStyles(): void;
+
+export function Style(definition: StyleDefinition): StyleDefinition;
+
+export namespace Style {
+    /** @group Style.Class */
+    type Class = StyleClass;
+    /** A spreadable named CSS query container with methods gated by its configured capabilities. */
+    type Container<CAPABILITIES extends StyleContainerOptions = StyleContainerOptions> = StyleContainer<CAPABILITIES>;
+    /**
+     * Creates or retrieves a CSS stylesheet entry with the given class name and style definition.
+     * Can be called with or without the `new` keyword.
+     *
+     * The style is immediately registered in a `<style>` element and available for use.
+     * CSS property names are converted from camelCase to kebab-case.
+     * Custom variables are prefixed with `$` in the definition and become `--` in CSS.
+     *
+     * @param className - Unique identifier for the style class. Must be unique or identical rules.
+     * @param definition - CSS property definitions to register.
+     * @returns The registered Style instance with a `.className` property.
+     * @throws If `className` is already registered with different rules.
+     *
+     * @example
+     * const cardStyle = Style.Class("card", { backgroundColor: "#fff", borderRadius: "8px" });
+     * // className: "card", renders: .card { background-color: #fff; border-radius: 8px }
+     * @group Style.Class
+     */
+    const Class: StyleClassConstructor & {
+        prototype: StyleClass;
+    };
+    /**
+     * Immutable factory for named CSS query containers with capability-gated query helpers.
+     * Select one or more capabilities, then finish with `.name(...)`. The `.size` and
+     * `.inlineSize` getters replace one another, so the last selected size capability wins.
+     *
+     * The finalized object can be spread into a `StyleDefinition`; only `containerName` and
+     * the configured CSS `containerType` value are enumerable.
+     *
+     * @example
+     * const cardContainer = Style.Container
+     *   .inlineSize
+     *   .style
+     *   .scrollState
+     *   .name("card");
+     * const containerStyle = Style.Class("card-container", { ...cardContainer });
+     * const cardStyle = Style.Class("card", {
+     *   ...cardContainer.query("(inline-size > 30rem)", { display: "grid" }),
+     * });
+     */
+    const Container: StyleContainerFactory;
+    /**
+     * Creates styles that will be rendered after the given dependency styles.
+     * Useful for ensuring CSS specificity or cascading order when styles depend on others.
+     *
+     * @param classes - One or more Style instances that this style should be ordered after.
+     * @returns An object with a `Class` method for defining the dependent style.
+     *
+     * @example
+     * const base = Style.Class("base", { color: "black" });
+     * const accent = Style.after(base).Class("accent", { color: "red" });
+     * // In the stylesheet, .base appears before .accent
+     */
+    function after(...classes: Style.Class[]): {
+        Class(className: string, definition: StyleDefinition): Style.Class;
+    };
+}
+
+export function StyleAnimation(name: string, keyframes: KeyframesDefinition): AnimationMarker;
+
+export const StyleReset: (definition: StyleDefinition) => Marker;
+
+export const StyleRoot: (definition: StyleDefinition) => Marker;
+
+export const StyleSelector: (selector: string, definition: StyleDefinition) => Marker;
+
+export const StyleImport: (url: string) => Marker;
+
+export type FontFaceDefinition = StyleDefinition & {
+    fontFamily: string;
+    src: string;
+    fontDisplay?: "auto" | "block" | "swap" | "fallback" | "optional";
+    unicodeRange?: string;
+};
+
+export const StyleFontFace: (definition: FontFaceDefinition) => Marker;
+
+export function elements(tagName: keyof HTMLElementTagNameMap, definition: StyleDefinition): StyleDefinition;
+
+export const whenFirst: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenNotFirst: (definition: StyleDefinition) => StyleDefinition;
+
+const whenAfterSelf: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenLast: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenNotLast: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenMiddle: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenEmpty: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenFull: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenOdd: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenEven: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenHover: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenHoverSelf: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenActive: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenActiveSelf: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenDisabled: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenFocus: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenFocusSelf: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenFocusAny: (definition: StyleDefinition) => StyleDefinition;
+
+export const whenFocusAnySelf: (definition: StyleDefinition) => StyleDefinition;
+
+export const pseudoBefore: (definition: StyleDefinition) => StyleDefinition;
+
+export const pseudoAfter: (definition: StyleDefinition) => StyleDefinition;
+
+export function mediaQuery(expression: QueryExpression, definition: StyleDefinition): StyleDefinition;
+
+export function lightScheme(definition: StyleDefinition): StyleDefinition;
+
+export function darkScheme(definition: StyleDefinition): StyleDefinition;
+
+export function whenOpen(definition: StyleDefinition): StyleDefinition;
+
+export function whenClosed(definition: StyleDefinition): StyleDefinition;
+
+export type StyleAttributeValue = StyleValue | null | undefined;
+
+type ReactiveStyleAttributeValue = StyleValue | null;
+
+export type StyleAttributeValueInput = StyleAttributeValue | State.Readonly<ReactiveStyleAttributeValue>;
+
+export type StyleAttributeDefinition = ({
+    [KEY in keyof CSSStyleDeclaration as KEY extends string ? CSSStyleDeclaration[KEY] extends string ? KEY extends "animation" | "animationName" ? never : KEY : never : never]?: StyleAttributeValueInput;
+} & {
+    [KEY in `$${string}`]?: StyleAttributeValueInput;
+});
+
+export type StyleAttributeInput = StyleAttributeDefinition | State.Readonly<StyleAttributeDefinition | null>;
+
+export class StyleManipulator<OWNER extends Owner> {
+    private readonly owner;
+    private readonly element;
+    private readonly layers;
+    private reportedReactiveLayerBuildup;
+    /**
+     * @param owner The owner managing this manipulator's lifecycle.
+     * @param element The element whose inline styles are controlled.
+     */
+    constructor(owner: OWNER, element: HTMLElement);
+    /**
+     * Sets inline styles from a direct definition or a subscribable definition source.
+     * Each property can also be driven by its own subscribable value.
+     * Nullish property values remove that property from the inline style attribute.
+     * @param value Direct or reactive inline style definition.
+     * @returns The owner of this manipulator.
+     */
+    set(value: StyleAttributeInput): OWNER;
+    /**
+     * Reactive layers can't be pruned (their property sets can change), so they live until the owner disposes.
+     * Many on one component almost always means `style.set(state)` is being called repeatedly instead of once.
+     */
+    private reportReactiveLayerBuildup;
+    /**
+     * Drops static layers that can never win a property again: every property they define is also defined by a later
+     * static layer. Reactive-definition layers are kept, since their property set can change. Without this, repeatedly
+     * restyling a component (e.g. once per Breakdown pass) would keep every past layer alive until disposal.
+     */
+    private pruneShadowedLayers;
+    private installDefinition;
+    private releaseLayerProperties;
+    private releaseLayer;
+    private writeResolvedProperty;
+    private writeProperty;
+    private ensureActive;
+}
+
+type TokenName = `$${string}`;
+
+type TokenOverrides<NAME extends TokenName> = {
+    readonly [KEY in NAME]?: StyleValue;
+};
+
+type NewTokenValues<VALUES, EXISTING extends TokenName = never> = {
+    readonly [KEY in keyof VALUES]: KEY extends EXISTING ? never : KEY extends TokenName ? StyleValue : never;
+};
+
+function resolveStyleTokenReference(definition: object, name: string): StyleValue | undefined;
+
+class StyleTokenSet<NAME extends TokenName> {
+    constructor(values: Readonly<Record<TokenName, StyleValue>>);
+    /**
+     * Returns new values for some of this set's tokens, to spread into a `Style.Class`, `StyleSelector` or inline
+     * style so they apply within that scope. Unknown token names are rejected.
+     */
+    override(values: TokenOverrides<NAME>): TokenOverrides<NAME>;
+    /**
+     * Returns a new set with this set's tokens plus more, whose values can reference this set's tokens.
+     * Existing tokens cannot be redefined; override them in a scope instead.
+     */
+    extend<const VALUES extends Readonly<Record<TokenName, StyleValue>>>(define: (tokens: StyleTokens<NAME>) => VALUES & NewTokenValues<VALUES, NAME>): StyleTokens<NAME | (keyof VALUES & TokenName)>;
+}
+
+export type StyleTokens<NAME extends TokenName = TokenName> = StyleTokenSet<NAME> & {
+    readonly [KEY in NAME]: KEY;
+};
+
+export function StyleTokens<const VALUES extends Readonly<Record<TokenName, StyleValue>>>(values: VALUES & NewTokenValues<VALUES>): StyleTokens<keyof VALUES & TokenName>;
+
+type SortableDraggableItem<TItem extends Component> = TItem & DraggableComponent<TItem>;
+
+export interface SortableExtensions<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly sortable: Sortable<T, TItem, K>;
+}
+
+export interface Sortable<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly dragging: State.Readonly<SortableDraggableItem<TItem> | null>;
+    readonly items: State.Readonly<readonly T[]>;
+    readonly phase: State.Readonly<"idle" | "sorting">;
+    readonly preview: State.Readonly<readonly T[]>;
+    cancel(): void;
+    dispose(): void;
+}
+
+export interface SortableTransfer<T> {
+    readonly label: string | undefined;
+    readonly type?: (value: T) => T;
+}
+
+export interface SortableTransferContext<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly item: T;
+    readonly key: K;
+    readonly sortable: Component & SortableExtensions<T, TItem, K>;
+}
+
+export interface SortableOptions<T, TItem extends Component = Component, K extends PropertyKey = number> {
+    readonly canTransferIn?: (context: SortableTransferContext<T, TItem, K>) => boolean;
+    readonly canTransferOut?: (context: SortableTransferContext<T, TItem, K>) => boolean;
+    readonly key?: (item: T, index: number) => K;
+    placeholder(component: SortableDraggableItem<TItem>, key: K): Component;
+    render(item: State.Readonly<T>, key: K, index: number): TItem;
+    readonly transfer?: SortableTransfer<T>;
+}
+
+type SortableInput<T> = readonly T[] | State.Readonly<readonly T[]>;
+
+interface SortableRecord<T, TItem extends Component, K extends PropertyKey> {
+    readonly cleanup: CleanupFunction;
+    readonly component: SortableDraggableItem<TItem>;
+    readonly key: K;
+    readonly state: State<T>;
+}
+
+interface ActiveSortSession<T, TItem extends Component, K extends PropertyKey> {
+    readonly dragging: SortableDraggableItem<TItem>;
+    item: T;
+    readonly key: K;
+    placeholder: Component | null;
+    source: SortableController<T, TItem, K>;
+    target: SortableController<any, any, any>;
+    targetIndex: number;
+}
+
+class SortableController<T, TItem extends Component = Component, K extends PropertyKey = number> implements Sortable<T, TItem, K> {
+    readonly component: Component & SortableExtensions<T, TItem, K>;
+    private readonly input;
+    private readonly options;
+    readonly dragging: State<SortableDraggableItem<TItem> | null>;
+    readonly items: State<readonly T[]>;
+    readonly phase: State<"idle" | "sorting">;
+    readonly preview: State<readonly T[]>;
+    private readonly recordsByKey;
+    private cleanupDisposeEvent;
+    private currentOrder;
+    private disposedValue;
+    private previewOrder;
+    private releaseSourceSubscription;
+    constructor(component: Component & SortableExtensions<T, TItem, K>, input: SortableInput<T>, options: SortableOptions<T, TItem, K>);
+    cancel(): void;
+    canAcceptSession(session: ActiveSortSession<any, any, any>): boolean;
+    dispose(): void;
+    handleDragStart(record: SortableRecord<T, TItem, K>, detail: DragEventDetail): void;
+    handleDragMove(detail: DragEventDetail): void;
+    handleDragEnd(event: Event, detail: DragEventDetail): void;
+    handleDragCancel(): void;
+    previewSession(session: ActiveSortSession<any, any, any>, point: {
+        readonly x: number;
+        readonly y: number;
+    }): void;
+    private cleanupSession;
+    private cancelSession;
+    private cancelDragSession;
+    private clearPreviewFromSession;
+    private suspendPlaceholder;
+    private commitSession;
+    private normalize;
+    private keyFor;
+    private syncItems;
+    private createRecord;
+    private removeRecord;
+    private placeRecords;
+    private placePlaceholder;
+    private baseOrderForSession;
+    private previewOrderForSession;
+    private previewValuesForSession;
+    private recordAtInsertionIndex;
+    private resolveInsertionIndex;
+    private insertionSlotsForSession;
+    private mergeActivePreviewOrder;
+    private insertKeyBySourceNeighbors;
+    private transferContextFor;
+}
+
+type SortableConstructor = {
+    <T, TItem extends Component = Component, K extends PropertyKey = number>(this: Component | void, input: SortableInput<T>, options: SortableOptions<T, TItem, K>): Component & SortableExtensions<T, TItem, K>;
+    Transfer<T>(label?: string): SortableTransfer<T>;
+};
+
+export const Sortable: SortableConstructor;
+
+export type TextValue = string | number | bigint | boolean;
+
+export type TextSelection = TextValue | null | undefined;
+
+type ReactiveTextSelection = Exclude<TextSelection, undefined>;
+
+export type TextInput = TextSelection | State.Readonly<ReactiveTextSelection>;
+
+export class TextManipulator<OWNER extends Component> extends GenericPropertyManipulator<OWNER, TextInput, ReactiveTextSelection> {
+    /**
+     * Sets the element's text content from a direct value or subscribable source.
+     * Nullish values clear the text content.
+     * @param value Direct or reactive text input.
+     * @returns The owning component for fluent chaining.
+     */
+    set(value: TextInput): OWNER;
+    /**
+     * Shows or clears text content based on a boolean source.
+     * When visible, the latest text value is applied; when hidden, the text content is cleared.
+     * @param visible Boolean source controlling whether text is shown.
+     * @param value Direct or reactive text input.
+     * @returns The owning component for fluent chaining.
+     */
+    bind(visible: State.Readonly<boolean>, value: TextInput): OWNER;
+    protected toSource(value: TextInput): PropertySource<ReactiveTextSelection>;
+    protected writeProperty(value: ReactiveTextSelection | undefined): void;
+}
+
+type Nullish = null;
+
+export type Mapper<T, TMapped> = (value: T, oldValue?: T) => TMapped;
+
+export const AsyncPending: Readonly<{
+    readonly type: "pending";
+}>;
+
+export type AsyncPending = typeof AsyncPending;
+
+export interface AsyncResolved<T> {
+    readonly type: "resolved";
+    readonly value: T;
+}
+
+export interface AsyncRejected<E> {
+    readonly type: "rejected";
+    readonly error: E;
+}
+
+export type AsyncResult<T, E> = AsyncPending | AsyncResolved<T> | AsyncRejected<E>;
+
+export type AsyncSettled<T, E> = AsyncResolved<T> | AsyncRejected<E>;
+
+export interface AsyncState<T, E> extends State.Readonly<AsyncResult<T, E>> {
+    /**
+     * The latest accepted resolved or rejected result, or `null` before the first settlement.
+     * Starting a newer evaluation does not clear this State.
+     */
+    readonly lastSettled: State.Readonly<AsyncSettled<T, E> | null>;
+}
+
+interface RecomputableState<T> extends State.Readonly<T> {
+    /**
+     * Recomputes the current value of the state by reapplying all mapping and transformation functions.
+     * Useful when external conditions affecting the mapped values have changed and a manual update is needed.
+     */
+    recompute(): void;
+}
+
+/**
+ * Function invoked during cleanup to release resources.
+ */
+export type CleanupFunction = () => void;
+
+type IsAny<T> = 0 extends (1 & T) ? true : false;
+
+type RejectUndefined<T> = IsAny<T> extends true ? T : [undefined] extends [T] ? never : T;
+
+type WidenStateValue<T> = [T] extends [string] ? string : [T] extends [number] ? number : [T] extends [boolean] ? boolean : [T] extends [bigint] ? bigint : [T] extends [symbol] ? symbol : T;
+
+export type StateEqualityFunction<T> = (currentValue: T, nextValue: T) => boolean;
+
+type StateFixFunction<T> = (value: T) => T | void;
+
+export type StateListener<T> = (value: T, previousValue: T) => void;
+
+export type StateUpdater<T> = (currentValue: T) => T | void;
+
+export interface StateOptions<T> {
+    /**
+     * Custom equality function for comparing state values.
+     * Defaults to `Object.is` if not provided.
+     */
+    equals?: StateEqualityFunction<T>;
+    /**
+     * Adjusts candidate state values after construction, `set()`, or `update()` resolves them.
+     * Runs before equality checks, storage, and listener emission.
+     *
+     * Like a state updater, it can return a replacement value or `undefined` to keep the candidate value.
+     */
+    fix?: StateFixFunction<T>;
+}
+
+interface StateExtensions<T> {
+}
+
+interface StateStaticExtensions {
+}
+
+export namespace State {
+    /** Public readonly-looking state surface for derived or internally-owned state values. */
+    interface Readonly<T> extends StateExtensions<T> {
+        readonly disposed: boolean;
+        readonly value: T;
+        getOwner(): Owner | null;
+        isMutable(): this is State<T>;
+        subscribe(owner: Owner, listener: StateListener<T>): CleanupFunction;
+        subscribeImmediate(owner: Owner, listener: StateListener<T>): CleanupFunction;
+        subscribeUnbound(listener: StateListener<T>): CleanupFunction;
+        subscribeImmediateUnbound(listener: StateListener<T>): CleanupFunction;
+    }
+}
+
+type MutableStateConstructor = Omit<StateConstructor, "prototype"> & {
+    prototype: State<unknown>;
+};
+
+export type ExtendableStateClass = MutableStateConstructor & StateStaticExtensions;
+
+interface StateGraph {
+    pending: StateLink<unknown>[];
+    scheduled: boolean;
+}
+
+type StateInternalOptions<T> = StateOptions<T> & {
+    graph?: StateGraph;
+};
+
+abstract class CleanupLink {
+    cleanupOwner: OwnerClass | null;
+    previousCleanup: CleanupLink | null;
+    nextCleanup: CleanupLink | null;
+    /** Runs once when the owner this link is registered on disposes. */
+    abstract runCleanup(): void;
+    /** Unregisters this link from its owner without running it. */
+    releaseCleanup(): void;
+}
+
+class DisposeLink extends CleanupLink {
+    private readonly target;
+    constructor(target: OwnerClass);
+    runCleanup(): void;
+}
+
+function linkCleanup(owner: OwnerClass, link: CleanupLink): void;
+
+abstract class OwnerClass {
+    private abortController;
+    private cleanupHead;
+    private cleanupTail;
+    private disposingValue;
+    private disposedValue;
+    /** @hidden */
+    constructor();
+    /**
+     * Whether this owner has been disposed.
+     * @readonly
+     */
+    get disposed(): boolean;
+    /**
+     * Whether this owner is currently executing its synchronous disposal lifecycle.
+     * This remains true through pre-disposal hooks, cleanup functions, and post-disposal hooks.
+     * @readonly
+     */
+    get disposing(): boolean;
+    /**
+     * An abort signal for work scoped to this owner's lifetime.
+     * The signal is created lazily, keeps a stable identity, and aborts synchronously when the owner is disposed.
+     * @readonly
+     */
+    get signal(): AbortSignal;
+    /**
+     * Disposes this owner and invokes all registered cleanup functions.
+     * Once disposed, an owner cannot be used again.
+     * Subsequent calls to `dispose()` are no-ops.
+     */
+    dispose(): void;
+    /**
+     * Registers a cleanup function to be invoked when this owner is disposed.
+     * If the owner is already disposed, the cleanup function is invoked immediately.
+     * @param cleanupFunction Function to invoke during cleanup.
+     * @returns A function that unregisters the cleanup function. Calling it prevents the cleanup function from being invoked later.
+     */
+    onCleanup(cleanupFunction: CleanupFunction): CleanupFunction;
+    /**
+     * Registers a cleanup function to be invoked when this owner is disposed, while binding the registration to another owner.
+     * If the registration owner is disposed first, the cleanup function is unregistered without being invoked.
+     * @param owner Owner that manages the cleanup registration lifetime.
+     * @param cleanupFunction Function to invoke during cleanup.
+     * @returns A function that unregisters the cleanup function from both owners.
+     */
+    onCleanup(owner: Owner, cleanupFunction: CleanupFunction): CleanupFunction;
+    /**
+     * Hook invoked before cleanup functions run during disposal.
+     * Subclasses may override to perform custom pre-disposal logic.
+     * @protected
+     */
+    protected beforeDispose(): void;
+    /**
+     * Hook invoked after all cleanup functions have run during disposal.
+     * Subclasses may override to perform custom post-disposal logic.
+     * @protected
+     */
+    protected afterDispose(): void;
+}
+
+export type Owner = OwnerClass;
+
+type OwnerConstructor = (abstract new () => Owner) & {
+    (): Owner;
+    prototype: Owner;
+};
+
+export const Owner: OwnerConstructor;
+
+function isOwner(value: unknown): value is Owner;
+
+abstract class StateLink<T> extends CleanupLink {
+    readonly immediate: boolean;
+    source: StateClass<T> | null;
+    queued: boolean;
+    forcePendingEmit: boolean;
+    pendingOriginalValue: T | undefined;
+    pendingFinalValue: T | undefined;
+    equals: StateEqualityFunction<T>;
+    constructor(immediate: boolean);
+    /** Receives a change from the source state. */
+    abstract notify(value: T, previousValue: T): void;
+    runCleanup(): void;
+    /** Stops receiving changes and releases the owner registration. Idempotent. */
+    unsubscribe(): void;
+}
+
+class StateClass<T> extends OwnerClass {
+    private owner;
+    private ownerLink;
+    private isImplicitOwner;
+    private mutable;
+    private requiresExplicitOwner;
+    private implicitOwnerDependents;
+    private currentValue;
+    private equalityFunction;
+    private readonly fixFunction;
+    private graph;
+    private immediateLinks;
+    /** True while a notification in progress iterates `immediateLinks`; edits then copy the array instead of mutating it. */
+    private immediateLinksShared;
+    private queuedLinks;
+    private notifying;
+    private pendingNotifications;
+    constructor(owner: Owner | null, initialValue: T, options?: StateInternalOptions<T>, requiresOwner?: boolean);
+    /**
+     * Returns the owner that manages this state's lifecycle, or null if ownerless.
+     */
+    getOwner(): Owner | null;
+    /**
+     * The current state value. Changes to this value trigger listeners.
+     */
+    get value(): T;
+    /**
+     * Whether the public state reference can be safely treated as mutable.
+     */
+    isMutable(): this is State<T>;
+    /**
+     * Returns the internal state graph used for batching queued listeners.
+     * This is typically used internally by extensions and should not be accessed directly.
+     * @internal
+     */
+    getGraph(): StateGraph;
+    /**
+     * Updates the state to a new value.
+     * If the new value is equal to the current value (by the equality function),
+     * the value is unchanged and no listeners are invoked.
+     * Immediate listeners are invoked synchronously; queued listeners are batched and called asynchronously.
+     * @param nextValue The new value for this state.
+     * @returns The new state value.
+     * @throws If the state has been disposed.
+     */
+    set(nextValue: T): T;
+    private commit;
+    private deliver;
+    /**
+     * Replaces the internal state value without checking disposal or notifying listeners.
+     * This is intended for silent state resets during disposal and cleanup flows.
+     * @param nextValue The new value for this state.
+     * @returns The stored state value.
+     */
+    clear(nextValue: T): T;
+    /**
+     * Updates the state by applying a function to the current value.
+     * Returning `undefined` keeps the current value, which is still passed through `fix()` and emitted to listeners.
+     * Unlike {@link set}, `update` always notifies listeners, even when the effective value is unchanged.
+     * @param updater Function that transforms the current value to a new value.
+     * @returns The stored state value after the update.
+     * @throws If the state has been disposed.
+     */
+    update(updater: StateUpdater<T>): T;
+    /**
+     * Sets a new equality function for comparing state values.
+     * This affects all subsequent calls to `set()` but does not re-evaluate existing listeners.
+     * @param equals Custom equality function.
+     * @returns This state instance for method chaining.
+     * @throws If the state has been disposed.
+     */
+    setEquality(equals: StateEqualityFunction<T>): this;
+    /**
+     * Subscribes to synchronous state changes without binding to an owner.
+     * The listener is invoked immediately (synchronously) whenever the state value changes.
+     * Use this for quick derivations and computed values. If the state is disposed, returns a no-op unsubscribe function.
+     * @param listener Function called with (newValue, previousValue) on each change.
+     * @returns Function to unsubscribe the listener.
+     */
+    subscribeImmediateUnbound(listener: StateListener<T>): CleanupFunction;
+    /**
+     * Subscribes to asynchronous state changes without binding to an owner.
+     * Listeners are batched and invoked together in microtasks, receiving only the original and final values.
+     * Multiple state changes between listener invocations are coalesced.
+     * Use this for side effects that can tolerate slight delays. If the state is disposed, returns a no-op unsubscribe function.
+     * @param listener Function called with (finalValue, originalValue) after batched changes.
+     * @returns Function to unsubscribe the listener.
+     */
+    subscribeUnbound(listener: StateListener<T>): CleanupFunction;
+    /**
+     * Subscribes to synchronous state changes with automatic cleanup via an owner.
+     * The listener is invoked immediately (synchronously) whenever the state value changes.
+     * The subscription is automatically cleaned up when the owner is disposed.
+     * @param owner The owner that will manage the subscription lifecycle.
+     * @param listener Function called with (newValue, previousValue) on each change.
+     * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
+     */
+    subscribeImmediate(owner: Owner, listener: StateListener<T>): CleanupFunction;
+    /**
+     * Subscribes to asynchronous state changes with automatic cleanup via an owner.
+     * Listeners are batched and invoked together in microtasks, receiving only the original and final values.
+     * The subscription is automatically cleaned up when the owner is disposed.
+     * @param owner The owner that will manage the subscription lifecycle.
+     * @param listener Function called with (finalValue, originalValue) after batched changes.
+     * @returns Function to unsubscribe (also triggered automatically when owner is disposed).
+     */
+    subscribe(owner: Owner, listener: StateListener<T>): CleanupFunction;
+    /**
+     * Attaches a subscription link bounded by an owner, with the same ownership effects as `subscribe`.
+     * @internal
+     */
+    _link(owner: Owner, link: StateLink<any>): void;
+    /** @internal */
+    _registerImplicitOwnerDependent(dependent: State.Readonly<unknown>): CleanupFunction;
+    protected beforeDispose(): void;
+    private static checkOrphan;
+    private refreshOrphanCheck;
+    private setImplicitOwnerCandidate;
+    private notifyImplicitOwnerDependents;
+    private ensureActive;
+}
+
+interface StateClass<T> extends State.Readonly<T>, StateExtensions<T> {
+}
+
+export type State<T> = StateClass<T>;
+
+type StateConstructor = {
+    <T>(owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+    new <T>(owner: Owner, initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+    <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+    new <T>(initialValue: RejectUndefined<T>, options?: StateOptions<WidenStateValue<T>>): State<WidenStateValue<T>>;
+    prototype: State.Readonly<unknown>;
+    /**
+     * Returns the underlying State class for prototype extension.
+     * This allows modules to add custom methods and properties to all State instances.
+     *
+     * @returns The ExtendableStateClass constructor, whose prototype can be modified.
+     *
+     * @example
+     * ```
+     * const StateClass = State.extend<number>();
+     * StateClass.prototype.double = function() {
+     *   return this.value * 2;
+     * };
+     *
+     * const num = State(owner, 5);
+     * num.double(); // 10
+     * ```
+     */
+    extend<T = unknown>(): ExtendableStateClass;
+    /**
+     * Creates a new State instance that can never change.
+     * The returned state has a fixed value and ignores all updates.
+     * It is not associated with any owner and does not require disposal.
+     * @param value The fixed value for the readonly state.
+     * @returns A new readonly state instance with the specified value.
+     */
+    Readonly<T>(value: RejectUndefined<T>): State.Readonly<WidenStateValue<T>>;
+};
+
+export const State: StateConstructor & StateStaticExtensions;
+
+type BreakdownPartBuilder<TPart> = (state: State<TPart>) => Component;
+
+type StatelessBreakdownPartBuilder = () => Component;
+
+type BreakdownPartRegistrar = {
+    <TPart>(key: PropertyKey, value: TPart, build: BreakdownPartBuilder<TPart>): Component;
+    (key: PropertyKey, build: StatelessBreakdownPartBuilder): Component;
+};
+
+type BreakdownRenderer<TValue> = (Part: BreakdownPartRegistrar, value: TValue) => void;
+
+type ComponentBreakdownRenderer<TValue, TComponent extends Component = Component> = (component: TComponent, Part: BreakdownPartRegistrar, value: TValue) => void;
+
+type BreakdownConstructor = {
+    <TValue>(owner: Owner, state: State.Readonly<TValue>, breakdown: BreakdownRenderer<TValue>): CleanupFunction;
+};
+
+type GroupedStateObject = Record<string, State.Readonly<any>>;
+
+type GroupedValue<T extends GroupedStateObject> = {
+    [K in keyof T]: T[K] extends State.Readonly<infer TValue> ? TValue : never;
+};
+
+type GroupConstructor = {
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is an object with the current value of each source state.
+     */
+    <T extends GroupedStateObject>(owner: Owner, states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * When called without an owner, the grouped state must gain an implicit or explicit
+     * owner before the next tick.
+     *
+     * @param states A record of source states to group.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is an object with the current value of each source state.
+     */
+    <T extends GroupedStateObject>(states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is an object with the current value of each source state.
+     */
+    new <T extends GroupedStateObject>(owner: Owner, states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * When called without an owner, the grouped state must gain an implicit or explicit
+     * owner before the next tick.
+     *
+     * @param states A record of source states to group.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is an object with the current value of each source state.
+     */
+    new <T extends GroupedStateObject>(states: T, options?: StateOptions<GroupedValue<T>>): State<GroupedValue<T>>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is the mapper result for the current grouped snapshot.
+     */
+    <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * When called without an owner, the grouped state must gain an implicit or explicit
+     * owner before the next tick.
+     *
+     * @param states A record of source states to group.
+     * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is the mapper result for the current grouped snapshot.
+     */
+    <T extends GroupedStateObject, U>(states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * @param owner The owner that manages the grouped state's lifecycle.
+     * @param states A record of source states to group.
+     * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is the mapper result for the current grouped snapshot.
+     */
+    new <T extends GroupedStateObject, U>(owner: Owner, states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
+    /**
+     * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
+     *
+     * The grouped state subscribes to all input states and coalesces source updates
+     * into a single next-tick grouped update per tick.
+     *
+     * When called without an owner, the grouped state must gain an implicit or explicit
+     * owner before the next tick.
+     *
+     * @param states A record of source states to group.
+     * @param mapper Maps each grouped snapshot and its previous grouped snapshot, or undefined during the initial call, into the derived value stored by the grouped state.
+     * @param options Optional state configuration for the grouped state.
+     * @returns A state whose value is the mapper result for the current grouped snapshot.
+     */
+    new <T extends GroupedStateObject, U>(states: T, mapper: Mapper<GroupedValue<T>, U>, options?: StateOptions<U>): State<U>;
+};
+
+export interface ComponentExtensions {
+        /**
+         * Renders keyed Components from a State and owns them with this Component.
+         *
+         * The initial render runs synchronously. Later State updates are queued, batched, and coalesced through State.subscribe.
+         * Virtual parent, order, containment, connectivity, and lifecycle intent update synchronously during the handler.
+         * Only physical DOM mutation and Mount wait until the handler returns.
+         * Async handlers, await, and Part or structural calls after the handler returns are unsupported.
+         *
+         * Kitsui structural APIs update the scoped virtual tree during the pass. Raw DOM operations and non-structural manipulators remain physical and immediate.
+         * Part only builds, registers, or reuses a Component; it never places that Component.
+         * Part builders must return an ownerless, unplaced Component root.
+         * The returned root must still be active.
+         * Explicitly place every returned part during each pass to establish its destination and order.
+         *
+         * If the handler throws, recorded structural intents still commit, omission reconciliation is skipped, and there is no rollback.
+         * After a successful pass, omitted parts are disposed and stale or disposed relative references are ignored.
+         * Placement does not transfer Breakdown lifetime.
+         *
+         * Mount fires once after the transaction closes and materializes. It means managed-parent placement, not document connectivity.
+         * Mount listeners run outside the Breakdown transaction, so their structural changes are separate and immediate.
+         * Nested Breakdown calls join the outer transaction.
+         *
+         * @param state The State that supplies each render value.
+         * @param breakdown The render callback.
+         * @returns This Component for chaining.
+         * @throws If a Part builder returns a non-Component, disposed, owned, or already placed root.
+         */
+        breakdown<TValue>(this: Component, state: State.Readonly<TValue>, breakdown: ComponentBreakdownRenderer<TValue>): this;
+    }
+
+export interface ComponentStaticExtensions {
+        /**
+         * Renders keyed Components from a State and owns them with the supplied owner.
+         *
+         * The initial render runs synchronously. Later State updates are queued, batched, and coalesced through State.subscribe.
+         * Virtual parent, order, containment, connectivity, and lifecycle intent update synchronously during the handler.
+         * Only physical DOM mutation and Mount wait until the handler returns.
+         * Async handlers, await, and Part or structural calls after the handler returns are unsupported.
+         *
+         * Kitsui structural APIs update the scoped virtual tree during the pass. Raw DOM operations and non-structural manipulators remain physical and immediate.
+         * Part only builds, registers, or reuses a Component; it never places that Component.
+         * Part builders must return an ownerless, unplaced Component root.
+         * The returned root must still be active.
+         * Explicitly place every returned part during each pass to establish its destination and order.
+         *
+         * If the handler throws, recorded structural intents still commit, omission reconciliation is skipped, and there is no rollback.
+         * After a successful pass, omitted parts are disposed and stale or disposed relative references are ignored.
+         * Placement does not transfer Breakdown lifetime.
+         *
+         * Mount fires once after the transaction closes and materializes. It means managed-parent placement, not document connectivity.
+         * Mount listeners run outside the Breakdown transaction, so their structural changes are separate and immediate.
+         * Nested Breakdown calls join the outer transaction.
+         *
+         * @param owner The Owner responsible for every keyed part.
+         * @param state The State that supplies each render value.
+         * @param breakdown The render callback.
+         * @returns A cleanup function that stops future renders and disposes all parts.
+         * @throws If a Part builder returns a non-Component, disposed, owned, or already placed root.
+         */
+        Breakdown: BreakdownConstructor;
+    }
+
+export interface ComponentExtensions {
+        /**
+         * Composes this component with a builder function.
+         *
+         * The builder receives this component as its `this` context and must return the same component instance.
+         * Builders that have already been applied are skipped.
+         *
+         * @param builder The component builder function to apply.
+         * @param params Parameters forwarded to the builder.
+         * @returns This component narrowed with the builder's result type.
+         */
+        and<PARAMS extends unknown[], RESULT extends Component>(builder: ComponentBuilderFunction<PARAMS, RESULT>, ...params: PARAMS): this & RESULT;
+        /**
+         * Checks whether this component has been marked with a builder identity.
+         *
+         * @param builder The builder identity to check.
+         * @returns True when the builder has been applied to this component.
+         */
+        is<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): this is this & RESULT;
+        /**
+         * Returns this component narrowed to the builder result type when the builder has been applied.
+         *
+         * @param builder The builder identity to check.
+         * @returns This component when marked with the builder, otherwise undefined.
+         */
+        as<RESULT extends Component>(builder: ComponentBuilderFunction<any[], RESULT>): (this & RESULT) | undefined;
+    }
+
+export interface StateStaticExtensions {
+        /**
+         * Creates a grouped state that mirrors the current values of multiple states.
+         *
+         * The grouped state subscribes to all input states and coalesces source updates
+         * into a single next-tick grouped update per tick.
+         * @group Group
+         */
+        Group: GroupConstructor;
+    }
+
+export interface StateExtensions<T> {
+        /**
+         * Creates an ownerless readonly state that waits until source changes stop for the requested duration.
+         * The initial value is available synchronously and later source changes are processed after queued State batching.
+         * @param milliseconds The quiet duration in milliseconds. Must be finite and non-negative.
+         * @returns A debounced readonly derivation that follows the normal implicit-owner lifecycle.
+         */
+        debounce(milliseconds: number): State.Readonly<T>;
+        /**
+         * Creates an explicitly owned readonly state that waits until source changes stop for the requested duration.
+         * The initial value is available synchronously and later source changes are processed after queued State batching.
+         * @param owner The owner responsible for managing the debounced state's lifecycle.
+         * @param milliseconds The quiet duration in milliseconds. Must be finite and non-negative.
+         * @returns A debounced readonly derivation owned by the provided owner.
+         */
+        debounce(owner: Owner, milliseconds: number): State.Readonly<T>;
+        /**
+         * Creates an ownerless readonly state that emits the first queued change immediately and then at most once per interval.
+         * The latest value received during an interval is emitted at its trailing boundary.
+         * @param milliseconds The throttle interval in milliseconds. Must be finite and non-negative.
+         * @returns A leading-and-trailing readonly derivation that follows the normal implicit-owner lifecycle.
+         */
+        throttle(milliseconds: number): State.Readonly<T>;
+        /**
+         * Creates an explicitly owned readonly state that emits the first queued change immediately and then at most once per interval.
+         * The latest value received during an interval is emitted at its trailing boundary.
+         * @param owner The owner responsible for managing the throttled state's lifecycle.
+         * @param milliseconds The throttle interval in milliseconds. Must be finite and non-negative.
+         * @returns A leading-and-trailing readonly derivation owned by the provided owner.
+         */
+        throttle(owner: Owner, milliseconds: number): State.Readonly<T>;
+    }
+
+export interface ComponentExtensions {
+        /**
+         * Physically appends this component to the end of the target component or DOM parent.
+         * If placement crosses a ShadowRoot boundary, the nearest wrapped host owns this component's lifetime.
+         * Ordinary light-DOM placement does not add an explicit owner.
+         * This authoring call synchronously replaces any prior Kitsui placement authority for this component.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         * @throws If this or the target component is disposed.
+         */
+        appendTo(target: PlacementContainer): this;
+        /**
+         * Conditionally appends this component based on a boolean state.
+         * Automatically removes the component when the state becomes false.
+         * @param state The boolean state that controls visibility.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         */
+        appendToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
+        /**
+         * Physically prepends this component to the start of the target component or DOM parent.
+         * If placement crosses a ShadowRoot boundary, the nearest wrapped host owns this component's lifetime.
+         * Ordinary light-DOM placement does not add an explicit owner.
+         * This authoring call synchronously replaces any prior Kitsui placement authority for this component.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         * @throws If this or the target component is disposed.
+         */
+        prependTo(target: PlacementContainer): this;
+        /**
+         * Conditionally prepends this component based on a boolean state.
+         * Automatically removes the component when the state becomes false.
+         * @param state The boolean state that controls visibility.
+         * @param target The target component or DOM parent.
+         * @returns This component for chaining.
+         */
+        prependToWhen(state: State.Readonly<boolean>, target: PlacementContainer): this;
+        /**
+         * Physically inserts this component before or after the target node, component, or place.
+         * If placement crosses a ShadowRoot boundary, the nearest wrapped host owns this component's lifetime.
+         * Ordinary light-DOM placement does not add an explicit owner.
+         * This authoring call synchronously replaces any prior Kitsui placement authority for this component.
+         * @param where \"before\" or \"after\" the target.
+         * @param target The reference node, component, place, or null.
+         * @returns This component for chaining.
+         * @throws If this component is disposed or target's parent is not a valid insert location.
+         */
+        insertTo(where: InsertWhere, target: PlacementTarget): this;
+        /**
+         * Conditionally inserts this component based on a boolean state.
+         * Automatically removes the component when the state becomes false.
+         * @param state The boolean state that controls visibility.
+         * @param where \"before\" or \"after\" the target.
+         * @param target The reference node, component, place, or null.
+         * @returns This component for chaining.
+         */
+        insertToWhen(state: State.Readonly<boolean>, where: InsertWhere, target: PlacementTarget): this;
+        /**
+         * Manually controls component placement with a reactive placer function.
+         * The placer receives a Place constructor and returns State<Place | null> that controls where the component is inserted.
+         * @param owner The owner who manages the placement lifecycle.
+         * @param placer A function that produces State<Place | null> determining the component's location.
+         * @returns This component for chaining.
+         * @throws If this component is disposed or the placer does not return a State<Place | null>.
+         */
+        place(owner: Owner, placer: PlacerFunction): this;
+    }
+
+export interface MarkerExtensions {
+        /**
+         * Appends this marker to the end of the target component or DOM parent.
+         * @param target The target component or DOM parent.
+         * @returns This marker for chaining.
+         */
+        appendTo(target: PlacementContainer): this;
+        /**
+         * Prepends this marker to the start of the target component or DOM parent.
+         * @param target The target component or DOM parent.
+         * @returns This marker for chaining.
+         */
+        prependTo(target: PlacementContainer): this;
+        /**
+         * Inserts this marker relative to another target.
+         * @param where Whether to insert before or after the target.
+         * @param target The component, marker, place, or DOM node to insert around.
+         * @returns This marker for chaining.
+         */
+        insertTo(where: InsertWhere, target: PlacementTarget): this;
+    }
+
+export interface ComponentExtensions {
+        and<T, TItem extends Component = Component, K extends PropertyKey = number>(builder: typeof Sortable, input: readonly T[] | State.Readonly<readonly T[]>, options: SortableOptions<T, TItem, K>): this & Component & SortableExtensions<T, TItem, K>;
+    }
+
+export interface StateExtensions<T> {
+        /**
+         * Creates a new ownerless state containing the mapped value of this state.
+         * The mapped state subscribes to changes in the source and automatically updates.
+         * The mapped state must gain an owner before the next tick.
+         * @param mapValue Function that transforms each value from the source state.
+         * @param options Optional state configuration for the mapped state.
+         * @returns A new ownerless state with the transformed values.
+         */
+        map<TMapped>(mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
+        /**
+         * Creates a new state containing the mapped value of this state.
+         * The mapped state subscribes to changes in the source and automatically updates.
+         * @param owner The owner responsible for managing the mapped state's lifecycle.
+         * @param mapValue Function that transforms each value from the source state.
+         * @param options Optional state configuration for the mapped state.
+         * @returns A new state with the transformed values.
+         */
+        map<TMapped>(owner: Owner, mapValue: Mapper<T, TMapped>, options?: StateOptions<TMapped>): RecomputableState<TMapped>;
+        /**
+         * Maps the latest coalesced source value asynchronously.
+         * Superseded operations are aborted and ignored, and the returned State is disposed with the explicit owner.
+         * @param owner The owner responsible for the asynchronous mapping lifetime.
+         * @param mapper Maps a source value with a signal that aborts on supersession or disposal.
+         * @returns A readonly asynchronous State that begins with the canonical pending value.
+         */
+        mapAsync<U, E = unknown>(owner: Owner, mapper: (value: T, signal: AbortSignal) => Promise<U>): AsyncState<U, E>;
+        /**
+         * A boolean state indicating whether the current value is truthy.
+         * The value is memoized per state instance for efficiency.
+         */
+        readonly truthy: RecomputableState<boolean>;
+        /**
+         * A boolean state indicating whether the current value is falsy.
+         * The value is memoized per state instance for efficiency.
+         */
+        readonly falsy: RecomputableState<boolean>;
+        /**
+         * Returns a state that falls back to a computed value when this state is null.
+         * Otherwise, returns the original value.
+         * @param getValue Function invoked to compute the fallback value when needed.
+         * @param options Optional state configuration for the derived state.
+         * @returns A new state with the original or fallback value.
+         */
+        or<TFallback>(getValue: () => TFallback, options?: StateOptions<Exclude<T, Nullish> | TFallback>): RecomputableState<Exclude<T, Nullish> | TFallback>;
+        /**
+         * Returns a boolean state that is true when this state equals the provided value or state.
+         * Uses strict equality (===) for comparison.
+         * @param compareValue The value or state to compare against the current state value.
+         * @returns A new state that is true when the values are strictly equal, false otherwise.
+         */
+        equals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
+        /**
+         * Returns a boolean state that is true when this state does not equal the provided value or state.
+         * Uses strict inequality (!==) for comparison.
+         * @param compareValue The value or state to compare against the current state value.
+         * @returns A new state that is true when the values are not strictly equal, false otherwise.
+         */
+        notEquals(compareValue: T | State.Readonly<T>): RecomputableState<boolean>;
+    }
+}

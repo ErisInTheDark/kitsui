@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style >@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap");
+* { box-sizing: border-box; margin: 0; padding: 0 }
+*::before { box-sizing: border-box }
+*::after { box-sizing: border-box }
+::view-transition-old(root) { animation-name: none; opacity: 1 }
+::view-transition-group(root) { animation-name: none }
+::view-transition-new(root) { animation-name: none; opacity: 1 }
+::view-transition-group(docs-header) { animation-duration: 0.2s; animation-timing-function: ease-out }
+::view-transition-old(docs-header) { opacity: 0.9 }
+::view-transition-new(docs-header) { opacity: 1 }
+::view-transition-group(docs-main) { animation-duration: 0.24s; animation-timing-function: ease-out }
+::view-transition-old(docs-main) { opacity: 0.85 }
+::view-transition-new(docs-main) { opacity: 1 }
+.docs-layout-page { background: var(--bg-page); color: var(--text-primary); display: flex; flex-direction: column; font-family: var(--font-sans); font-size: 17px; line-height: 1.6; min-height: 100vh }
+.docs-home-hero { display: flex; flex-direction: column; border-bottom: 1px solid var(--border-subtle); gap: 8px; padding-bottom: 20px }
+.docs-home-title { color: var(--text-bright); font-size: 31px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2 }
+.docs-home-summary { color: var(--text-subtle); font-size: 15px; line-height: 1.5 }
+.docs-theme { color-scheme: light dark; --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; --font-mono: 'JetBrains Mono', 'Fira Code', monospace; --bg-page: light-dark( #fafafa, #0d0d0d); --bg-code-block: light-dark( #f3f3f3, #111); --bg-surface: light-dark( #eaeaea, #161616); --bg-raised: light-dark( #e0e0e0, #1a1a1a); --border-subtle: light-dark( #ddd, #1a1a1a); --border-code: light-dark( #d0d0d0, #222); --border-muted: light-dark( #c0c0c0, #333); --text-bright: light-dark( #111, #fff); --text-primary: light-dark( #1a1a1a, #e4e4e4); --text-body: light-dark( #333, #ccc); --text-muted: light-dark( #666, #aaa); --text-secondary: light-dark( #777, #888); --text-subtle: light-dark( #888, #777); --text-dim: light-dark( #999, #666); --syntax-type: light-dark( #2e7d32, #a3e635); --syntax-reference: light-dark( #1565c0, #60a5fa); --syntax-keyword: light-dark( #4a7fa8, #7aafe0); --syntax-literal: light-dark( #b8860b, #f59e0b); --syntax-punctuation: light-dark( #999, #666); --syntax-method: light-dark( #7b1fa2, #c084fc); --accent-primary: light-dark( #2e7d32, #a3e635); --accent-returns: light-dark( #1565c0, #60a5fa); --accent-throws: light-dark( #c62828, #f87171) }
+.docs-footer { font-family: var(--font-mono); border-top: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 12px; letter-spacing: 0.04em; margin-top: 48px; padding: 16px 20px 24px }
+.docs-footer-inner { margin: 0 auto; max-width: 1120px; width: 100% }
+.docs-header { border-bottom: 1px solid var(--border-subtle); padding: 14px 20px; view-transition-name: docs-header }
+.docs-header-inner { margin: 0 auto; max-width: 1120px; width: 100%; align-items: center; display: flex; gap: 16px; justify-content: space-between }
+.docs-header-left { align-items: center; display: flex; gap: 16px }
+.docs-header-right { align-items: center; display: flex; gap: 16px }
+.docs-header-link { font-family: var(--font-mono); border-radius: 999px; color: var(--text-muted); font-size: 13px; font-weight: 600; padding: 6px 10px; text-decoration: none; transition: background 0.15s, color 0.15s }
+.docs-header-link:hover { background: var(--bg-surface); color: var(--text-primary) }
+.docs-header-link-active { background: var(--bg-surface); color: var(--accent-primary) }
+.docs-header-brand { font-family: var(--font-mono); color: var(--text-primary); font-size: 20px; font-weight: 700; letter-spacing: 0.02em; text-decoration: none }
+.docs-header-note { font-family: var(--font-mono); color: var(--text-secondary); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase }
+.docs-sidebar { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 24px }
+.docs-sidebar-label { font-family: var(--font-mono); color: var(--text-secondary); font-size: 11px; font-weight: 600; letter-spacing: 0.1em; padding: 12px 10px 6px; text-transform: uppercase }
+.docs-sidebar-link { border-radius: 6px; color: var(--text-muted); display: block; font-size: 14px; padding: 6px 10px; text-decoration: none; transition: background 0.15s, color 0.15s }
+.docs-sidebar-link:hover { background: var(--bg-surface); color: var(--text-primary) }
+.docs-sidebar-link-active { background: var(--bg-surface); color: var(--accent-primary) }
+.docs-sidebar-sections { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; margin-left: 14px; margin-top: 2px; transform-origin: top }
+.docs-sidebar-section-link { border-radius: 6px; color: var(--text-secondary); display: block; font-size: 12px; padding: 3px 8px; text-decoration: none; transition: background 0.15s, color 0.15s }
+.docs-sidebar-section-link:hover { background: var(--bg-surface); color: var(--text-primary) }
+.docs-layout-shell { margin: 0 auto; max-width: 1120px; width: 100%; display: flex; gap: 24px; padding: 24px 20px 0; flex-grow: 1 }
+.docs-layout-sidebar-wrap { flex: 0 0 220px; min-width: 0 }
+.docs-layout-main { display: flex; flex: 1 1 0; min-width: 0; view-transition-name: docs-main }
+.docs-layout-content { display: flex; flex-direction: column; gap: 20px; width: 100% }
+.docs-type { font-family: var(--font-mono); color: var(--syntax-type); font-size: 14px }
+.docs-type-keyword { color: var(--syntax-keyword) }
+.docs-type-punctuation { color: var(--syntax-punctuation) }
+.docs-type-literal { color: var(--syntax-literal) }
+.docs-type-reference { color: var(--syntax-reference) }
+.docs-type-reference-link { text-decoration: none }
+.docs-type-error { color: var(--accent-throws) }
+.docs-type-function { color: var(--syntax-method) }
+.docs-type-param-name { color: var(--text-primary) }
+.docs-comment { color: var(--text-body); font-size: 15px; line-height: 1.6 }
+.docs-comment-block-tag { align-items: flex-start; display: flex; gap: 6px }
+.docs-comment-tag-icon { flex-shrink: 0; height: 16px; margin-top: 2px; width: 16px }
+.docs-comment-tag-content { flex: 1; min-width: 0 }
+.docs-comment-type-annotation { font-family: var(--font-mono); background: var(--bg-surface); border: 1px solid var(--border-code); border-radius: 4px; font-size: 13px; margin-right: 6px; padding: 2px 5px }
+.docs-comment-code { font-family: var(--font-mono); background: var(--bg-surface); border: 1px solid var(--border-code); border-radius: 4px; color: var(--accent-primary); font-size: 13px; padding: 2px 5px }
+.docs-comment-link { text-decoration: none }
+.docs-comment-code-block { font-family: var(--font-mono); background: var(--bg-code-block); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-body); display: block; font-size: 14px; line-height: 1.6; margin: 8px 0; overflow: auto; padding: 10px 14px; margin-left: -14px; white-space: pre }
+.docs-comment-icon-returns { color: var(--accent-returns) }
+.docs-comment-icon-throws { color: var(--accent-throws) }
+.docs-flag { background: var(--bg-raised); border: 1px solid var(--border-muted); border-radius: 4px; color: var(--text-muted); font-size: 12px; line-height: 1; padding: 2px 6px }
+.docs-flags { display: inline-flex; gap: 4px }
+.docs-parameter { display: inline }
+.docs-parameter-name { color: var(--text-primary); font-weight: 600 }
+.docs-type-parameter { display: inline }
+.docs-type-parameter-name { color: var(--syntax-method); font-weight: 600 }
+.docs-signature { position: relative; display: flex; flex-direction: column; gap: 8px; z-index: 1; padding-block: 12px; margin-top: 8px; --docs-accent: var(--syntax-method) }
+.docs-signature::before { content: ''; display: block; position: absolute; inset: 0; left: -24px; border-left: 2px solid var(--docs-accent); background: linear-gradient(to right, var(--docs-accent), transparent); background-size: 300% 100%; background-position: -200% 0; opacity: 0.4; z-index: -1 }
+.docs-signature-accent-method { --docs-accent: var(--syntax-method) }
+.docs-signature-accent-type { --docs-accent: var(--syntax-type) }
+.docs-signature-accent-reference { --docs-accent: var(--syntax-reference) }
+.docs-signature-accent-literal { --docs-accent: var(--syntax-literal) }
+.docs-signature-accent-keyword { --docs-accent: var(--syntax-keyword) }
+.docs-signature-accent-property { --docs-accent: var(--text-primary) }
+.docs-signature-code { font-family: var(--font-mono); background: var(--bg-code-block); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-primary); font-size: 14px; line-height: 1.6; overflow: auto; padding: 10px 14px; margin-left: -14px }
+.docs-signature-punctuation { color: var(--syntax-punctuation) }
+.docs-signature-name { color: var(--syntax-method); font-weight: 600 }
+.docs-signature-params { display: flex; flex-direction: column; gap: 6px; padding-left: 24px }
+.docs-signature-param-row { display: flex; gap: 8px }
+.docs-source-link { font-family: var(--font-mono); color: var(--text-dim); font-size: 13px; text-decoration: none }
+.docs-declaration { border-top: 1px solid var(--border-subtle); padding-block: 16px; padding-left: 26px; scroll-margin-top: var(--docs-declaration-sticky-top) }
+.docs-declaration:not(:open) { --declaration-title-font-style: italic }
+.docs-declaration-collapsed { padding-block: 4px }
+.docs-declaration-collapsed:first-child { padding-top: 8px }
+.docs-declaration-collapsed:not(:first-child) { border-top: none }
+.docs-declaration-contents { display: flex; flex-direction: column; gap: 10px; padding-top: 10px }
+.docs-declaration-relationships { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-left: -2px; min-height: 24px }
+.docs-declaration-relationship-label { font-family: var(--font-mono); color: var(--syntax-keyword); font-size: 13px; font-weight: 700; text-transform: lowercase }
+.docs-declaration-relationship-list { align-items: center; display: inline-flex; flex-wrap: wrap; gap: 6px }
+.docs-declaration-relationship-separator { color: var(--syntax-punctuation) }
+.docs-declaration-header { container-name: declaration-header; container-type: scroll-state; align-items: center; display: flex; gap: 8px; margin-left: -30px; margin-bottom: -17px; min-height: 42px; padding: 6px 0; position: sticky; top: var(--docs-declaration-sticky-top, 0px); z-index: var(--docs-declaration-sticky-z, 1); background: linear-gradient(to bottom, var(--bg-page) 60%, transparent); font-style: var(--declaration-title-font-style, none) }
+.docs-declaration-header-overlay { position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity 0.1s }
+@container declaration-header scroll-state((stuck: left) or (stuck: right) or (stuck: top) or (stuck: bottom)) {
+.docs-declaration-header-overlay { background: var(--bg-page); border-bottom: 1px solid var(--border-subtle); opacity: 1 }
+}
+.docs-declaration-collapsed-link { margin-bottom: 0; position: relative; top: auto; z-index: 1; background: transparent; font-style: normal; cursor: pointer; text-decoration: none; width: fit-content; --declaration-collapsed-arrow-x: 0px }
+.docs-declaration-collapsed-link::before { content: ""; display: block; position: absolute; inset-block: 0; inset-inline: -12px; border-radius: 6px; background: var(--bg-surface); opacity: 0; transition: opacity 0.15s; z-index: -1 }
+.docs-declaration-collapsed-link:hover { --declaration-collapsed-arrow-x: 2px }
+.docs-declaration-collapsed-link:hover::before { opacity: 1 }
+.docs-declaration-collapsed-arrow { color: var(--text-dim); display: inline-flex; padding-right: 6px; transform: translateX(var(--declaration-collapsed-arrow-x)); transition: transform 0.12s, color 0.12s; height: 24px }
+.docs-declaration-name { font-family: var(--font-mono); color: var(--text-primary); font-size: 18px; font-weight: 700; white-space: nowrap }
+.docs-declaration-anchor { color: var(--text-dim); font-size: 14px; font-weight: 600; text-decoration: none }
+.docs-declaration-anchor:hover { color: var(--text-primary) }
+.docs-declaration-kind-icon { align-items: center; border-radius: 4px; display: inline-flex; flex-shrink: 0; height: 22px; justify-content: center; width: 22px }
+.docs-kind-type { color: var(--syntax-type) }
+.docs-kind-method { color: var(--syntax-method) }
+.docs-kind-reference { color: var(--syntax-reference) }
+.docs-kind-literal { color: var(--syntax-literal) }
+.docs-kind-keyword { color: var(--syntax-keyword) }
+.docs-kind-property { color: var(--text-primary) }
+.docs-declaration-type { font-family: var(--font-mono); background: var(--bg-code-block); border: 1px solid var(--border-subtle); border-radius: 6px; color: var(--text-secondary); font-size: 14px; overflow: auto; padding: 10px 14px; margin-left: -14px }
+.docs-declaration-keyword { color: var(--syntax-punctuation) }
+.docs-declaration-var-name { color: var(--text-primary); font-weight: 600 }
+.docs-declaration-ref-name { color: var(--syntax-reference); font-weight: 600 }
+.docs-declaration-method-name { color: var(--syntax-method); font-weight: 600 }
+.docs-declaration-type-punctuation { color: var(--syntax-punctuation) }
+.docs-declaration-children { display: flex; flex-direction: column }
+.docs-declaration-signatures { display: flex; flex-direction: column; gap: 12px }
+.docs-declaration-fancy { position: relative; display: flex; flex-direction: column; gap: 8px; z-index: 1; padding-block: 12px; margin-top: 8px; --docs-accent: var(--syntax-method) }
+.docs-declaration-fancy::before { content: ''; display: block; position: absolute; inset: 0; left: -24px; border-left: 2px solid var(--docs-accent); background: linear-gradient(to right, var(--docs-accent), transparent); background-size: 300% 100%; background-position: -200% 0; opacity: 0.4; z-index: -1 }
+.docs-declaration-fancy-accent-method { --docs-accent: var(--syntax-method) }
+.docs-declaration-fancy-accent-type { --docs-accent: var(--syntax-type) }
+.docs-declaration-fancy-accent-reference { --docs-accent: var(--syntax-reference) }
+.docs-declaration-fancy-accent-literal { --docs-accent: var(--syntax-literal) }
+.docs-declaration-fancy-accent-keyword { --docs-accent: var(--syntax-keyword) }
+.docs-declaration-fancy-accent-property { --docs-accent: var(--text-primary) }
+.docs-component-section { display: flex; flex-direction: column; gap: 4px }
+.docs-component-section-title { color: var(--text-bright); font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin-top: 16px }
+.docs-component-hero { display: flex; flex-direction: column; border-bottom: 1px solid var(--border-subtle); gap: 8px; padding-bottom: 20px }
+.docs-component-title { color: var(--text-bright); font-size: 31px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2 }
+.docs-component-summary { color: var(--text-subtle); font-size: 15px; line-height: 1.5 }
+.docs-home-article { color: var(--text-body); font-size: 15px; line-height: 1.7 }
+.docs-home-article h1 { color: var(--text-bright); font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin: 28px 0 12px }
+.docs-home-article h1:first-child { margin-top: 0 }
+.docs-home-article h2 { color: var(--text-primary); font-size: 19px; font-weight: 600; letter-spacing: -0.01em; margin: 24px 0 10px }
+.docs-home-article h3 { color: var(--text-body); font-size: 17px; font-weight: 600; margin: 20px 0 8px }
+.docs-home-article p { margin: 0 0 12px }
+.docs-home-article ul { margin: 0 0 12px; padding-left: 20px }
+.docs-home-article ol { margin: 0 0 12px; padding-left: 20px }
+.docs-home-article li { margin: 0 0 4px }
+.docs-home-article code { font-family: var(--font-mono); background: var(--bg-surface); border: 1px solid var(--border-code); border-radius: 4px; color: var(--accent-primary); font-size: 13px; padding: 2px 5px }
+.docs-home-article pre { background: var(--bg-code-block); border: 1px solid var(--border-subtle); border-radius: 8px; margin: 0 0 16px; overflow-x: auto; padding: 16px }
+.docs-home-article pre code { background: none; border: none; color: var(--text-body); font-size: 14px; padding: 0 }
+.docs-home-article a { color: var(--accent-primary); text-decoration: none }
+.docs-home-article a:hover { text-decoration: underline }
+.docs-home-article strong { color: var(--text-primary) }
+.docs-editor-wrap { display: flex; flex-direction: column; flex: 1 1 0; gap: 8px; min-width: 0 }
+.docs-editor-toolbar { align-items: center; display: flex; gap: 8px }
+.docs-editor-label { color: var(--text-secondary); font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase }
+.docs-editor-select { background: var(--bg-surface); border: 1px solid var(--border-muted); border-radius: 6px; color: var(--text-primary); font-size: 13px; padding: 4px 8px }
+.docs-editor-container { border: 1px solid var(--border-subtle); border-radius: 8px; flex: 1 1 0; min-height: 320px; overflow: hidden }
+.docs-editor-result-wrap { display: flex; flex-direction: column; flex: 1 1 0; gap: 8px; min-width: 0 }
+.docs-editor-result-label { color: var(--text-secondary); font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase }
+.docs-editor-result-panel { background: var(--bg-page); border: 1px solid var(--border-subtle); border-radius: 8px; flex: 1 1 0; min-height: 320px; overflow: auto; padding: 24px }
+.docs-playground-main { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; padding: 20px; view-transition-name: docs-main }
+.docs-playground-content { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; width: 100% }
+.docs-playground-shell { align-items: stretch; display: flex; flex: 1 1 0; flex-wrap: wrap; gap: 20px; min-height: 0; min-width: 0; width: 100% }
+.docs-body { margin: 0 }
+.docs-declaration-depth-0 { --docs-declaration-sticky-top: 0px; --docs-declaration-sticky-z: 200 }
+.docs-declaration-depth-1 { --docs-declaration-sticky-top: 42px; --docs-declaration-sticky-z: 199 }
+.docs-declaration-depth-2 { --docs-declaration-sticky-top: 84px; --docs-declaration-sticky-z: 198 }
+</style><!--kitsui:style-import-27--><!--kitsui:style-import-28--><!--kitsui:style-reset-29--><!--kitsui:style-selector-30--><!--kitsui:style-selector-31--><!--kitsui:style-selector-32--><!--kitsui:style-selector-33--><!--kitsui:style-selector-34--><!--kitsui:style-selector-35--><!--kitsui:style-selector-36--><!--kitsui:style-selector-37--><!--kitsui:style-selector-38--><title>kitsui</title></head><body class="docs-body"><div class="docs-theme docs-layout-page"><header class="docs-header"><div class="docs-header-inner"><div class="docs-header-left"><a class="docs-header-brand" href="index.html">kitsui</a><span class="docs-header-note">docs</span></div><div class="docs-header-right"><a class="docs-header-link" href="playground.html">Playground</a></div></div></header><div class="docs-layout-shell"><div class="docs-layout-sidebar-wrap"><nav class="docs-sidebar"><span class="docs-sidebar-label">Pages</span><a class="docs-sidebar-link docs-sidebar-link-active" href="index.html">Overview</a><a class="docs-sidebar-link" href="Component.html">Component</a><a class="docs-sidebar-link" href="State.html">State</a><a class="docs-sidebar-link" href="Style.html">Style</a><a class="docs-sidebar-link" href="Marker.html">Marker</a><a class="docs-sidebar-link" href="AriaManipulator.html">AriaManipulator</a><a class="docs-sidebar-link" href="AttributeManipulator.html">AttributeManipulator</a><a class="docs-sidebar-link" href="ClassManipulator.html">ClassManipulator</a><a class="docs-sidebar-link" href="EventManipulator.html">EventManipulator</a><a class="docs-sidebar-link" href="GenericClaimManipulator.html">GenericClaimManipulator</a><a class="docs-sidebar-link" href="GenericPropertyManipulator.html">GenericPropertyManipulator</a><a class="docs-sidebar-link" href="OwnerManipulator.html">OwnerManipulator</a><a class="docs-sidebar-link" href="StyleManipulator.html">StyleManipulator</a><a class="docs-sidebar-link" href="TextManipulator.html">TextManipulator</a></nav></div><main class="docs-layout-main" role="main"><div class="docs-layout-content"><section class="docs-home-hero"><h1 class="docs-home-title">kitsui</h1><p class="docs-home-summary">A DOM-first UI library built around owned components and reactive state. These docs are generated by kitsui itself.</p></section><article class="docs-home-article"><h1>kitsui</h1>
+<p>kitsui is a DOM-first UI library built around owned <code>Component</code> and <code>State</code> objects. A <code>Component</code> wraps a real <code>HTMLElement</code>; a <code>State</code> is an owned reactive value.</p>
+<p>Think of kitsui like react but with less magic. Every possible effect is explicitly declared and controlled by you. Build and move real Components directly; kitsui does not run an application-wide render cycle behind your code.</p>
+<pre><code class="language-sh">pnpm add @inthedark/kitsui
+</code></pre>
+<h2>A Typical Component</h2>
+<pre><code class="language-ts">import { Component, State, Style } from "@inthedark/kitsui"
+
+const counterStyle = Style.Class("counter", {
+	alignItems: "center",
+	display: "flex",
+	gap: 8,
+})
+
+function Counter (): Component {
+	const root = Component("section")
+		.class.add(counterStyle)
+
+	const count = State(root, 0)
+
+	Component("output")
+		.text.set(count.map(value =&gt; `Count: ${value}`))
+		.appendTo(root)
+
+	Component("button")
+		.attribute.set("type", "button")
+		.text.set("Increment")
+		.event.owned.on.click(() =&gt; {
+			count.update(value =&gt; value + 1)
+		})
+		.appendTo(root)
+
+	return root
+}
+
+Counter().appendTo(document.body)
+</code></pre>
+<p>This style keeps ownership simple: <code>root</code> owns the state, event cleanup, and child components, so removing <code>root</code> disposes the whole subtree.</p>
+<h2>Best Practices</h2>
+<ul>
+<li>Return <code>Component</code> instances from small factory functions.</li>
+<li>Create <code>State</code> on the component or owner that should dispose it.</li>
+<li>Use <code>Owner()</code> for a living scope that has no owning <code>Component</code>, then pass it to every owner-aware API in that scope.</li>
+<li>Use derived state, manipulators, and conditional placement before manual <code>subscribe</code> plus DOM mutation.</li>
+<li>Build most static structure in one fluent chain.</li>
+<li>Use <code>component.class</code>, <code>component.style</code>, <code>component.attribute</code>, <code>component.aria</code>, <code>component.text</code>, and <code>component.event</code> for DOM effects.</li>
+<li>Use <code>event.owned</code> for handlers that should be cleaned up with the component.</li>
+<li>Use <code>Style.Class</code> for reusable, selectable, or shared styles. Use <code>component.style</code> for dynamic or reactive inline properties.</li>
+<li>Keep direct DOM access inside event handlers or genuinely custom behavior.</li>
+</ul>
+<h2>Reusable Components</h2>
+<p>Reusable component files should exactly match the component name and default-export the component function. Use one local symbol as both the interface name and function name, then export it once with <code>export default Name</code>.</p>
+<p>Do not force assignability with <code>as Name</code> in the return statement. Give the function an explicit return type and let <code>component.extend(...)</code> typecheck the result.</p>
+<p>Custom component methods should return <code>this</code> unless there is a strong reason to return something else.</p>
+<pre><code class="language-ts">import { Component } from "@inthedark/kitsui"
+
+interface ButtonExtensions {
+	setBusy (busy: boolean): this
+	setLabel (label: string): this
+}
+
+interface Button extends Component&lt;HTMLButtonElement&gt;, ButtonExtensions { }
+
+function Button (this: Component&lt;HTMLButtonElement&gt; | void, label: string): Button {
+	const button = Component(this ?? "button", Button)
+		.attribute.set("type", "button")
+
+	const labelText = Component("span")
+		.text.set(label)
+		.appendTo(button)
+
+	return button.extend&lt;ButtonExtensions&gt;(root =&gt; ({
+		setBusy (busy) {
+			root.attribute.toggle("disabled", busy)
+			return root
+		},
+
+		setLabel (label) {
+			labelText.text.set(label)
+			return root
+		},
+	}))
+}
+
+export default Button
+</code></pre>
+<p>Composable builders must pass their own function identity to the initial <code>Component(...)</code> call. <code>and</code> injects the current component as <code>this</code>, forwards params, and skips builders already applied to that component. <code>is</code> and <code>as</code> check the same builder identity.</p>
+<pre><code class="language-ts">const standalone = Button("Save")
+const composed = Component("button").and(Button, "Save")
+
+if (composed.is(Button)) {
+	composed.setBusy(true)
+}
+</code></pre>
+<h3>Component-Specific Events</h3>
+<p>Base component events are only for events available on every component, such as <code>Mount</code> and <code>Dispose</code>. Feature-specific components should expose custom events through <code>Component.WithEvents&lt;Events&gt;</code> instead of augmenting the shared component event map.</p>
+<p>Custom kitsui component event names should be <code>PascalCase</code>, such as <code>DragStart</code> or <code>WidgetCommit</code>, so they stay distinct from native DOM events like <code>click</code> and <code>pointerdown</code>.</p>
+<pre><code class="language-ts">import { Component } from "@inthedark/kitsui"
+
+interface WidgetEvents {
+	WidgetCommit: CustomEvent&lt;{
+		readonly value: string
+	}&gt; &amp; {
+		readonly source: "user" | "api"
+	}
+}
+
+interface WidgetExtensions {
+	commit (value: string): this
+}
+
+interface Widget extends Component.WithEvents&lt;WidgetEvents&gt;, WidgetExtensions { }
+
+function emitWidgetCommit (widget: Widget, value: string): boolean {
+	return widget.event.emit.WidgetCommit({ value }, {
+		tweak: event =&gt; Object.defineProperty(event, "source", {
+			value: "api",
+		}),
+	})
+}
+
+declare const widget: Widget
+
+widget.event.owned.on.WidgetCommit(event =&gt; {
+	event.detail.value.toUpperCase()
+	event.source
+})
+</code></pre>
+<p><code>event.emit.*</code> and <code>event.dispatch.*</code> are aliases that construct the mapped <code>CustomEvent</code>, run the optional <code>tweak</code> callback, and return the target's native <code>dispatchEvent</code> result. Native <code>CustomEvent</code> defaults are preserved, so kitsui custom events do not bubble unless <code>bubbles: true</code> is explicitly supplied. Bubbling does not add the feature event to ancestor component types; an ancestor must still opt into the event map before its typed <code>event</code> API exposes that name.</p>
+<p>Synchronous <code>Dispose</code> handlers may emit final custom notifications while the owner reports both <code>disposed</code> and <code>disposing</code>. This is a narrow lifecycle window: listener registration and other component mutations remain forbidden, and custom-event emission is rejected again after disposal finishes.</p>
+<h2>State And Derived Values</h2>
+<p>Use short-form derived state when the derived value is consumed immediately. Use owner-explicit derived state when the derived state is reused, grouped, passed around, or otherwise needs an obvious owner.</p>
+<p>Keep behavior and UI state consistent. A disabled button should not be the only thing enforcing an invariant.</p>
+<pre><code class="language-ts">const root = Component("section")
+const count = State(root, 0)
+const atLimit = count.map(root, value =&gt; value &gt;= 10)
+
+Component("output")
+	.text.set(count.map(value =&gt; `Count: ${value}`))
+	.appendTo(root)
+
+Component("button")
+	.attribute.set("type", "button")
+	.attribute.bind(atLimit, "disabled")
+	.text.set(atLimit.map(value =&gt; value ? "Limit reached" : "Increment"))
+	.event.owned.on.click(() =&gt; {
+		count.update(value =&gt; Math.min(value + 1, 10))
+	})
+	.appendTo(root)
+
+Component("p")
+	.text.bind(atLimit, "The counter is capped.")
+	.appendTo(root)
+</code></pre>
+<p>Use <code>State.Group(owner, states)</code> when one derived value needs a coherent snapshot of multiple states. Use <code>truthy</code>, <code>falsy</code>, and <code>or(...)</code> instead of writing repetitive boolean or nullish mapping by hand.</p>
+<h2>Standalone Owner Scopes</h2>
+<p>Use <code>Owner()</code> when a living scope does not have an owning <code>Component</code>. Pass the owner to <code>State</code> and other owner-aware APIs so the whole scope shares one lifetime. Dispose the owner when the scope ends.</p>
+<pre><code class="language-ts">const session = Owner()
+const status = State(session, "connecting")
+const label = status.map(session, value =&gt; `Status: ${value}`)
+
+label.subscribe(session, value =&gt; {
+	console.log(value)
+})
+
+session.dispose()
+</code></pre>
+<p>When a scope belongs to a UI subtree, use the <code>Component</code> as its owner. Integration helpers for routers, sockets, observers, and other systems can accept an <code>Owner</code> and use <code>owner.onCleanup(...)</code> internally; ordinary application code usually only passes the owner to the helper.</p>
+<p>Every owner exposes a lifetime-bound <code>signal</code> for cancellable platform work.</p>
+<h2>Manipulator Binding</h2>
+<p>Use manipulators for reactive DOM effects. A single state can drive text, class, raw attributes, typed ARIA attributes, and events without manual DOM bookkeeping.</p>
+<pre><code class="language-ts">const expandedStyle = Style.Class("panel-expanded", {
+	borderColor: "#0f766e",
+})
+
+const panel = Component("section")
+const expanded = State(panel, false)
+
+Component("button")
+	.attribute.set("type", "button")
+	.aria.expanded(expanded)
+	.text.set(expanded.map(value =&gt; value ? "Collapse" : "Expand"))
+	.event.owned.on.click(() =&gt; {
+		expanded.update(value =&gt; !value)
+	})
+	.appendTo(panel)
+
+Component("div")
+	.class.bind(expanded, expandedStyle)
+	.attribute.bind(expanded, "data-expanded")
+	.aria.hidden(expanded.falsy)
+	.text.set(expanded.map(value =&gt; value ? "Expanded" : "Collapsed"))
+	.appendTo(panel)
+</code></pre>
+<p>Use <code>attribute.toggle(name, enabled)</code> for immediate boolean attribute toggling in imperative methods. Use <code>attribute.bind(state, name)</code> when attribute presence should follow state.</p>
+<h2>Movement And Placement</h2>
+<p>Use <code>appendTo</code>, <code>prependTo</code>, and <code>insertTo</code> when an existing component should move relative to another component, node, or marker. Use <code>appendToWhen</code>, <code>prependToWhen</code>, <code>insertToWhen</code>, <code>appendWhen</code>, <code>prependWhen</code>, and <code>insertWhen</code> for conditional placement. Use <code>place</code> when the target location itself is reactive.</p>
+<p>Keep one active kitsui placement flow per Component or raw Node. If you place it again through another kitsui API, the newer call takes control and the older conditional or selection flow stops moving it. Replacing one Component from a shared selection does not stop its siblings.</p>
+<p>Conditional placement keeps hidden nodes alive off-DOM and restores them when their condition becomes true. Removing their lifetime owner disposes them.</p>
+<pre><code class="language-ts">const root = Component("section")
+const open = State(root, false)
+const details = Component("p")
+	.text.set("More detail")
+	.appendToWhen(open, root)
+</code></pre>
+<pre><code class="language-ts">const root = Component("section")
+const left = Component("div").appendTo(root)
+const right = Component("div").appendTo(root)
+const side = State&lt;"left" | "right"&gt;(root, "left")
+
+const badge = Component("span")
+	.text.set("moving")
+
+badge.place(root, (Place) =&gt; {
+	const leftPlace = Place().appendTo(left)
+	const rightPlace = Place().appendTo(right)
+
+	return side.map(value =&gt; value === "left" ? leftPlace : rightPlace)
+})
+</code></pre>
+<p>Use <code>append</code>, <code>prepend</code>, and <code>insert</code> when the owner should select which children are present. State-backed child selections are anchored in place; when the state changes, kitsui replaces and disposes the old selection.</p>
+<pre><code class="language-ts">const root = Component("section")
+const view = State&lt;"summary" | "details"&gt;(root, "summary")
+
+Component("button")
+	.attribute.set("type", "button")
+	.text.set("Summary")
+	.event.owned.on.click(() =&gt; view.set("summary"))
+	.appendTo(root)
+
+Component("button")
+	.attribute.set("type", "button")
+	.text.set("Details")
+	.event.owned.on.click(() =&gt; view.set("details"))
+	.appendTo(root)
+
+root.append(view.map(root, value =&gt; {
+	if (value === "summary") {
+		return Component("p").text.set("Short summary")
+	}
+
+	return Component("p").text.set("Full details")
+}))
+</code></pre>
+<h2>Styling</h2>
+<p>Use <code>Style(...)</code> for reusable style fragments and <code>Style.Class(...)</code> for registered CSS classes. Use <code>Style.after(...)</code> when order matters between reusable classes.</p>
+<pre><code class="language-ts">const cardBase = Style({
+	borderRadius: 8,
+	padding: 12,
+})
+
+const cardStyle = Style.Class("card", {
+	...cardBase,
+	$accent: "#0a7",
+	border: "1px solid $accent",
+})
+
+const raisedStyle = Style.after(cardStyle).Class("card-raised", {
+	...cardBase,
+	boxShadow: "0 2px 12px rgba(0, 0, 0, 0.15)",
+})
+
+const card = Component("button")
+const raised = State(card, false)
+
+card
+	.attribute.set("type", "button")
+	.class.add(cardStyle)
+	.class.bind(raised, raisedStyle)
+	.style.set({
+		$panelAccent: "#0a7",
+		borderColor: "$panelAccent",
+	})
+	.text.set("Hover for elevation")
+	.event.owned.on.pointerenter(() =&gt; raised.set(true))
+	.event.owned.on.pointerleave(() =&gt; raised.set(false))
+</code></pre>
+<p>String style values support calculation shorthand. Kitsui compiles <code>[expression]</code> to <code>calc(expression)</code> and expands variable shorthand inside the expression. Double the square brackets when CSS needs literal brackets, such as named grid lines.</p>
+<pre><code class="language-ts">const layoutStyle = Style.Class("layout", {
+	$gap: "1rem",
+	gridTemplateColumns: "[[content-start]] [100% - ${sidebarWidth: 18rem} - $gap] [[content-end]]",
+	width: "[100% - $gap]",
+})
+</code></pre>
+<p>This emits literal <code>[content-start]</code> and <code>[content-end]</code> grid line names. The bracketed expressions become <code>calc(...)</code> values, and <code>$gap</code> plus <code>${sidebarWidth: 18rem}</code> become CSS variable references.</p>
+<h2>Breakdown</h2>
+<p>Use <code>component.breakdown(...)</code> when a State drives a keyed list or region and each Component should be reused by key.</p>
+<pre><code class="language-ts">interface Todo {
+	id: string
+	label: string
+}
+
+const list = Component("ul")
+const todos = State(list, [
+	{ id: "first", label: "Write the README" },
+])
+
+list.breakdown(todos, (list, Part, todos) =&gt; {
+	for (const todo of todos) {
+		Part(todo.id, () =&gt; Component("li"))
+			.text.set(todo.label)
+			.appendTo(list)
+	}
+})
+</code></pre>
+<p>Use a stable key for each logical item. <code>Part</code> returns the same Component while that key remains present. Its builder runs when the key needs a new Component and must return a new, active, ownerless Component that has not been placed yet.</p>
+<p>Update and place every returned part during every pass. <code>Part</code> never places a Component for you, and the order of your placement calls establishes the rendered order. If a successful pass omits a key, kitsui disposes that part.</p>
+<p>Keep the callback synchronous: do not use an async callback, <code>await</code>, or delayed <code>Part</code> and placement calls. Later State updates are batched and can skip intermediate values, so author each pass from the value supplied to the callback.</p>
+<p>Use kitsui placement APIs inside the callback. If you need to inspect the physical DOM, do so after the callback returns. Breakdown continues to own each part even when you place it somewhere else.</p>
+<h2>Feature Index</h2>
+<ul>
+<li><a href="./Component.html"><code>Component</code></a>: <code>append</code>, <code>prepend</code>, <code>insert</code>, conditional variants, <code>clear</code>, <code>use</code>, <code>and</code>, <code>is</code>, <code>as</code>, <code>remove</code>, <code>extend</code>.</li>
+<li>Breakdown: <code>component.breakdown(...)</code> and <code>Component.Breakdown(...)</code> for stable keyed rendering from State values.</li>
+<li>Placement extensions: <code>appendTo</code>, <code>prependTo</code>, <code>insertTo</code>, conditional variants, and <code>place</code>.</li>
+<li>Manipulators: <a href="./ClassManipulator.html"><code>ClassManipulator</code></a>, <a href="./StyleManipulator.html"><code>StyleManipulator</code></a>, <a href="./AttributeManipulator.html"><code>AttributeManipulator</code></a>, <a href="./TextManipulator.html"><code>TextManipulator</code></a>, <a href="./EventManipulator.html"><code>EventManipulator</code></a>, <a href="./AriaManipulator.html"><code>AriaManipulator</code></a>.</li>
+<li><a href="./State.html"><code>State</code></a>: <code>set</code>, <code>update</code>, equality options, subscriptions, <code>map</code>, <code>debounce</code>, <code>throttle</code>, <code>mapAsync</code>, <code>truthy</code>, <code>falsy</code>, <code>or</code>, <code>Group</code>, <code>extend</code>.</li>
+<li><a href="./Style.html"><code>Style</code></a>: fragments, classes, ordered classes with <code>after</code>, variables, nested selectors, media queries, pseudo selectors, animation helpers, and sticky helpers.</li>
+<li>ARIA: typed helpers for roles, labels, references, booleans, <code>current</code>, and <code>live</code>.</li>
+<li>Docs examples: <a href="./playground.html?example=counter.ts">counter</a>, <a href="./playground.html?example=composition.ts">composition</a>, <a href="./playground.html?example=append-when.ts">append-when</a>, <a href="./playground.html?example=bind-manipulators.ts">bind-manipulators</a>, <a href="./playground.html?example=place-iframe.ts">place-iframe</a>, <a href="./playground.html?example=state-group.ts">state-group</a>, <a href="./playground.html?example=mount-dispose.ts">mount-dispose</a>.</li>
+</ul>
+</article></div></main></div><footer class="docs-footer"><div class="docs-footer-inner">kitsui — generated with kitsui</div></footer></div><script type="module" src="kitsui.esm.js?cacheBust=1793510265464"></script><script type="module" src="client.js?cacheBust=1793510265464"></script></body></html>
