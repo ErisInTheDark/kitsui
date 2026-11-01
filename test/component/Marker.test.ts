@@ -5,6 +5,7 @@ import { EventManipulator } from "../../src/component/EventManipulator";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Marker } from "../../src/component/Marker";
 import { Owner } from "../../src/state/State";
+import { OrphanError, traceOrphans } from "../../src/utility/orphanCheck";
 import { captureOrphanCheck } from "../utility/captureOrphanCheck";
 
 placeExtension();
@@ -379,6 +380,24 @@ describe("Marker", () => {
 			expect(orphanCapture.queuedError, "the orphan callback should queue an uncaught rethrow").toBeTypeOf("function");
 			expect(() => orphanCapture.queuedError?.(), "the queued rethrow should surface the orphan error").toThrow("Markers must be connected to the document or have a managed owner before the next tick.");
 		} finally {
+			orphanCapture.restore();
+		}
+	});
+
+	it("identifies the orphaned marker in its error, with a trace while tracing is on", () => {
+		const orphanCapture = captureOrphanCheck();
+
+		try {
+			traceOrphans(true);
+			const marker = Marker("crafting-slot");
+			const error = orphanCapture.orphanError() as OrphanError;
+
+			expect(error).toBeInstanceOf(OrphanError);
+			expect(error.orphan).toBe(marker);
+			expect(error.message).toContain("<!--crafting-slot-->");
+			expect((error.cause as Error).stack).toContain("Marker.test.ts");
+		} finally {
+			traceOrphans(false);
 			orphanCapture.restore();
 		}
 	});

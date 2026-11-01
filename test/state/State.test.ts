@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Owner, State } from "../../src/state/State";
+import { OrphanError, traceOrphans } from "../../src/utility/orphanCheck";
 import { captureOrphanCheck } from "../utility/captureOrphanCheck";
 
 if (false) {
@@ -1633,6 +1634,24 @@ describe("State", () => {
 			expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the orphan error").toThrowError("States must have an owner before the next tick.");
 		}
 		finally {
+			orphanCheckSpy.restore();
+		}
+	});
+
+	it("identifies the orphaned state in its error, with a trace while tracing is on", () => {
+		const orphanCheckSpy = captureOrphanCheck();
+
+		try {
+			traceOrphans(true);
+			const state = State(1);
+			const error = orphanCheckSpy.orphanError() as OrphanError;
+
+			expect(error).toBeInstanceOf(OrphanError);
+			expect(error.orphan).toBe(state);
+			expect((error.cause as Error).stack).toContain("State.test.ts");
+		}
+		finally {
+			traceOrphans(false);
 			orphanCheckSpy.restore();
 		}
 	});

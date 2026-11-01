@@ -1,4 +1,5 @@
-import { cancelNextTickCheck, isNextTickCheckScheduled, scheduleNextTickCheck } from "../utility/nextTickCheck";
+import { cancelNextTickCheck } from "../utility/nextTickCheck";
+import { OrphanError, scheduleOrphanCheck } from "../utility/orphanCheck";
 
 /**
  * Function invoked during cleanup to release resources.
@@ -1010,7 +1011,7 @@ class StateClass<T> extends OwnerClass {
 			return;
 		}
 
-		throw new Error(orphanedStateErrorMessage);
+		throw new OrphanError(state, orphanedStateErrorMessage);
 	}
 
 	private refreshOrphanCheck (): void {
@@ -1019,9 +1020,7 @@ class StateClass<T> extends OwnerClass {
 			return;
 		}
 
-		if (!isNextTickCheckScheduled(this)) {
-			scheduleNextTickCheck(this as StateClass<unknown>, StateClass.checkOrphan);
-		}
+		scheduleOrphanCheck(this as StateClass<unknown>, StateClass.checkOrphan);
 	}
 
 	private setImplicitOwnerCandidate (candidate: Owner): void {

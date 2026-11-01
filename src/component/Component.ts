@@ -1,6 +1,7 @@
 import { Owner, State, type CleanupFunction } from "../state/State";
 import { cleanupAndRethrow, runCleanupSteps } from "../utility/cleanup";
-import { cancelNextTickCheck, isNextTickCheckScheduled, scheduleNextTickCheck } from "../utility/nextTickCheck";
+import { cancelNextTickCheck, scheduleNextTickCheck } from "../utility/nextTickCheck";
+import { OrphanError, scheduleOrphanCheck } from "../utility/orphanCheck";
 import { AriaManipulator } from "./AriaManipulator";
 import { AttributeManipulator } from "./AttributeManipulator";
 import type { Falsy } from "./ClassManipulator";
@@ -444,7 +445,19 @@ function requireManagedComponent (component: ComponentClass<HTMLElement>): void 
 		return;
 	}
 
-	throw new Error(orphanedComponentErrorMessage);
+	throw new OrphanError(component, `${orphanedComponentErrorMessage} Orphan: ${describeElement(component.element)}`);
+}
+
+const describedTextLength = 40;
+
+/** Summarises an element as its opening tag plus the start of its text, such as `<div id="x" class="row"> "Wheat"`. */
+function describeElement (element: HTMLElement): string {
+	const id = element.id ? ` id="${element.id}"` : "";
+	const className = element.getAttribute("class");
+	const classes = className ? ` class="${className}"` : "";
+	const text = element.textContent?.trim().replace(/\s+/g, " ") ?? "";
+	const snippet = text.length > describedTextLength ? `${text.slice(0, describedTextLength)}...` : text;
+	return `<${element.tagName.toLowerCase()}${id}${classes}>${snippet ? ` "${snippet}"` : ""}`;
 }
 
 /** Settles a component whose placement was cleaned up: mounts it if still managed, otherwise removes it. */
@@ -1446,11 +1459,7 @@ class ComponentClass<ELEMENT extends HTMLElement> extends Owner {
 			return;
 		}
 
-		if (isNextTickCheckScheduled(this)) {
-			return;
-		}
-
-		scheduleNextTickCheck(this as ComponentClass<HTMLElement>, requireManagedComponent);
+		scheduleOrphanCheck(this as ComponentClass<HTMLElement>, requireManagedComponent);
 	}
 
 	private refreshPlacementOwner (): void {

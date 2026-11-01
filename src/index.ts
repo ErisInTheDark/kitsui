@@ -144,4 +144,5 @@ export type {
     StateOptions,
     StateUpdater
 } from "./state/State";
+export { OrphanError, traceOrphans } from "./utility/orphanCheck";
 

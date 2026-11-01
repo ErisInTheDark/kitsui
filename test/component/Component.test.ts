@@ -6,6 +6,7 @@ import type { Place } from "../../src/component/extensions/placeExtension";
 import placeExtension from "../../src/component/extensions/placeExtension";
 import { Style } from "../../src/component/Style";
 import { Owner, State, type CleanupFunction } from "../../src/state/State";
+import { OrphanError, traceOrphans } from "../../src/utility/orphanCheck";
 import { captureOrphanCheck } from "../utility/captureOrphanCheck";
 
 declare module "../../src/component/Component" {
@@ -2702,6 +2703,48 @@ describe("Component", () => {
 				expect(orphanCheckSpy.queuedError, "the orphan callback should queue an uncaught rethrow").toBeTypeOf("function");
 				expect(() => orphanCheckSpy.queuedError?.(), "the queued rethrow should surface the orphan error").toThrow("Components must be connected to the document or have a managed owner before the next tick.");
 			} finally {
+				orphanCheckSpy.restore();
+			}
+		});
+
+		it("identifies the orphaned component in its error", () => {
+			const orphanCheckSpy = captureOrphanCheck();
+
+			try {
+				const component = Component("div");
+				component.element.id = "crafting";
+				component.element.className = "row slot";
+				component.element.textContent = "Wheat flour";
+
+				const error = orphanCheckSpy.orphanError();
+
+				expect(error).toBeInstanceOf(OrphanError);
+				expect((error as OrphanError).orphan).toBe(component);
+				expect((error as OrphanError).message).toContain("Components must be connected to the document or have a managed owner before the next tick.");
+				expect((error as OrphanError).message).toContain("<div id=\"crafting\" class=\"row slot\"> \"Wheat flour\"");
+				expect((error as OrphanError).cause).toBeUndefined();
+			} finally {
+				orphanCheckSpy.restore();
+			}
+		});
+
+		it("traces where a component became unmanaged only while tracing is on", () => {
+			const orphanCheckSpy = captureOrphanCheck();
+
+			try {
+				traceOrphans(true);
+				Component("div");
+				const traced = orphanCheckSpy.orphanError() as OrphanError;
+
+				traceOrphans(false);
+				Component("div");
+				const untraced = orphanCheckSpy.orphanError() as OrphanError;
+
+				expect(traced.cause).toBeInstanceOf(Error);
+				expect((traced.cause as Error).stack).toContain("Component.test.ts");
+				expect(untraced.cause).toBeUndefined();
+			} finally {
+				traceOrphans(false);
 				orphanCheckSpy.restore();
 			}
 		});

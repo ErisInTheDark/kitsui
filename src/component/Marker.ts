@@ -1,6 +1,7 @@
 import { Owner, type CleanupFunction } from "../state/State";
 import { runCleanupSteps } from "../utility/cleanup";
-import { cancelNextTickCheck, isNextTickCheckScheduled, scheduleNextTickCheck } from "../utility/nextTickCheck";
+import { cancelNextTickCheck } from "../utility/nextTickCheck";
+import { OrphanError, scheduleOrphanCheck } from "../utility/orphanCheck";
 import { EventManipulator } from "./EventManipulator";
 import {
 	DOMTree,
@@ -377,9 +378,7 @@ class MarkerClass extends Owner {
 			return;
 		}
 
-		if (!isNextTickCheckScheduled(this)) {
-			scheduleNextTickCheck(this as MarkerClass, requireManagedMarker);
-		}
+		scheduleOrphanCheck(this as MarkerClass, requireManagedMarker);
 	}
 
 	/** @internal Updates Kitsui-derived placement ownership from the current virtual tree. */
@@ -420,7 +419,7 @@ function requireManagedMarker (marker: MarkerClass): void {
 		return;
 	}
 
-	throw new Error(orphanedMarkerErrorMessage);
+	throw new OrphanError(marker, `${orphanedMarkerErrorMessage} Orphan: <!--${marker.node.data}-->`);
 }
 
 /**

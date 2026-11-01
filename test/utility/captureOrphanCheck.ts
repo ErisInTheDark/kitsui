@@ -6,6 +6,8 @@ export interface OrphanCheckCapture {
 	readonly orphanCheck: (() => void) | null;
 	/** The latest deferred rethrow queued by a failed check. */
 	readonly queuedError: (() => void) | null;
+	/** Runs the pending checks, then returns what the queued rethrow throws. */
+	orphanError (): unknown;
 	restore (): void;
 }
 
@@ -31,6 +33,16 @@ export function captureOrphanCheck (): OrphanCheckCapture {
 		},
 		get queuedError (): (() => void) | null {
 			return queuedError;
+		},
+		orphanError (): unknown {
+			flushNextTickChecks();
+			try {
+				queuedError?.();
+			} catch (error) {
+				return error;
+			}
+
+			return undefined;
 		},
 		restore (): void {
 			queueMicrotaskSpy.mockRestore();
