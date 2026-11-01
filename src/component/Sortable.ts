@@ -1,6 +1,6 @@
 import { Component } from "./Component";
 import { DOMTree } from "./DOMTree";
-import { State, type CleanupFunction } from "../state/State";
+import { State, type CleanupFunction, type StateOptions } from "../state/State";
 import { Draggable, type DragEventDetail, type DraggableComponent } from "./Draggable";
 import { handleDropTargetDrop, resolveDropTarget } from "./DropTarget";
 
@@ -84,9 +84,13 @@ const noop: CleanupFunction = () => {
 	// Intentionally empty.
 };
 
-const createOwnedState = State as unknown as <T>(owner: Component, initialValue: T) => State<T>;
+const createOwnedState = State as unknown as <T>(owner: Component, initialValue: T, options?: StateOptions<T>) => State<T>;
 const sortablesByDocument = new WeakMap<Document, Set<SortableController<any, any, any>>>();
 const activeSessionsByDocument = new WeakMap<Document, ActiveSortSession<any, any, any>>();
+
+function sameItems<T> (current: readonly T[], next: readonly T[]): boolean {
+	return current.length === next.length && current.every((item, index) => Object.is(item, next[index]));
+}
 
 function isStateLike<T> (value: unknown): value is State.Readonly<T> {
 	if (typeof value !== "object" || value === null) {
@@ -243,8 +247,8 @@ export class SortableController<
 		private readonly options: SortableOptions<T, TItem, K>,
 	) {
 		const initial = isStateLike<readonly T[]>(input) ? input.value : input;
-		this.items = createOwnedState<readonly T[]>(component, []);
-		this.preview = createOwnedState<readonly T[]>(component, []);
+		this.items = createOwnedState<readonly T[]>(component, [], { equals: sameItems });
+		this.preview = createOwnedState<readonly T[]>(component, [], { equals: sameItems });
 		this.phase = createOwnedState<"idle" | "sorting">(component, "idle");
 		this.dragging = createOwnedState<SortableDraggableItem<TItem> | null>(component, null);
 

@@ -137,6 +137,58 @@ describe("Sortable", () => {
 		}
 	});
 
+	it("does not notify items or preview when a resync keeps the same items", async () => {
+		const owner = mountedComponent();
+		const source = State(owner, [
+			{ id: "a", label: "Alpha" },
+			{ id: "b", label: "Beta" },
+		]);
+		const host = mountedComponent().and(Sortable, source, sortableOptions());
+		const itemsListener = vi.fn();
+		const previewListener = vi.fn();
+		host.sortable.items.subscribe(owner, itemsListener);
+		host.sortable.preview.subscribe(owner, previewListener);
+
+		try {
+			source.set([...source.value]);
+			await flushEffects();
+
+			expect(itemsListener).not.toHaveBeenCalled();
+			expect(previewListener).not.toHaveBeenCalled();
+		}
+		finally {
+			host.remove();
+			owner.remove();
+		}
+	});
+
+	it("settles when items are written back into the input state", async () => {
+		const owner = mountedComponent();
+		const alpha = { id: "a", label: "Alpha" };
+		const beta = { id: "b", label: "Beta" };
+		const order = State<readonly { id: string; label: string }[]>(owner, [alpha, beta]);
+		const host = mountedComponent().and(Sortable, order, sortableOptions());
+		let notifications = 0;
+		host.sortable.items.subscribe(owner, (items) => {
+			notifications++;
+			order.set(items);
+		});
+
+		try {
+			order.set([beta, alpha]);
+			for (let flush = 0; flush < 20; flush++) {
+				await flushEffects();
+			}
+
+			expect(notifications).toBe(1);
+			expect(host.sortable.items.value).toEqual([beta, alpha]);
+		}
+		finally {
+			host.remove();
+			owner.remove();
+		}
+	});
+
 	it("auto-applies Draggable and preserves pre-applied Draggable options", () => {
 		const rendered: Component[] = [];
 		const host = mountedComponent().and(Sortable, [
