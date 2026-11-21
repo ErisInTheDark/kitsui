@@ -112,9 +112,12 @@ type MutableStateConstructor = Omit<StateConstructor, "prototype"> & {
 export type ExtendableStateClass = MutableStateConstructor & StateStaticExtensions;
 
 /** Queued links of states that share one batching scope, waiting for the next flush. */
-interface StateGraph {
+/** @internal */
+export interface StateGraph {
 	pending: StateLink<unknown>[];
 	scheduled: boolean;
+	/** Runs first in every flush, before deliveries are snapshotted, for states that commit lazily, like a model's `$x`. */
+	prepare: (() => void) | null;
 }
 
 interface StateNotification<T> {
@@ -143,17 +146,35 @@ function assertDefinedStateValue (value: unknown): void {
 	throw new TypeError("State values cannot be undefined.");
 }
 
-function createStateGraph (): StateGraph {
+/** @internal */
+export function createStateGraph (): StateGraph {
 	return {
 		pending: [],
+		prepare: null,
 		scheduled: false,
 	};
 }
 
-function flushGraph (graph: StateGraph): void {
+/**
+ * Delivers everything queued on the graph now.
+ * @internal
+ */
+export function flushGraph (graph: StateGraph): void {
 	graph.scheduled = false;
+	let failed = false;
+	let firstError: unknown;
+	try {
+		graph.prepare?.();
+	} catch (error) {
+		failed = true;
+		firstError = error;
+	}
+
 	const links = graph.pending;
 	if (links.length === 0) {
+		if (failed) {
+			throw firstError;
+		}
 		return;
 	}
 
@@ -175,8 +196,6 @@ function flushGraph (graph: StateGraph): void {
 		link.pendingFinalValue = undefined;
 	}
 
-	let failed = false;
-	let firstError: unknown;
 	for (let index = 0; index < count; index++) {
 		const link = links[index];
 		if (!deliver[index] || link.source === null) {
@@ -198,7 +217,8 @@ function flushGraph (graph: StateGraph): void {
 	}
 }
 
-function scheduleGraphFlush (graph: StateGraph): void {
+/** @internal */
+export function scheduleGraphFlush (graph: StateGraph): void {
 	if (graph.scheduled) {
 		return;
 	}
@@ -361,7 +381,7 @@ abstract class OwnerClass {
 
 	/**
 	 * An abort signal for work scoped to this owner's lifetime.
-	 * The signal is created lazily, keeps a stable identity, and aborts synchronously when the owner is disposed.
+	 * The signal is created lazily, keeps a stable identity until it aborts, and aborts synchronously when the owner is disposed.
 	 * @readonly
 	 */
 	get signal (): AbortSignal {
@@ -449,6 +469,68 @@ abstract class OwnerClass {
 	}
 
 	/**
+	 * Releases everything bound to this owner, leaving it alive to own more, for objects that are reused after being removed.
+	 *
+	 * Aborts the current {@link signal}, then runs every cleanup registered so far exactly as disposal would, each once and in order,
+	 * rethrowing the first error after all have run. Disposal hooks don't run and {@link disposed} stays false. A later read of
+	 * `signal` gets a fresh one. Cleanups registered while this runs belong to the next release or disposal. Does nothing once disposed.
+	 *
+	 * Protected because kitsui's own owners, such as components and states, register cleanups on themselves that assume they run once.
+	 * A subclass whose lifetime supports reuse can widen it to public.
+	 */
+	protected release (): void {
+		if (this.disposedValue) {
+			return;
+		}
+
+		const controller = this.abortController;
+		this.abortController = null;
+
+		const links: CleanupLink[] = [];
+		let link = this.cleanupHead;
+		this.cleanupHead = null;
+		this.cleanupTail = null;
+		while (link) {
+			links.push(link);
+			const next = link.nextCleanup;
+			link.previousCleanup = null;
+			link.nextCleanup = null;
+			link.cleanupOwner = releasingOwner;
+			link = next;
+		}
+
+		let firstError: unknown;
+		let failed = false;
+
+		try {
+			controller?.abort();
+		} catch (error) {
+			failed = true;
+			firstError = error;
+		}
+
+		for (const released of links) {
+			if (released.cleanupOwner !== releasingOwner) {
+				continue;
+			}
+
+			released.cleanupOwner = null;
+			try {
+				released.runCleanup();
+			} catch (error) {
+				if (!failed) {
+					failed = true;
+					firstError = error;
+				}
+			}
+		}
+
+		if (failed) {
+			throw firstError;
+		}
+	}
+
+	/**
 	 * Registers a cleanup function to be invoked when this owner is disposed.
 	 * If the owner is already disposed, the cleanup function is invoked immediately.
 	 * @param cleanupFunction Function to invoke during cleanup.
@@ -520,6 +602,13 @@ abstract class OwnerClass {
 		// Subclasses may override.
 	}
 }
+
+/**
+ * Stands in as the owner of links a release has detached. Being disposed, unlinking from it only marks the link inactive,
+ * so a cleanup releasing another link mid-release can't touch the owner's new list. Re-registering elsewhere also takes a link off the release.
+ */
+const releasingOwner = new (class extends OwnerClass { })();
+releasingOwner["disposedValue"] = true;
 
 /**
  * A disposable lifetime for a living scope and its owner-aware resources.
@@ -597,6 +686,24 @@ export abstract class StateLink<T> extends CleanupLink {
 	/** Receives a change from the source state. */
 	abstract notify (value: T, previousValue: T): void;
 
+	/**
+	 * The source's value already changed, but its listeners hear later: a lazy state was written, so `notify` waits for the flush.
+	 * Lazy readers mark themselves stale here to stay exact mid-tick; everything else waits for `notify`.
+	 */
+	invalidate (): void {
+		// Most links wait for notify.
+	}
+
+	/** Whether this link only reads lazily, through `invalidate`, rather than listening; lazy links don't make their source observed. */
+	get lazy (): boolean {
+		return false;
+	}
+
+	/** Whether this is a subscriber's own listener, rather than another state following this one. */
+	get isListener (): boolean {
+		return false;
+	}
+
 	runCleanup (): void {
 		this.unsubscribe();
 	}
@@ -620,9 +727,17 @@ class ListenerLink<T> extends StateLink<T> {
 	notify (value: T, previousValue: T): void {
 		this.listener(value, previousValue);
 	}
+
+	get isListener (): boolean {
+		return true;
+	}
 }
 
-function attachLink<T> (state: StateClass<T>, link: StateLink<T>): void {
+/**
+ * Attaches a link with no owner and no implicit-owner effect; the caller owns its lifetime and calls `unsubscribe`.
+ * @internal
+ */
+export function attachLink<T> (state: StateClass<T>, link: StateLink<T>): void {
 	link.source = state;
 	if (link.immediate) {
 		const links = state["immediateLinks"];
@@ -634,16 +749,16 @@ function attachLink<T> (state: StateClass<T>, link: StateLink<T>): void {
 		} else {
 			links.push(link);
 		}
-		return;
-	}
-
-	link.equals = state["equalityFunction"];
-	const links = state["queuedLinks"];
-	if (links === null) {
-		state["queuedLinks"] = [link];
 	} else {
-		links.push(link);
+		link.equals = state["equalityFunction"];
+		const links = state["queuedLinks"];
+		if (links === null) {
+			state["queuedLinks"] = [link];
+		} else {
+			links.push(link);
+		}
 	}
+	state["linksChanged"]();
 }
 
 function removeFromLinks<T> (links: StateLink<T>[], link: StateLink<T>, copy: boolean): StateLink<T>[] | null {
@@ -674,14 +789,14 @@ function detachLink<T> (state: StateClass<T>, link: StateLink<T>): void {
 				state["immediateLinksShared"] = false;
 			}
 		}
-		return;
+	} else {
+		// A queued link may still sit in the graph's pending list; the flush skips it once its source is cleared.
+		const links = state["queuedLinks"];
+		if (links !== null) {
+			state["queuedLinks"] = removeFromLinks(links, link, false);
+		}
 	}
-
-	// A queued link may still sit in the graph's pending list; the flush skips it once its source is cleared.
-	const links = state["queuedLinks"];
-	if (links !== null) {
-		state["queuedLinks"] = removeFromLinks(links, link, false);
-	}
+	state["linksChanged"]();
 }
 
 /** @group State */
@@ -703,6 +818,8 @@ class StateClass<T> extends OwnerClass {
 	private queuedLinks: StateLink<any>[] | null = null;
 	private notifying = false;
 	private pendingNotifications: StateNotification<any>[] | null = null;
+	/** Counts commits, forced ones included, so readers can tell an in-place `update()` from no change. */
+	private changes = 0;
 
 	constructor (owner: Owner | null, initialValue: T, options: StateInternalOptions<T> = {}, requiresOwner = true) {
 		super();
@@ -776,6 +893,7 @@ class StateClass<T> extends OwnerClass {
 	private commit (nextValue: T, force: boolean): T {
 		const previousValue = this.currentValue;
 		this.currentValue = nextValue;
+		this.changes++;
 		const immediateLinks = this.immediateLinks;
 
 		if (this.notifying) {
@@ -845,6 +963,23 @@ class StateClass<T> extends OwnerClass {
 			link.forcePendingEmit ||= force;
 			link.pendingFinalValue = value;
 		}
+	}
+
+	/**
+	 * Increases whenever the value may have changed, even in place. Derived states compare it to tell whether to recompute.
+	 * @internal
+	 */
+	get _changes (): number {
+		return this.changes;
+	}
+
+	/**
+	 * Checks and fixes a value the way `set` would, without storing it.
+	 * @internal
+	 */
+	_prepare (value: T): T {
+		assertDefinedStateValue(value);
+		return fixStateValue(this.fixFunction, value);
 	}
 
 	/**
@@ -978,6 +1113,11 @@ class StateClass<T> extends OwnerClass {
 		return () => {
 			this.implicitOwnerDependents?.delete(dependentState);
 		};
+	}
+
+	/** Runs after a link attaches or detaches, for states whose own links decide what they link to. */
+	protected linksChanged (): void {
+		// Most states don't care.
 	}
 
 	protected beforeDispose (): void {

@@ -9,6 +9,7 @@ describe("kitsui entrypoint", () => {
 		expect(kitsui).toHaveProperty("ClassManipulator");
 		expect(kitsui).toHaveProperty("Draggable");
 		expect(kitsui).toHaveProperty("DropTarget");
+		expect(kitsui).toHaveProperty("Emitter");
 		expect(kitsui).toHaveProperty("EventManipulator");
 		expect(kitsui).toHaveProperty("GenericClaimManipulator");
 		expect(kitsui).toHaveProperty("GenericPropertyManipulator");

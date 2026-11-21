@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cancelNextTickCheck, flushNextTickChecks, isNextTickCheckScheduled, scheduleNextTickCheck } from "../../src/utility/nextTickCheck";
+import { cancelNextTickCheck, flushNextTickChecks, hasPendingNextTickChecks, isNextTickCheckScheduled, scheduleNextTickCheck } from "../../src/utility/nextTickCheck";
 
 async function nextTick (): Promise<void> {
 	vi.advanceTimersByTime(0);
@@ -92,6 +92,27 @@ describe("next-tick checks", () => {
 
 		await nextTick();
 		expect(order).toEqual(["first batch", "second batch"]);
+	});
+
+	it("flushes checks scheduled by flushed checks until none are pending", async () => {
+		const order: string[] = [];
+
+		scheduleNextTickCheck({}, () => {
+			order.push("first");
+			scheduleNextTickCheck({}, () => {
+				order.push("second");
+				scheduleNextTickCheck({}, () => order.push("third"));
+			});
+		});
+
+		flushNextTickChecks();
+
+		expect(order).toEqual(["first", "second", "third"]);
+		expect(hasPendingNextTickChecks()).toBe(false);
+		expect(vi.getTimerCount()).toBe(0);
+
+		await nextTick();
+		expect(order).toEqual(["first", "second", "third"]);
 	});
 
 	it("reports each failing check without stopping the rest of the batch", async () => {

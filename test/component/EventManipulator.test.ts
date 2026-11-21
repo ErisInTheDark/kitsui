@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Component } from "../../src/component/Component";
 import { EventManipulator } from "../../src/component/EventManipulator";
 import placeExtension from "../../src/component/extensions/placeExtension";
@@ -258,6 +258,105 @@ describe("EventManipulator", () => {
 		await flushEffects();
 		component.element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 		expect(calls).toEqual(["first:BUTTON", "second:BUTTON"]);
+	});
+
+	it("runs listeners by priority, then subscription order, behind one native listener per event", () => {
+		const component = mountedComponent("button");
+		const element = component.element;
+		const added = vi.spyOn(element, "addEventListener");
+		const removed = vi.spyOn(element, "removeEventListener");
+		const calls: string[] = [];
+		const low = () => void calls.push("low");
+		const first = () => void calls.push("first");
+		const second = () => void calls.push("second");
+		const high = () => void calls.push("high");
+
+		component.event.owned.on.click(low, -1);
+		component.event.owned.on.click(first);
+		component.event.owned.on.click(second);
+		component.event.owned.on.click(high, 5);
+		element.dispatchEvent(new MouseEvent("click"));
+
+		expect(calls).toEqual(["high", "first", "second", "low"]);
+		expect(added).toHaveBeenCalledTimes(1);
+
+		component.event.off.click(low, -1);
+		component.event.off.click(first);
+		component.event.off.click(second);
+		expect(removed).not.toHaveBeenCalled();
+		component.event.off.click(high, 5);
+		expect(removed).toHaveBeenCalledTimes(1);
+	});
+
+	it("stops the remaining listeners at stopImmediatePropagation, and only for that dispatch", () => {
+		const component = mountedComponent("button");
+		const calls: string[] = [];
+		let stop = true;
+		component.event.owned.on.click(event => {
+			calls.push("first");
+			if (stop) {
+				event.stopImmediatePropagation();
+			}
+		});
+		component.event.owned.on.click(() => void calls.push("second"));
+
+		component.element.dispatchEvent(new MouseEvent("click"));
+		stop = false;
+		component.element.dispatchEvent(new MouseEvent("click"));
+
+		expect(calls).toEqual(["first", "first", "second"]);
+	});
+
+	it("reports a throwing listener and still runs the rest", () => {
+		const component = mountedComponent("button");
+		const reported: unknown[] = [];
+		vi.stubGlobal("reportError", (error: unknown) => void reported.push(error));
+		const calls: string[] = [];
+		try {
+			component.event.owned.on.click(() => {
+				throw new Error("broken");
+			});
+			component.event.owned.on.click(() => void calls.push("after"));
+			component.element.dispatchEvent(new MouseEvent("click"));
+		} finally {
+			vi.unstubAllGlobals();
+		}
+
+		expect(calls).toEqual(["after"]);
+		expect(reported).toEqual([new Error("broken")]);
+	});
+
+	it("fires once listeners for one event, and resolves next with the hosted event", async () => {
+		const component = mountedComponent("button");
+		let calls = 0;
+		component.event.owned.once.click(() => {
+			calls += 1;
+		});
+		const next = component.event.next.click();
+
+		component.element.dispatchEvent(new MouseEvent("click"));
+		component.element.dispatchEvent(new MouseEvent("click"));
+
+		expect(calls).toBe(1);
+		expect((await next).component).toBe(component);
+		expect(component.event.has.click()).toBe(false);
+	});
+
+	it("ends until listeners at another component's event, and reports has", () => {
+		const component = mountedWidget();
+		const dialog = mountedWidget();
+		let calls = 0;
+		component.event.until(dialog.event.when.WidgetRefresh).on.click(() => {
+			calls += 1;
+		});
+		expect(component.event.has.click()).toBe(true);
+
+		component.element.dispatchEvent(new MouseEvent("click"));
+		dialog.event.emit.WidgetRefresh();
+		component.element.dispatchEvent(new MouseEvent("click"));
+
+		expect(calls).toBe(1);
+		expect(component.event.has.click()).toBe(false);
 	});
 
 	it("removes explicit-owner and reactive listeners when the host component is removed", async () => {

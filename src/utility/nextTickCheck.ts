@@ -75,15 +75,13 @@ export function cancelNextTickCheck (target: object): void {
 	batch.timer = null;
 }
 
-/** Runs every pending check now instead of after the tick. */
+/** Runs every pending check now instead of after the tick, including checks those checks schedule. */
 export function flushNextTickChecks (): void {
-	const batch = pending;
-	if (batch === null) {
-		return;
+	while (pending !== null) {
+		const batch = pending;
+		batch.timer?.cancel();
+		flush(batch);
 	}
-
-	batch.timer?.cancel();
-	flush(batch);
 }
 
 export function hasPendingNextTickChecks (): boolean {

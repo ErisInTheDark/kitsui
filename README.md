@@ -184,6 +184,24 @@ Component("p")
 
 Use `State.Group(owner, states)` when one derived value needs a coherent snapshot of multiple states. Use `truthy`, `falsy`, and `or(...)` instead of writing repetitive boolean or nullish mapping by hand.
 
+Derived states (`map`, `State.Group`, `forward` and the helpers above) read exact values every time, even mid-tick, and count in-place `update()`s of their sources. They link their sources only while something listens: an unwatched one maps on read and keeps nothing awake. A watched `map` maps each change at once; a watched group's listeners hear once per tick.
+
+Use `forward(owner, select)` when a value lives in whichever state another state currently points at. It reads and writes the picked state, follows a new pick when the source changes, and uses the picked state's equality. Like `map`, `forward(select)` without an owner suits a forward consumed at once; the picked states keep their own owners. `select` must return a state, so pass your own fallback:
+
+```ts
+const quality = heldDoodad.forward(item, doodad => doodad?.quality ?? ownQuality)
+quality.set(3) // writes the held doodad's quality, or ownQuality while none is held
+```
+
+A forward links its source and pick only while something listens to it; unwatched, `value` pulls through on each read, so a forward on an idle object keeps nothing awake.
+
+`select` can also return a list of states. The forward is then a readonly array of their values, exact on every read, re-linked when the source picks a new list and notifying only when some value changed by its own state's equality. Prefer it over `State.Group` when the list of states itself changes:
+
+```ts
+const defenses = equipped.forward(human, items => items.map(item => item.$defense))
+const total = defenses.value.reduce((sum, defense) => sum + defense, 0)
+```
+
 ## Standalone Owner Scopes
 
 Use `Owner()` when a living scope does not have an owning `Component`. Pass the owner to `State` and other owner-aware APIs so the whole scope shares one lifetime. Dispose the owner when the scope ends.
@@ -203,6 +221,74 @@ session.dispose()
 When a scope belongs to a UI subtree, use the `Component` as its owner. Integration helpers for routers, sockets, observers, and other systems can accept an `Owner` and use `owner.onCleanup(...)` internally; ordinary application code usually only passes the owner to the helper.
 
 Every owner exposes a lifetime-bound `signal` for cancellable platform work.
+
+An object that is removed and later reused can subclass `Owner` and widen the protected `release()`. It runs every cleanup and aborts the signal as disposal would, but the owner stays alive to own more.
+
+```ts
+class Entity extends Owner {
+	override release () {
+		super.release()
+	}
+}
+```
+
+## Non-DOM Events
+
+`Emitter` is a generic event emitter for objects that are not components, and it loads with no DOM, such as in a Web Worker or on a server. Events are an interface of method signatures, and the verbs read like `component.event`. Handlers receive the host first, and subscribing takes an owner, or an explicit `null` to live as long as the emitter.
+
+```ts
+interface HumanEvents {
+	creatureKilled (creature: Creature): void
+	getDefense (defense: number): number
+	canMove (direction: Direction): boolean | undefined
+}
+
+class Human {
+	readonly event = new Emitter<this, HumanEvents>(this)
+}
+
+human.event.on.creatureKilled(owner, (human, creature) => grantExperience(human, creature))
+human.event.on.getDefense(owner, (human, defense) => defense + 1, 100)
+
+human.event.emit.creatureKilled(creature)
+const defense = human.event.reduce.getDefense(baseDefense)
+const canMove = human.event.first.canMove(direction)
+```
+
+`first` runs every handler and returns the first non-nullish result. `reduce` threads its first argument through them. There is also `collect`, `async` and `parallel`.
+
+`Emitter.of(Human)` subscribes for every instance of a class and its subclasses, including ones defined later, without allocating anything per instance. Higher priorities fire first; ties fire by concrete class, then up the chain, then instance. A `null` owner lives as long as the class, which suits handlers a class declares as its own behaviour.
+
+```ts
+Emitter.of(Human).on.creatureKilled(owner, (human, creature) => recordKill(human, creature))
+Emitter.of(Human).on.getDefense(null, (human, defense) => human.applyArmor(defense))
+```
+
+`close()` drops every instance subscription and stops the emitter firing, for an object that is removed but may come back; `open()` brings it back with none. Class-level subscriptions stay through both. `Emitter.warnings(handler)` receives misuse reports, such as an event passing its `limit`, for the whole process.
+
+## Subscribing To Events
+
+Components and emitters subscribe the same way. Every subscription has an owner, takes an optional priority, and can be a state holding a handler, which it follows and which fires nothing while it holds `null`.
+
+```ts
+button.event.on.click(owner, handler, 10)
+button.event.owned.once.click(handler)
+human.event.owned.on.creatureKilled(handler)
+const [creature] = await human.event.next.creatureKilled()
+const click = await button.event.next.click()
+```
+
+There are also `off`, `has` (whether anything listens), and `limit` (how many subscriptions before a leak warning). Component listeners run highest priority first, then in subscription order; `stopImmediatePropagation()` skips the rest, and a throwing listener is reported without stopping them.
+
+`until` ends subscriptions at the first of any events, owners, states, or promises:
+
+```ts
+human.event.until(dialog.event.when.Close, session).on.creatureKilled(refreshKillCount)
+```
+
+Pass an owner as well, as in `.on.creatureKilled(owner, refreshKillCount)`, to also end that one subscription with `owner`, leaving others made through the same `until` alone.
+
+Call verbs through the emitter, as `human.event.emit.x()`. Their methods read the emitter from `this`, so `const emit = human.event.emit.x` is a compile error. The normal form is just as fast, because each is an ordinary method after an event's first use.
 
 ## Manipulator Binding
 
@@ -382,6 +468,8 @@ Use kitsui placement APIs inside the callback. If you need to inspect the physic
 - Breakdown: `component.breakdown(...)` and `Component.Breakdown(...)` for stable keyed rendering from State values.
 - Placement extensions: `appendTo`, `prependTo`, `insertTo`, conditional variants, and `place`.
 - Manipulators: [`ClassManipulator`](./ClassManipulator.html), [`StyleManipulator`](./StyleManipulator.html), [`AttributeManipulator`](./AttributeManipulator.html), [`TextManipulator`](./TextManipulator.html), [`EventManipulator`](./EventManipulator.html), [`AriaManipulator`](./AriaManipulator.html).
+- [`Emitter`](./Emitter.html): non-DOM events with priorities, class-level subscriptions, and `emit`, `first`, `reduce`, `collect`, `async`, `parallel`, `next`, `until`.
+- [`Fields`](./Fields.html): reactive models, classes whose fields are plain slots with cached derived values and a `$x` State per field on demand, extensible through `compose`.
 - [`State`](./State.html): `set`, `update`, equality options, subscriptions, `map`, `debounce`, `throttle`, `mapAsync`, `truthy`, `falsy`, `or`, `Group`, `extend`.
 - [`Style`](./Style.html): fragments, classes, ordered classes with `after`, variables, nested selectors, media queries, pseudo selectors, animation helpers, and sticky helpers.
 - ARIA: typed helpers for roles, labels, references, booleans, `current`, and `live`.

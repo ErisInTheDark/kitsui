@@ -10,13 +10,17 @@
 import breakdownExtension from "./component/extensions/breakdownExtension";
 import compositionExtension from "./component/extensions/compositionExtension";
 import placeExtension from "./component/extensions/placeExtension";
+import forwardExtension from "./state/extensions/forwardExtension";
 import groupExtension from "./state/extensions/groupExtension";
 import mappingExtension from "./state/extensions/mappingExtension";
 import temporalExtension from "./state/extensions/temporalExtension";
+// Model fields' `$x` states.
+import "./state/LazyState";
 
 breakdownExtension();
 compositionExtension();
 placeExtension();
+forwardExtension();
 groupExtension();
 mappingExtension();
 temporalExtension();
@@ -126,6 +130,7 @@ export type {
 } from "./component/Sortable";
 export { TextManipulator } from "./component/TextManipulator";
 export type { TextInput, TextSelection, TextValue } from "./component/TextManipulator";
+export { Emitter } from "./event/Emitter";
 export { AsyncPending } from "./state/extensions/mappingExtension";
 export type {
     AsyncRejected,
@@ -135,6 +140,7 @@ export type {
     AsyncState,
     Mapper
 } from "./state/extensions/mappingExtension";
+export { Fields } from "./state/Fields";
 export { Owner, State } from "./state/State";
 export type {
     CleanupFunction,
@@ -144,5 +150,6 @@ export type {
     StateOptions,
     StateUpdater
 } from "./state/State";
+export { flushNextTickChecks } from "./utility/nextTickCheck";
 export { OrphanError, traceOrphans } from "./utility/orphanCheck";
 

@@ -20,6 +20,23 @@ const LIST_ITEMS = 500;
 const GRAPH_STATES = 2000;
 const CHURN_DIALOGS = 40;
 const CHURN_ROWS = 25;
+const COMPOSES = 52;
+const COMPOSE_HOSTS = 1000;
+const ENTITY_DERIVED = 10;
+const ITEM_DERIVED = 40;
+const ITEM_SUBCLASSES = 4;
+const MODEL_HOSTS = 10_000;
+const MODEL_BOUND = 200;
+
+type Slots = Record<string, unknown>;
+
+/** A model: `state` keys plus derived over the first of them. */
+function compiledClass (kitsui: Kitsui, parent: new () => object, name: string, state: string[], derived: string[]): new () => Slots {
+	return kitsui.Fields.define(parent, name, {
+		state: Object.fromEntries(state.map(key => [key, 1])),
+		derived: Object.fromEntries(derived.map((key, index) => [key, { reads: [state[0]], get: (host: Slots) => (host[state[0]] as number) + index }])),
+	}) as unknown as new () => Slots;
+}
 
 function buildDialog (kitsui: Kitsui, rows: number): { root: KitsuiModule.Component; selected: KitsuiModule.State<number>; counts: KitsuiModule.State<number>[] } {
 	const { Component, State, Style } = kitsui;
@@ -231,4 +248,115 @@ export const scenarios: Scenario[] = [
 			};
 		},
 	},
+	composeRegistration(false),
+	composeRegistration(true),
+	{
+		name: "model fields",
+		description: `${MODEL_HOSTS} model instances: cached derived reads, writes then reads, and writes heard by a bound component`,
+		create (kitsui) {
+			const { Component, Fields, Owner } = kitsui;
+			const Model = Fields.define(Owner, "BenchModel", {
+				state: { quality: 1, bonus: 0 },
+				derived: {
+					attack: { reads: ["quality", "bonus"], get: (host: { quality: number; bonus: number }) => host.quality * 10 + host.bonus },
+					label: { reads: ["attack"], get: (host: { attack: number }) => `attack ${host.attack}` },
+				},
+			});
+			let hosts: InstanceType<typeof Model>[] = [];
+			let root: KitsuiModule.Component | null = null;
+			let sink = 0;
+			return {
+				build () {
+					hosts = Array.from({ length: MODEL_HOSTS }, () => new Model());
+					root = Component();
+					for (let index = 0; index < MODEL_BOUND; index++) {
+						Component("span").text.set(hosts[index].$label).appendTo(root);
+					}
+					root.appendTo(document.body);
+				},
+				steps: {
+					"read all": () => {
+						for (let pass = 0; pass < 10; pass++) {
+							for (const host of hosts) sink += host.attack;
+						}
+					},
+					"write then read all": () => {
+						for (const host of hosts) {
+							host.quality++;
+							sink += host.attack;
+						}
+					},
+					"write bound, flush": () => {
+						for (let index = 0; index < MODEL_BOUND; index++) hosts[index].bonus++;
+					},
+				},
+				dispose () {
+					root?.remove();
+					root = null;
+					for (const host of hosts) host.dispose();
+					hosts = [];
+					if (sink < 0) console.log(sink);
+				},
+			};
+		},
+	},
 ];
+
+function composeRegistration (useLock: boolean): Scenario {
+	return {
+		name: useLock ? "compose registration (locked)" : "compose registration",
+		description: `${COMPOSES} composes added then removed on an entity/item/${ITEM_SUBCLASSES}-subclass chain with ${COMPOSE_HOSTS} live items${useLock ? ", inside Fields.lock" : ""}`,
+		create (kitsui) {
+			const { Fields, Owner, State } = kitsui;
+			const keys = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+			const entityDerived = keys("e", ENTITY_DERIVED);
+			const itemDerived = keys("i", ITEM_DERIVED);
+			const Entity = compiledClass(kitsui, Owner as unknown as new () => object, "BenchEntity", ["type"], entityDerived);
+			const Item = compiledClass(kitsui, Entity, "BenchItem", ["quality"], itemDerived);
+			for (let index = 0; index < ITEM_SUBCLASSES; index++) {
+				compiledClass(kitsui, Item, `BenchItem${index}`, ["extra"], ["sub"]);
+			}
+			const compose = (Item as unknown as { compose: Record<string, (owner: KitsuiModule.Owner, mapper: (host: unknown, value: number) => number) => void> }).compose;
+			const lockable = useLock && typeof (Fields as { lock?: unknown }).lock === "function";
+
+			let root: KitsuiModule.Owner | null = null;
+			let mods: KitsuiModule.Owner[] = [];
+			let locked: KitsuiModule.State<boolean> | null = null;
+			let sink = 0;
+
+			return {
+				build () {
+					root = Owner();
+					locked = State(root, false);
+					if (lockable) Fields.lock(root, locked);
+					for (let index = 0; index < COMPOSE_HOSTS; index++) {
+						sink += (new Item() as Slots).i0 as number;
+					}
+				},
+				steps: {
+					"add composes": () => {
+						locked!.set(true);
+						mods = Array.from({ length: COMPOSES }, (_, index) => {
+							const mod = Owner();
+							compose[[...entityDerived, ...itemDerived][index % (ENTITY_DERIVED + ITEM_DERIVED)]](mod, (_host, value) => value + 1);
+							return mod;
+						});
+						locked!.set(false);
+					},
+					"remove composes": () => {
+						locked!.set(true);
+						for (const mod of mods) mod.dispose();
+						mods = [];
+						locked!.set(false);
+					},
+				},
+				dispose () {
+					root?.dispose();
+					root = null;
+					locked = null;
+					if (sink < 0) console.log(sink);
+				},
+			};
+		},
+	};
+}

@@ -1,4 +1,5 @@
-import { isOwner, Owner, State, StateStaticExtensions, type CleanupFunction, type StateOptions } from "../State";
+import { ComputedState } from "../DerivedState";
+import { isOwner, Owner, State, StateStaticExtensions, type StateOptions } from "../State";
 import type { Mapper } from "./mappingExtension";
 
 type GroupedStateObject = Record<string, State.Readonly<any>>;
@@ -12,8 +13,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
@@ -24,8 +24,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * When called without an owner, the grouped state must gain an implicit or explicit
 	 * owner before the next tick.
@@ -38,8 +37,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
@@ -50,8 +48,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * When called without an owner, the grouped state must gain an implicit or explicit
 	 * owner before the next tick.
@@ -64,8 +61,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
@@ -77,8 +73,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * When called without an owner, the grouped state must gain an implicit or explicit
 	 * owner before the next tick.
@@ -92,8 +87,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * @param owner The owner that manages the grouped state's lifecycle.
 	 * @param states A record of source states to group.
@@ -105,8 +99,7 @@ type GroupConstructor = {
 	/**
 	 * Creates a grouped state that mirrors the current values of multiple states and maps them into a derived value.
 	 *
-	 * The grouped state subscribes to all input states and coalesces source updates
-	 * into a single next-tick grouped update per tick.
+	 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 	 *
 	 * When called without an owner, the grouped state must gain an implicit or explicit
 	 * owner before the next tick.
@@ -124,22 +117,12 @@ declare module "../State" {
 		/**
 		 * Creates a grouped state that mirrors the current values of multiple states.
 		 *
-		 * The grouped state subscribes to all input states and coalesces source updates
-		 * into a single next-tick grouped update per tick.
+		 * Reads are always exact. Listeners hear once per tick, and only while something listens does it link the input states.
 		 * @group Group
 		 */
 		Group: GroupConstructor;
 	}
 }
-
-const noop: CleanupFunction = () => {
-	// Intentionally empty.
-};
-
-const createState = State as unknown as {
-	<T>(owner: Owner, initialValue: T, options?: StateOptions<T>): State<T>;
-	<T>(initialValue: T, options?: StateOptions<T>): State<T>;
-};
 
 let patched = false;
 
@@ -158,25 +141,55 @@ function scheduleNextTick (callback: () => void): void {
 	queueMicrotask(callback);
 }
 
-function readGroupedValue<T extends GroupedStateObject> (states: T): GroupedValue<T> {
-	const entries = Object.entries(states).map(([key, state]) => {
-		return [key, state.value] as const;
-	});
-
-	return Object.fromEntries(entries) as GroupedValue<T>;
-
+function readGroupedValue (states: GroupedStateObject): Record<string, unknown> {
+	const value: Record<string, unknown> = {};
+	for (const key in states) {
+		value[key] = states[key].value;
+	}
+	return value;
 }
 
-function readGroupSnapshot<T extends GroupedStateObject, U> (states: T, mapper: Mapper<GroupedValue<T>, U> | undefined, oldValue?: GroupedValue<T>): {
-	snapshot: GroupedValue<T>;
-	value: GroupedValue<T> | U;
-} {
-	const snapshot = readGroupedValue(states);
+/**
+ * The current values of several states, optionally mapped. Reads are exact in every tick; listeners hear once per tick.
+ * Unwatched, it links nothing and reads on demand.
+ */
+class GroupedState extends ComputedState {
+	private readonly inputList: readonly State<unknown>[];
+	private snapshot: Record<string, unknown>;
+	private queued = false;
 
-	return {
-		snapshot,
-		value: mapper ? mapper(snapshot, oldValue) : snapshot,
-	};
+	constructor (owner: Owner | null, private readonly states: GroupedStateObject, private readonly mapper: Mapper<Record<string, unknown>, unknown> | undefined, options: StateOptions<unknown> | undefined) {
+		const snapshot = readGroupedValue(states);
+		super(owner, mapper ? mapper(snapshot, undefined) : snapshot, { ...options } as StateOptions<unknown>);
+		this.snapshot = snapshot;
+		this.inputList = Object.values(states) as State<unknown>[];
+		this.track();
+	}
+
+	protected inputs (): readonly State<unknown>[] {
+		return this.inputList;
+	}
+
+	protected compute (): unknown {
+		const snapshot = readGroupedValue(this.states);
+		const previous = this.snapshot;
+		this.snapshot = snapshot;
+		return this.mapper ? this.mapper(snapshot, previous) : snapshot;
+	}
+
+	inputChanged (): void {
+		if (this.queued) {
+			return;
+		}
+
+		this.queued = true;
+		scheduleNextTick(() => {
+			this.queued = false;
+			if (!this.disposed) {
+				this.publish();
+			}
+		});
+	}
 }
 
 function createGroupedState<T extends GroupedStateObject, U> (
@@ -185,56 +198,7 @@ function createGroupedState<T extends GroupedStateObject, U> (
 	mapper: Mapper<GroupedValue<T>, U> | undefined,
 	options?: StateOptions<GroupedValue<T> | U>,
 ): State<U> {
-	const initialGroup = readGroupSnapshot(states, mapper, undefined);
-	const grouped = owner
-		? createState(owner, initialGroup.value, options as StateOptions<typeof initialGroup.value> | undefined)
-		: createState(initialGroup.value, options as StateOptions<typeof initialGroup.value> | undefined);
-	const releaseSubscriptions: CleanupFunction[] = [];
-	let active = true;
-	let queued = false;
-	let previousSnapshot = initialGroup.snapshot;
-
-	const flush = () => {
-		queued = false;
-
-		if (!active || grouped.disposed) {
-			return;
-		}
-
-		const nextGroup = readGroupSnapshot(states, mapper, previousSnapshot);
-		grouped.set(nextGroup.value);
-		previousSnapshot = nextGroup.snapshot;
-	};
-
-	const queueGroupedUpdate = () => {
-		if (!active || queued || grouped.disposed) {
-			return;
-		}
-
-		queued = true;
-		scheduleNextTick(flush);
-	};
-
-	for (const state of Object.values(states)) {
-		releaseSubscriptions.push(state.subscribeImmediate(grouped, queueGroupedUpdate));
-	}
-
-	grouped.onCleanup(() => {
-		if (!active) {
-			return;
-		}
-
-		active = false;
-		queued = false;
-
-		for (const releaseSubscription of releaseSubscriptions) {
-			releaseSubscription();
-		}
-
-		releaseSubscriptions.length = 0;
-	});
-
-	return grouped as unknown as State<U>;
+	return new GroupedState(owner, states, mapper as Mapper<Record<string, unknown>, unknown> | undefined, options as StateOptions<unknown> | undefined) as unknown as State<U>;
 }
 
 /**

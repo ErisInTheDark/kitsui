@@ -10,7 +10,229 @@ import type {
 	QueryExpression,
 	StyleValue,
 } from "@inthedark/kitsui";
-import { AsyncPending, Component, Draggable, DropTarget, Owner, Sortable, State, Style, mediaQuery } from "@inthedark/kitsui";
+import { AsyncPending, Component, Draggable, DropTarget, Emitter, Fields, Owner, Sortable, State, Style, mediaQuery } from "@inthedark/kitsui";
+
+// Models: the declaration's fields, their `$x` states and `compose` are all typed from the declaration.
+const F = Fields;
+// Bodies can't name the class they're declaring, so they read the instance through an interface.
+interface FixtureHost extends Owner {
+	quality: number;
+	label?: string;
+	readonly attack: number;
+	readonly $quality: State<number>;
+	readonly $held: State<FixtureHost | null>;
+}
+class FieldsFixture extends F.define(Owner, "FieldsFixture", {
+	state: { quality: 1, label: undefined as string | undefined, held: null as FixtureHost | null },
+	derived: {
+		attack: { reads: ["quality"], get: (host: FixtureHost) => host.quality * 2 },
+		described: { checks: { "this.label": (host: FixtureHost) => host.label }, get: (host: FixtureHost) => `${host.label}: ${host.attack}` },
+	},
+	forward: { heldQuality: (host: FixtureHost) => host.$held.forward(host, held => held?.$quality ?? host.$quality) },
+}) {
+	readonly extra = "own member";
+}
+const fixtureHost = new FieldsFixture();
+fixtureHost.quality = 2;
+fixtureHost.heldQuality = 3;
+fixtureHost.attack satisfies number;
+fixtureHost.described satisfies string;
+fixtureHost.extra satisfies string;
+fixtureHost.$quality satisfies State<number>;
+fixtureHost.$label satisfies State<string | null>;
+fixtureHost.$attack satisfies State.Readonly<number>;
+// @ts-expect-error a derived value can't be written.
+fixtureHost.attack = 1;
+// @ts-expect-error a derived's state is readonly.
+fixtureHost.$attack.set(1);
+const fixtureMod = Owner();
+const fixtureInput = State(fixtureMod, "x");
+FieldsFixture.compose.attack(fixtureMod, (_host, value) => value + 1);
+FieldsFixture.compose.attack(fixtureMod, host => [host.$quality, fixtureInput], (_host, value, [quality, label]) => value + quality + label.length);
+FieldsFixture.compose.attack(fixtureMod, () => fixtureInput, (_host, value, label: string) => value + label.length);
+// @ts-expect-error compose covers derived values only.
+FieldsFixture.compose.quality;
+F.verify(fixtureHost) satisfies readonly Fields.Mismatch[];
+F.lock(fixtureMod, State(fixtureMod, false));
+F.equality(FieldsFixture, (a, b) => a.quality === b.quality);
+F.computing satisfies number;
+// @ts-expect-error the runtime's internals aren't public.
+void F.generation;
+
+const forwardHost = new FieldsFixture();
+const forwardHeld = State<FieldsFixture | null>(fixtureMod, null);
+const forwardWritable: State<number> = forwardHeld.forward(fixtureMod, held => held?.$quality ?? forwardHost.$quality);
+forwardWritable.set(2);
+const forwardReadonly = forwardHeld.forward(fixtureMod, held => held?.$attack ?? State.Readonly(0));
+const forwardReadonlyValue: number = forwardReadonly.value;
+void forwardReadonlyValue;
+// @ts-expect-error a forward to a readonly pick can't be set.
+forwardReadonly.set(1);
+F.forward(forwardHost, "quality", forwardWritable);
+const forwardList = forwardHeld.forward(fixtureMod, held => [forwardHost.$quality, held?.$attack ?? State.Readonly("none")] as const);
+const forwardListValue: readonly [number, number | string] = forwardList.value;
+void forwardListValue;
+const forwardMapped: readonly number[] = State<readonly FieldsFixture[]>(fixtureMod, []).forward(fixtureMod, hosts => hosts.map(host => host.$quality)).value;
+void forwardMapped;
+// @ts-expect-error a forward to a list is readonly.
+forwardList.set([1, 2]);
+
+interface EmitterEntityEvents {
+	removed (): void;
+	canMove (direction: number): boolean | undefined;
+	getDefense (defense: number): number;
+	optionalEvent? (value: string): void;
+}
+
+interface EmitterMovableEvents extends EmitterEntityEvents {
+	moved (x: number, y: number): void;
+}
+
+interface EmitterWithStatsEvents extends EmitterMovableEvents {
+	statChanged (stat: string, value: number): Promise<string>;
+}
+
+interface EmitterHumanEvents extends EmitterWithStatsEvents {
+	creatureKilled (creature: EmitterEntity): void;
+}
+
+interface EmitterPlayerEvents extends EmitterHumanEvents {
+	chat (message: string): void;
+}
+
+// Redeclaring `event` down a hierarchy with polymorphic `this` only compiles if each subclass emitter is assignable to its base.
+abstract class EmitterEntity {
+	declare readonly event: Emitter<this, EmitterEntityEvents>;
+}
+
+abstract class EmitterMovable extends EmitterEntity {
+	declare readonly event: Emitter<this, EmitterMovableEvents>;
+}
+
+abstract class EmitterWithStats extends EmitterMovable {
+	declare readonly event: Emitter<this, EmitterWithStatsEvents>;
+}
+
+class EmitterHuman extends EmitterWithStats {
+	declare readonly event: Emitter<this, EmitterHumanEvents>;
+}
+
+class EmitterPlayer extends EmitterHuman {
+	declare readonly event: Emitter<this, EmitterPlayerEvents>;
+	readonly name = "player";
+
+	subscribeToSelf (): this {
+		return this.event.on.chat(null, player => player.name);
+	}
+}
+
+const emitterPlayer = new EmitterPlayer();
+const emitterOwner = Owner();
+const emitterBase: Emitter<EmitterEntity, EmitterEntityEvents> = emitterPlayer.event;
+void emitterBase;
+const emitterEntities: EmitterEntity[] = [emitterPlayer, new EmitterHuman()];
+void emitterEntities;
+// Generic decorators and registries hold emitters this way, so it must stay assignable without an any guard in the types.
+const emitterAny: Emitter<any, any> = emitterPlayer.event;
+void emitterAny;
+
+interface EmitterDropdownEvents<T> {
+	select (value: T): void;
+}
+
+class EmitterDropdown<T> {
+	declare readonly event: Emitter<this, EmitterDropdownEvents<T>>;
+	value?: T;
+}
+
+const emitterWideDropdown: EmitterDropdown<string | number> = new EmitterDropdown<string>();
+void emitterWideDropdown;
+
+emitterPlayer.event.on.creatureKilled(emitterOwner, (player, creature) => {
+	player.name satisfies string;
+	creature satisfies EmitterEntity;
+});
+emitterPlayer.event.on.moved(null, (_player, x, y) => x + y, 100);
+emitterPlayer.event.once.removed(emitterOwner, () => undefined);
+emitterPlayer.event.owned.on.removed(() => undefined);
+emitterPlayer.event.emit.moved(1, 2) satisfies EmitterPlayer;
+emitterPlayer.event.emit.optionalEvent("value");
+emitterPlayer.event.off.removed(() => undefined, 5) satisfies EmitterPlayer;
+emitterPlayer.event.on.chat(emitterOwner, State(emitterOwner, (player: EmitterPlayer, message: string) => void `${player.name}${message}`));
+emitterPlayer.event.owned.once.chat(State(emitterOwner, null));
+emitterPlayer.event.first.canMove(1) satisfies boolean | undefined;
+emitterPlayer.event.first.removed() satisfies undefined;
+emitterPlayer.event.reduce.getDefense(1) satisfies number;
+emitterPlayer.event.collect.canMove(1) satisfies Array<boolean | undefined>;
+emitterPlayer.event.async.statChanged("a", 1) satisfies Promise<string[]>;
+emitterPlayer.event.parallel.statChanged("a", 1) satisfies Promise<string[]>;
+emitterPlayer.event.next.moved(emitterOwner, 5) satisfies Promise<[x: number, y: number]>;
+emitterPlayer.event.has.moved() satisfies boolean;
+emitterPlayer.event.limit.moved(500) satisfies EmitterPlayer;
+emitterPlayer.event.until(emitterOwner, Promise.resolve(), State(emitterOwner, 1), emitterPlayer.event.when.removed).until(emitterOwner).on.moved((player, x) => {
+	player.name satisfies string;
+	x satisfies number;
+});
+emitterPlayer.event.until(emitterOwner).on.moved(emitterOwner, (player, x) => {
+	player.name satisfies string;
+	x satisfies number;
+}, 5) satisfies EmitterPlayer;
+emitterPlayer.event.until(emitterOwner).once.removed(null, player => player.name satisfies string);
+// @ts-expect-error until's owner must be an owner.
+emitterPlayer.event.until(emitterOwner).on.moved({}, () => undefined);
+
+new Emitter<null, EmitterEntityEvents>(null).on.removed(null, host => host satisfies null);
+
+Emitter.of(EmitterPlayer).on.chat(emitterOwner, (player, message) => {
+	player.name satisfies string;
+	message satisfies string;
+});
+Emitter.of(EmitterHuman).on.creatureKilled(null, human => human satisfies EmitterHuman);
+Emitter.of(EmitterEntity).on.removed(null, entity => entity satisfies EmitterEntity, 10);
+Emitter.warnings(warning => warning.kind satisfies Emitter.Warning["kind"]);
+Emitter.warnings(null);
+Emitter.of(EmitterEntity).when.removed satisfies Emitter.EventTrigger;
+
+// Subclasses are free to define their own API, so Emitter's internals must not claim common member names.
+class EmitterWithOwnApi<H, E> extends Emitter<H, E> {
+	host = 0;
+	info = 0;
+	lists = 0;
+	limits = 0;
+	view (): void { }
+	snapshot (): void { }
+	selfSnapshot (): void { }
+	setLimit (): void { }
+	subscribe (): void { }
+	subscribeNext (): void { }
+	unsubscribe (): void { }
+	waitFor (): void { }
+	race (): void { }
+	hasHandlersForEvent (): void { }
+	emitFirst (): void { }
+	emitFirstDefault (): void { }
+	emitReduce (): void { }
+	emitCollect (): void { }
+	emitSelf (): void { }
+	emitAsync (): void { }
+	emitAsyncParallel (): void { }
+	raw (): void { }
+}
+void EmitterWithOwnApi;
+
+// @ts-expect-error verb methods read their emitter from `this`, so they cannot be held detached.
+const emitterDetached = emitterPlayer.event.emit.removed; emitterDetached();
+// @ts-expect-error null is the explicit way to subscribe without an owner.
+emitterPlayer.event.on.removed(() => undefined);
+// @ts-expect-error events take their declared arguments.
+emitterPlayer.event.emit.moved("not a number", 2);
+// @ts-expect-error a base-level emitter cannot name subclass events.
+emitterBase.emit.moved(1, 2);
+// @ts-expect-error a base emitter is not assignable to a subclass emitter: it lacks the subclass's events.
+const emitterNotSubclass: Emitter<EmitterPlayer, EmitterPlayerEvents> = new Emitter<EmitterPlayer, EmitterEntityEvents>(emitterPlayer);
+void emitterNotSubclass;
+// @ts-expect-error sibling and subclass events are not on a superclass.
+Emitter.of(EmitterEntity).on.chat(null, () => undefined);
 
 const standaloneOwner: Owner = Owner();
 const standaloneState = State(standaloneOwner, "active");
@@ -29,6 +251,17 @@ const releaseOwnedCleanup: CleanupFunction = standaloneOwner.onCleanup(requestOw
 void standaloneState;
 void requestOwner;
 void releaseOwnedCleanup;
+class ReusableOwner extends Owner {
+	override release (): void {
+		super.release();
+	}
+}
+new ReusableOwner().release();
+// @ts-expect-error release is protected: kitsui's own owners assume their cleanups run once.
+standaloneOwner.release();
+// @ts-expect-error components are owners, but cannot be released and reused.
+Component("div").release();
+
 // @ts-expect-error standalone Owner instances are created by calling Owner().
 new Owner();
 // @ts-expect-error Owner.create() was replaced by Owner().
@@ -221,6 +454,12 @@ draggableHost.event.owned.on.DragStart(event => {
 	event.detail.component.draggable.cancel();
 	event.detail.position.current.x.toFixed();
 });
+draggableHost.event.owned.once.DragStart(event => event.component.draggable.cancel(), 10) satisfies typeof draggableHost;
+draggableHost.event.on.click(standaloneOwner, event => event.component satisfies typeof draggableHost, -1);
+draggableHost.event.next.DragStart() satisfies Promise<{ readonly component: typeof draggableHost }>;
+draggableHost.event.has.click() satisfies boolean;
+draggableHost.event.until(draggableHost.event.when.DragEnd, emitterPlayer.event.when.removed).on.pointermove(event => event.clientX.toFixed());
+draggableHost.event.limit.click(10) satisfies typeof draggableHost;
 
 const dropTargetHost = Component("div").and(DropTarget, {
 	accepts: ({ draggable }) => draggable.is(Draggable),

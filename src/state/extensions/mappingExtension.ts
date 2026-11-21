@@ -1,4 +1,5 @@
-import { DisposeLink, isOwner, linkCleanup, Owner, State, StateLink, type CleanupFunction, type StateOptions } from "../State";
+import { ComputedState } from "../DerivedState";
+import { DisposeLink, isOwner, linkCleanup, Owner, State, type StateOptions } from "../State";
 
 type Nullish = null;
 type ComparableValue<T> = T | State.Readonly<T>;
@@ -53,15 +54,11 @@ export interface RecomputableState<T> extends State.Readonly<T> {
 type MutableRecomputableState<T> = State<T> & RecomputableState<T>;
 type MutableAsyncState<T, E> = State<AsyncResult<T, E>> & AsyncState<T, E>;
 
-type ImplicitOwnerLinkedState = State<unknown> & {
-	_registerImplicitOwnerDependent?: (dependent: State.Readonly<unknown>) => CleanupFunction;
-};
-
 declare module "../State" {
 	interface StateExtensions<T> {
 		/**
 		 * Creates a new ownerless state containing the mapped value of this state.
-		 * The mapped state subscribes to changes in the source and automatically updates.
+		 * Reads are always exact. While something listens it maps each source change at once; unwatched, it links nothing and maps on read.
 		 * The mapped state must gain an owner before the next tick.
 		 * @param mapValue Function that transforms each value from the source state.
 		 * @param options Optional state configuration for the mapped state.
@@ -71,7 +68,7 @@ declare module "../State" {
 
 		/**
 		 * Creates a new state containing the mapped value of this state.
-		 * The mapped state subscribes to changes in the source and automatically updates.
+		 * Reads are always exact. While something listens it maps each source change at once; unwatched, it links nothing and maps on read.
 		 * @param owner The owner responsible for managing the mapped state's lifecycle.
 		 * @param mapValue Function that transforms each value from the source state.
 		 * @param options Optional state configuration for the mapped state.
@@ -134,53 +131,59 @@ const createOwnedState = State as unknown as <T>(owner: Owner, initialValue: T, 
 
 let patched = false;
 
-type StateClassConstructor = new (owner: Owner | null, initialValue: unknown, options?: StateOptions<unknown>) => State<unknown>;
+/**
+ * Maps one source, plus any extra states the mapper reads, such as a comparison's other side. Watched, it maps each source change
+ * at once; unwatched, it maps on read.
+ */
+class MappedState extends ComputedState {
+	private readonly inputList: readonly State<unknown>[];
+	private lastSource: unknown;
+	// Unset while super() runs; a disposed owner disposes the state before construction finishes.
+	private readonly sourceDisposal: DisposeLink | undefined;
 
-let MappedStateClass: (new (source: State<unknown>, owner: Owner | null, mapValue: Mapper<unknown, unknown>, options?: StateOptions<unknown>) => MutableRecomputableState<unknown>) | null = null;
-
-/** Pushes each source change through the mapper into the mapped state. */
-class MappedLink extends StateLink<unknown> {
 	constructor (
-		private readonly target: State<unknown>,
+		private readonly source: State<unknown>,
+		owner: Owner | null,
 		private readonly mapValue: Mapper<unknown, unknown>,
+		options: StateOptions<unknown> | undefined,
+		extra: readonly State<unknown>[],
 	) {
-		super(true);
+		const initial = source.value;
+		super(owner, mapValue(initial), { ...options, graph: source.getGraph() } as StateOptions<unknown>);
+		this.inputList = [source, ...extra];
+		this.lastSource = initial;
+		if (this.disposed) {
+			return;
+		}
+
+		this.track();
+		this._registerImplicitOwnerDependent(source);
+		for (const state of extra) {
+			this.onCleanup(this._registerImplicitOwnerDependent(state));
+		}
+		this.sourceDisposal = new DisposeLink(this as unknown as Owner);
+		linkCleanup(source, this.sourceDisposal);
 	}
 
-	notify (value: unknown, previousValue: unknown): void {
-		this.target.set(this.mapValue(value, previousValue));
+	protected inputs (): readonly State<unknown>[] {
+		return this.inputList;
 	}
-}
 
-function defineMappedStateClass (): NonNullable<typeof MappedStateClass> {
-	const StateClass = State.extend() as unknown as StateClassConstructor;
+	protected compute (): unknown {
+		const value = this.source.value;
+		const previous = this.lastSource;
+		this.lastSource = value;
+		return this.mapValue(value, previous);
+	}
 
-	return class MappedState extends StateClass {
-		// Unset while super() runs; a disposed owner disposes the state before construction finishes.
-		private readonly sourceDisposal: DisposeLink | undefined;
+	inputChanged (): void {
+		this.publish();
+	}
 
-		constructor (
-			private readonly source: State<unknown>,
-			owner: Owner | null,
-			private readonly mapValue: Mapper<unknown, unknown>,
-			options?: StateOptions<unknown>,
-		) {
-			super(owner, mapValue(source.value), { ...options, graph: source.getGraph() } as StateOptions<unknown>);
-			this._registerImplicitOwnerDependent(source);
-			source._link(this, new MappedLink(this, mapValue));
-			this.sourceDisposal = new DisposeLink(this);
-			linkCleanup(source, this.sourceDisposal);
-		}
-
-		recompute (): void {
-			this.set(this.mapValue(this.source.value, this.source.value));
-		}
-
-		protected beforeDispose (): void {
-			super["beforeDispose"]();
-			this.sourceDisposal?.releaseCleanup();
-		}
-	} as unknown as NonNullable<typeof MappedStateClass>;
+	protected beforeDispose (): void {
+		super.beforeDispose();
+		this.sourceDisposal?.releaseCleanup();
+	}
 }
 
 function createMappedState<T, TMapped> (
@@ -188,13 +191,14 @@ function createMappedState<T, TMapped> (
 	owner: Owner | null,
 	mapValue: Mapper<T, TMapped>,
 	options?: StateOptions<TMapped>,
+	extra: readonly State<unknown>[] = [],
 ): MutableRecomputableState<TMapped> {
-	MappedStateClass ??= defineMappedStateClass();
-	return new MappedStateClass(
+	return new MappedState(
 		source as State<unknown>,
 		owner,
 		mapValue as Mapper<unknown, unknown>,
 		options as StateOptions<unknown> | undefined,
+		extra,
 	) as unknown as MutableRecomputableState<TMapped>;
 }
 
@@ -308,23 +312,8 @@ function createComparisonState<T> (
 	compare: (value: T, otherValue: T) => boolean,
 ): MutableRecomputableState<boolean> {
 	const comparator = compareValue instanceof State ? compareValue : null;
-	const comparisonState = createMappedState(source, source, (value) => compare(value, (comparator?.value ?? compareValue) as T));
-
-	if (!comparator || comparator === source) {
-		return comparisonState;
-	}
-
-	const releaseComparatorImplicitOwnerPropagation = ((comparisonState as unknown as ImplicitOwnerLinkedState)._registerImplicitOwnerDependent?.(comparator)) ?? (() => undefined);
-	const releaseComparatorSubscription = comparator.subscribeImmediate(comparisonState, () => {
-		comparisonState.recompute();
-	});
-
-	comparisonState.onCleanup(() => {
-		releaseComparatorImplicitOwnerPropagation();
-		releaseComparatorSubscription();
-	});
-
-	return comparisonState;
+	const extra = comparator === null || comparator === source ? [] : [comparator as State<unknown>];
+	return createMappedState(source, source, (value) => compare(value, (comparator?.value ?? compareValue) as T), undefined, extra);
 }
 
 /**

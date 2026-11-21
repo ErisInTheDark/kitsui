@@ -381,6 +381,247 @@ describe("Owner", () => {
 	});
 });
 
+describe("Owner.release", () => {
+	class ReusableOwner extends Owner {
+		override release (): void {
+			super.release();
+		}
+	}
+
+	it("runs current cleanups once in order, and leaves the owner alive", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => log.push("first"));
+		owner.onCleanup(() => log.push("second"));
+
+		owner.release();
+		expect(log).toEqual(["first", "second"]);
+		expect(owner.disposed).toBe(false);
+		expect(owner.disposing).toBe(false);
+
+		owner.release();
+		expect(log).toEqual(["first", "second"]);
+	});
+
+	it("runs cleanups registered after a release at the next release, and at disposal", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => log.push("generation 1"));
+		owner.release();
+
+		owner.onCleanup(() => log.push("generation 2"));
+		owner.release();
+		expect(log).toEqual(["generation 1", "generation 2"]);
+
+		owner.onCleanup(() => log.push("generation 3"));
+		owner.dispose();
+		expect(log).toEqual(["generation 1", "generation 2", "generation 3"]);
+	});
+
+	it("does not run disposal hooks", () => {
+		const log: string[] = [];
+
+		class HookedOwner extends ReusableOwner {
+			protected override beforeDispose (): void {
+				log.push("before");
+			}
+
+			protected override afterDispose (): void {
+				log.push("after");
+			}
+		}
+
+		const owner = new HookedOwner();
+		owner.release();
+		expect(log).toEqual([]);
+
+		owner.dispose();
+		expect(log).toEqual(["before", "after"]);
+	});
+
+	it("aborts the current signal and gives a fresh one afterwards", () => {
+		const owner = new ReusableOwner();
+		const first = owner.signal;
+		const reasons: string[] = [];
+		first.addEventListener("abort", () => reasons.push("aborted"));
+
+		owner.release();
+		expect(first.aborted).toBe(true);
+		expect(reasons).toEqual(["aborted"]);
+
+		const second = owner.signal;
+		expect(second).not.toBe(first);
+		expect(second.aborted).toBe(false);
+
+		owner.dispose();
+		expect(second.aborted).toBe(true);
+	});
+
+	it("gives the next generation's signal to a cleanup or abort listener reading it mid-release", () => {
+		const owner = new ReusableOwner();
+		const first = owner.signal;
+		let fromCleanup: AbortSignal | undefined;
+		let fromListener: AbortSignal | undefined;
+		first.addEventListener("abort", () => {
+			fromListener = owner.signal;
+		});
+		owner.onCleanup(() => {
+			fromCleanup = owner.signal;
+		});
+
+		owner.release();
+		expect(fromListener?.aborted).toBe(false);
+		expect(fromCleanup).toBe(fromListener);
+		expect(owner.signal).toBe(fromCleanup);
+	});
+
+	it("keeps a cleanup registered during a release for the next generation", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => {
+			log.push("first");
+			owner.onCleanup(() => log.push("registered during release"));
+		});
+		owner.onCleanup(() => log.push("second"));
+
+		owner.release();
+		expect(log).toEqual(["first", "second"]);
+
+		owner.release();
+		expect(log).toEqual(["first", "second", "registered during release"]);
+	});
+
+	it("does not run a cleanup that an earlier cleanup unregistered, and does not disturb the next generation", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		let unregisterMiddle: () => void = () => undefined;
+		let unregisterLast: () => void = () => undefined;
+		owner.onCleanup(() => {
+			log.push("first");
+			unregisterMiddle();
+			unregisterLast();
+			owner.onCleanup(() => log.push("next generation"));
+		});
+		unregisterMiddle = owner.onCleanup(() => log.push("middle"));
+		unregisterLast = owner.onCleanup(() => log.push("last"));
+
+		owner.release();
+		expect(log).toEqual(["first"]);
+
+		owner.dispose();
+		expect(log).toEqual(["first", "next generation"]);
+	});
+
+	it("unlinks a next-generation cleanup normally during a release", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => {
+			owner.onCleanup(() => log.push("kept 1"));
+			const unregister = owner.onCleanup(() => log.push("removed"));
+			owner.onCleanup(() => log.push("kept 2"));
+			unregister();
+		});
+
+		owner.release();
+		owner.release();
+		expect(log).toEqual(["kept 1", "kept 2"]);
+	});
+
+	it("runs every cleanup when some throw, then rethrows the first error", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => {
+			throw new Error("first failure");
+		});
+		owner.onCleanup(() => {
+			log.push("still ran");
+			throw new Error("second failure");
+		});
+
+		expect(() => owner.release()).toThrow("first failure");
+		expect(log).toEqual(["still ran"]);
+
+		owner.onCleanup(() => log.push("next generation"));
+		owner.release();
+		expect(log).toEqual(["still ran", "next generation"]);
+	});
+
+	it("still runs the rest once when a cleanup disposes the owner mid-release", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => {
+			log.push("disposing");
+			owner.dispose();
+		});
+		owner.onCleanup(() => log.push("rest"));
+
+		owner.release();
+		expect(log).toEqual(["disposing", "rest"]);
+		expect(owner.disposed).toBe(true);
+	});
+
+	it("handles a nested release from a cleanup", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => {
+			log.push("outer");
+			owner.onCleanup(() => log.push("next generation"));
+			owner.release();
+		});
+		owner.onCleanup(() => log.push("rest"));
+
+		owner.release();
+		expect(log).toEqual(["outer", "next generation", "rest"]);
+	});
+
+	it("is a no-op once disposed or while disposing", () => {
+		const owner = new ReusableOwner();
+		const log: string[] = [];
+		owner.onCleanup(() => {
+			owner.release();
+			log.push("disposal cleanup");
+		});
+		owner.onCleanup(() => log.push("second"));
+		owner.dispose();
+		expect(log).toEqual(["disposal cleanup", "second"]);
+
+		owner.release();
+		expect(log).toEqual(["disposal cleanup", "second"]);
+		expect(owner.signal.aborted).toBe(true);
+	});
+
+	it("disposes bound states and ends subscriptions and two-owner registrations, leaving the owner usable", () => {
+		const owner = new ReusableOwner();
+		const other = Owner();
+		const bound = State(owner, 1);
+		const source = State(other, 1);
+		const seen: number[] = [];
+		source.subscribeImmediate(owner, value => seen.push(value));
+		let otherCleanupRan = false;
+		other.onCleanup(owner, () => {
+			otherCleanupRan = true;
+		});
+		let ownerSideRan = false;
+		owner.onCleanup(other, () => {
+			ownerSideRan = true;
+		});
+
+		owner.release();
+		expect(bound.disposed).toBe(true);
+		source.set(2);
+		expect(seen).toEqual([]);
+		expect(ownerSideRan).toBe(true);
+
+		other.dispose();
+		expect(otherCleanupRan).toBe(false);
+
+		const rebound = State(owner, 5);
+		expect(rebound.disposed).toBe(false);
+		owner.dispose();
+		expect(rebound.disposed).toBe(true);
+	});
+});
+
 describe("State", () => {
 	it("can be constructed with or without new and still supports instanceof", () => {
 		const owner = mountedOwner();
@@ -797,14 +1038,6 @@ describe("State", () => {
 		count.set(2);
 		label.set("two");
 
-		expect(groupedFromCall.value).toBe("one:1");
-		expect(groupedFromNew.value).toEqual({
-			summary: "one:1",
-			ready: true,
-		});
-
-		await flushEffects();
-
 		expect(groupedFromCall.value).toBe("two:2");
 		expect(groupedFromNew.value).toEqual({
 			summary: "two:2",
@@ -982,8 +1215,9 @@ describe("State", () => {
 
 		count.set(2);
 		label.set("two");
-		await flushEffects();
+		expect(mapper).toHaveBeenCalledTimes(1);
 
+		const next = grouped.value;
 		expect(mapper).toHaveBeenCalledTimes(2);
 		expect(mapper).toHaveBeenNthCalledWith(2, {
 			count: 2,
@@ -992,7 +1226,7 @@ describe("State", () => {
 			count: 1,
 			label: "one",
 		});
-		expect(grouped.value).toEqual({
+		expect(next).toEqual({
 			values: {
 				count: 2,
 				label: "two",
@@ -1004,16 +1238,19 @@ describe("State", () => {
 		});
 	});
 
-	it("updates grouped states on the next tick, not synchronously", async () => {
+	it("reads grouped states synchronously, and notifies their listeners on the next tick", async () => {
 		const owner = mountedOwner();
 		const count = State(owner, 0);
 		const grouped = State.Group(owner, { count });
+		const listener = vi.fn();
+		grouped.subscribeImmediate(owner, listener);
 
 		count.set(1);
-		expect(grouped.value.count).toBe(0);
+		expect(grouped.value.count).toBe(1);
+		expect(listener).not.toHaveBeenCalled();
 
 		await flushEffects();
-		expect(grouped.value.count).toBe(1);
+		expect(listener).toHaveBeenCalledTimes(1);
 	});
 
 	it("coalesces multiple source updates into one grouped update per tick", async () => {
@@ -2125,6 +2362,87 @@ describe("State", () => {
 		finally {
 			orphanCheckSpy.restore();
 		}
+	});
+});
+
+describe("derived states link only while watched", () => {
+	const linksOf = (state: State.Readonly<unknown>) => (state as unknown as { immediateLinks: unknown[] | null }).immediateLinks;
+
+	it("an unwatched map links nothing, maps only when read, and reads exact", () => {
+		const owner = Owner();
+		const source = State(owner, 1);
+		let maps = 0;
+		const doubled = source.map(owner, value => (maps++, value * 2));
+		expect(linksOf(source)).toBeNull();
+
+		source.set(2);
+		source.set(3);
+		expect(maps).toBe(1);
+		expect(doubled.value).toBe(6);
+		expect(doubled.value).toBe(6);
+		expect(maps).toBe(2);
+	});
+
+	it("an unwatched map sees an in-place update() of its source", () => {
+		const owner = Owner();
+		const bonuses = State(owner, new Map<string, number>());
+		const archery = bonuses.map(owner, map => map.get("archery") ?? 0);
+		expect(archery.value).toBe(0);
+
+		bonuses.update(map => void map.set("archery", 4));
+		expect(archery.value).toBe(4);
+	});
+
+	it("a watched map links its source, and unlinks when the last listener leaves", () => {
+		const owner = Owner();
+		const source = State(owner, 1);
+		const doubled = source.map(owner, value => value * 2);
+		const heard: number[] = [];
+		const stop = doubled.subscribeImmediate(owner, value => heard.push(value));
+		source.set(2);
+		expect(heard).toEqual([4]);
+
+		stop();
+		expect(linksOf(source)).toBeNull();
+		source.set(5);
+		expect(doubled.value).toBe(10);
+	});
+
+	it("an unwatched Group links nothing and reads exact in the same tick", () => {
+		const owner = Owner();
+		const core = State(owner, 1);
+		const bonus = State(owner, 2);
+		const total = State.Group(owner, { bonus, core }, ({ bonus, core }) => core + bonus);
+		expect(linksOf(core)).toBeNull();
+
+		core.set(5);
+		expect(total.value).toBe(7);
+	});
+
+	it("a watched Group reads exact in the same tick, and its listeners still hear once next tick", async () => {
+		const owner = Owner();
+		const core = State(owner, 1);
+		const bonus = State(owner, 2);
+		const total = State.Group(owner, { bonus, core }, ({ bonus, core }) => core + bonus);
+		const heard: Array<[number, number]> = [];
+		total.subscribeImmediate(owner, (value, previous) => heard.push([value, previous]));
+
+		core.set(5);
+		bonus.set(3);
+		expect(total.value).toBe(8);
+		expect(heard).toEqual([]);
+		await flushEffects();
+		expect(heard).toEqual([[8, 3]]);
+	});
+
+	it("a comparison against a state links neither side while unwatched", () => {
+		const owner = Owner();
+		const left = State(owner, 1);
+		const right = State(owner, 2);
+		const same = left.equals(right);
+		expect(linksOf(right)).toBeNull();
+		right.set(1);
+		expect(same.value).toBe(true);
 	});
 });
 
