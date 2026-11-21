@@ -359,6 +359,17 @@ describe("EventManipulator", () => {
 		expect(component.event.has.click()).toBe(false);
 	});
 
+	it("tells whether an exact listener and priority is subscribed", () => {
+		const component = mountedComponent("button");
+		const listener = () => undefined;
+		expect(component.event.has.click(listener)).toBe(false);
+		component.event.owned.on.click(listener, 2);
+		expect(component.event.has.click(listener)).toBe(false);
+		expect(component.event.has.click(listener, 2)).toBe(true);
+		component.event.off.click(listener, 2);
+		expect(component.event.has.click(listener, 2)).toBe(false);
+	});
+
 	it("removes explicit-owner and reactive listeners when the host component is removed", async () => {
 		const component = mountedComponent("button");
 		const explicitOwner = mountedComponent("section");

@@ -22,7 +22,7 @@ type ReduceMethod<F> = { reduce<A extends ReturnOf<F> & ArgsOf<F>[0]> (this: obj
 type CollectMethod<F> = { collect (this: object, ...args: ArgsOf<F>): Array<ReturnOf<F>> }["collect"];
 type AsyncMethod<F> = { async (this: object, ...args: ArgsOf<F>): Promise<Array<Awaited<ReturnOf<F>>>> }["async"];
 type NextMethod<F> = { next (this: object, signal?: AbortSignal | Owner | null, priority?: number): Promise<ArgsOf<F>> }["next"];
-type HasMethod = { has (this: object): boolean }["has"];
+type HasMethod<H, F> = { has (this: object, handler?: Emitter.HandlerInput<H, F>, priority?: number): boolean }["has"];
 type LimitMethod<R> = { limit (this: object, max: number): R }["limit"];
 
 /**
@@ -166,9 +166,12 @@ export class Emitter<out H, out E> {
 		return this.verbView(nextVerb) as Emitter.Next<E>;
 	}
 
-	/** `emitter.has.x()`: whether emitting would fire anything, for skipping expensive argument construction. */
-	get has (): Emitter.Has<E> {
-		return this.verbView(hasVerb) as Emitter.Has<E>;
+	/**
+	 * `emitter.has.x()`: whether emitting would fire anything, for skipping expensive argument construction.
+	 * `emitter.has.x(handler, priority?)`: whether this emitter holds that exact subscription, as `off` would remove it.
+	 */
+	get has (): Emitter.Has<H, E> {
+		return this.verbView(hasVerb) as Emitter.Has<H, E>;
 	}
 
 	/** `emitter.when.x`: a trigger for {@link Emitter.until} that fires on this event. */
@@ -252,7 +255,10 @@ export class Emitter<out H, out E> {
 		(this.cellLimits ??= new Map()).set(cell, max);
 	}
 
-	private hasHandlers (cell: EventCell): boolean {
+	private hasHandlers (cell: EventCell, handler: HandlerInput | undefined, priority = 0): boolean {
+		if (handler !== undefined) {
+			return findInstanceList(this.instanceLists, cell)?.find(handler, priority) !== undefined;
+		}
 		return !this.closedValue && anyHandler(resolveHandlers(this.classInfo, this.instanceLists, cell));
 	}
 
@@ -278,7 +284,7 @@ export namespace Emitter {
 	export type Collect<E> = { [K in keyof E]-?: CollectMethod<E[K]> };
 	export type Async<E> = { [K in keyof E]-?: AsyncMethod<E[K]> };
 	export type Next<E> = { [K in keyof E]-?: NextMethod<E[K]> };
-	export type Has<E> = { [K in keyof E]-?: HasMethod };
+	export type Has<H, E> = { [K in keyof E]-?: HasMethod<H, E[K]> };
 	export type When<E> = { readonly [K in keyof E]-?: EventTrigger };
 	export type Limit<H, E> = { [K in keyof E]-?: LimitMethod<H> };
 
@@ -291,11 +297,23 @@ export namespace Emitter {
 
 	/** Class-level subscribing verbs, returned by {@link Emitter.of}. */
 	export interface ClassLevel<out H, out E> {
-		/** `on.x(owner, handler, priority?)`: subscribes for every instance of this class and its subclasses. `null` lives as long as the class. */
+		/**
+		 * `on.x(owner, handler, priority?)`: observes every instance of this class and its subclasses. `null` lives as long as the class.
+		 * At equal priority, observers of a subclass run before observers of its parent.
+		 */
 		readonly on: { [K in keyof E]-?: OnMethod<H, E[K], void> };
 		/** Like `on`, consumed by the first emit it fires in, from any instance. */
 		readonly once: { [K in keyof E]-?: OnMethod<H, E[K], void> };
+		/**
+		 * `self.x(owner, handler, priority?)`: the class's own behaviour for this event, for every instance of it and its subclasses, like
+		 * a method. At equal priority it runs after observers, parent class first, so a subclass's behaviour extends its parent's as an
+		 * override calling `super` would. Ends with `owner`; `null` lives as long as the class.
+		 */
+		readonly self: { [K in keyof E]-?: OnMethod<H, E[K], void> };
+		/** `off.x(handler, priority?)`: removes an `on` or `once` subscription made at this class. */
 		readonly off: { [K in keyof E]-?: OffMethod<H, E[K], void> };
+		/** `has.x()`: whether any class-level handler applies here. `has.x(handler, priority?)`: whether `on` or `once` holds it at this class. */
+		readonly has: Has<H, E>;
 		/** `when.x`: a trigger for {@link Emitter.until} that fires when any instance emits this event. */
 		readonly when: When<E>;
 		readonly limit: { [K in keyof E]-?: LimitMethod<void> };
@@ -366,7 +384,7 @@ class ClassEmitter {
 		this.classInfo = classInfoFor(cls);
 	}
 
-	private verbView (verb: ViewConstructor<object>): object {
+	private verbView (verb: ViewConstructor<ClassEmitter>): object {
 		return cachedView(this.verbViews, verb, this);
 	}
 
@@ -378,8 +396,16 @@ class ClassEmitter {
 		return this.verbView(onceVerb);
 	}
 
+	get self (): object {
+		return this.verbView(classSelfVerb);
+	}
+
 	get off (): object {
 		return this.verbView(offVerb);
+	}
+
+	get has (): object {
+		return this.verbView(hasVerb);
 	}
 
 	get when (): object {
@@ -388,6 +414,10 @@ class ClassEmitter {
 
 	get limit (): object {
 		return this.verbView(limitVerb);
+	}
+
+	private subscribeSelf (cell: EventCell, ownerInput: unknown, handler: HandlerInput, priority: number | undefined): void {
+		subscribe(this.classInfo.selfList(cell), this.cellLimits?.get(cell), checkedOwner(ownerInput), handler, priority, false, this.cls);
 	}
 
 	private eventsClosed (): boolean {
@@ -410,7 +440,10 @@ class ClassEmitter {
 		(this.cellLimits ??= new Map()).set(cell, max);
 	}
 
-	private hasHandlers (cell: EventCell): boolean {
+	private hasHandlers (cell: EventCell, handler: HandlerInput | undefined, priority = 0): boolean {
+		if (handler !== undefined) {
+			return this.classInfo.classList(cell).find(handler, priority) !== undefined;
+		}
 		return anyHandler(this.classInfo.handlers(cell));
 	}
 
@@ -418,6 +451,12 @@ class ClassEmitter {
 		return received.slice(1);
 	}
 }
+
+const classSelfVerb = defineVerb<ClassEmitter>(cell => ({
+	value (this: View<ClassEmitter>, owner: unknown, handler: HandlerInput, priority?: number) {
+		targetOf(this)["subscribeSelf"](cell, owner, handler, priority);
+	},
+}));
 
 function snapshotOf (view: View<AnyEmitter>, cell: EventCell): readonly Subscription[] {
 	return targetOf(view)["snapshotCell"](cell);

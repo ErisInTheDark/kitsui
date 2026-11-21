@@ -185,25 +185,75 @@ describe("Emitter", () => {
 		});
 	});
 
-	describe("class-level handlers as built-in behaviour", () => {
-		it("survive close then open, while instance subscriptions do not", () => {
+	describe("class behaviour through self", () => {
+		it("fires parent first, after outside class observers and before instance subscriptions", () => {
+			const { A, B, C } = hierarchy();
+			const instance = new C();
+			instance.event.on.ping(null, recording("instance"));
+			Emitter.of(C).self.ping(null, recording("C self"));
+			Emitter.of(A).on.ping(null, recording("A on"));
+			Emitter.of(A).self.ping(null, recording("A self"));
+			Emitter.of(B).self.ping(null, recording("B self"));
+			Emitter.of(C).on.ping(null, recording("C on"));
+
+			expect(pingLog(instance.event)).toEqual(["C on", "A on", "A self", "B self", "C self", "instance"]);
+		});
+
+		it("respects priority against the other tiers, and registration order within a class", () => {
 			const { A, C } = hierarchy();
 			const instance = new C();
-			Emitter.of(A).on.ping(null, recording("class"));
+			instance.event.on.ping(null, recording("instance high"), 20);
+			Emitter.of(C).self.ping(null, recording("C self mid"), 10);
+			Emitter.of(A).self.ping(null, recording("A self 1"));
+			Emitter.of(A).self.ping(null, recording("A self 2"));
+			Emitter.of(C).on.ping(null, recording("class low"), -1);
+
+			expect(pingLog(instance.event)).toEqual(["instance high", "C self mid", "A self 1", "A self 2", "class low"]);
+		});
+
+		it("ends with its owner, and survives close then open, while instance subscriptions do not", () => {
+			const { A, C } = hierarchy();
+			const instance = new C();
+			const owner = Owner();
+			Emitter.of(A).self.ping(owner, recording("self"));
 			instance.event.on.ping(null, recording("instance"));
 
 			instance.event.close();
-			expect(pingLog(instance.event)).toEqual([]);
 			instance.event.open();
-			expect(pingLog(instance.event)).toEqual(["class"]);
+			expect(pingLog(instance.event)).toEqual(["self"]);
+			owner.dispose();
+			expect(pingLog(instance.event)).toEqual([]);
 		});
 
-		it("allocate nothing per instance", () => {
+		it("allocates nothing per instance", () => {
 			const { A, C } = hierarchy();
-			Emitter.of(A).on.ping(null, recording("class"));
+			Emitter.of(A).self.ping(null, recording("self"));
 			const instance = new C();
 			pingLog(instance.event);
 			expect(instance.event["instanceLists"]).toBeNull();
+		});
+	});
+
+	describe("has with a handler", () => {
+		it("tells whether that exact subscription exists, per scope", () => {
+			const { A, C } = hierarchy();
+			const instance = new C();
+			const handler = recording("handler");
+			expect(instance.event.has.ping(handler)).toBe(false);
+			instance.event.on.ping(null, handler, 3);
+			expect(instance.event.has.ping(handler)).toBe(false);
+			expect(instance.event.has.ping(handler, 3)).toBe(true);
+			instance.event.off.ping(handler, 3);
+			expect(instance.event.has.ping(handler, 3)).toBe(false);
+
+			Emitter.of(A).on.ping(null, handler);
+			expect(Emitter.of(A).has.ping(handler)).toBe(true);
+			expect(Emitter.of(C).has.ping(handler)).toBe(false);
+			expect(Emitter.of(A).has.ping()).toBe(true);
+			Emitter.of(A).self.ping(null, handler);
+			Emitter.of(A).off.ping(handler);
+			expect(Emitter.of(A).has.ping(handler)).toBe(false);
+			expect(Emitter.of(A).has.ping()).toBe(true);
 		});
 	});
 

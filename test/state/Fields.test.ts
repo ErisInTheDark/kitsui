@@ -462,6 +462,21 @@ describe("Fields: inheritance", () => {
 		}
 	});
 
+	it("reads a forward field's unset value as undefined, and writes undefined as the state's null", () => {
+		const Holder = F.define(Owner, "UnsetHolder", {
+			state: { own: undefined as number | undefined },
+			forward: { quality: (self: Slots) => self.$own },
+		}) as any;
+		const holder = new Holder();
+		expect(holder.quality).toBeUndefined();
+		expect(holder.$quality.value).toBeNull();
+		holder.quality = 3;
+		expect(holder.own).toBe(3);
+		holder.quality = undefined;
+		expect(holder.own).toBeUndefined();
+		expect(holder.quality).toBeUndefined();
+	});
+
 	it("declares forward fields that read and write the selected state, with that state as their $x", () => {
 		const Doodad = emit({ name: "DeclDoodad", state: { quality: 1 } });
 		const Holder = F.define(Owner, "DeclHolder", {

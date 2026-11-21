@@ -67,7 +67,8 @@ interface Scope {
 	subscribeCell (cell: EventCell, owner: unknown, handler: HandlerInput, priority: number | undefined, once: boolean): void;
 	unsubscribeCell (cell: EventCell, handler: HandlerInput, priority: number | undefined): void;
 	setCellLimit (cell: EventCell, max: number): void;
-	hasHandlers (cell: EventCell): boolean;
+	/** Whether anything would fire, or with a handler, whether this scope holds that subscription. */
+	hasHandlers (cell: EventCell, handler: HandlerInput | undefined, priority: number | undefined): boolean;
 	/** What `next` resolves with, from the arguments its handler received. */
 	nextValue (received: readonly unknown[]): unknown;
 }
@@ -138,8 +139,8 @@ export const nextVerb = defineVerb<EventScope>(cell => ({
 }));
 
 export const hasVerb = defineVerb<EventScope>(cell => ({
-	value (this: View<EventScope>) {
-		return scopeOf(this).hasHandlers(cell);
+	value (this: View<EventScope>, handler?: HandlerInput, priority?: number) {
+		return scopeOf(this).hasHandlers(cell, handler, priority);
 	},
 }));
 

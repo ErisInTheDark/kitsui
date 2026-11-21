@@ -129,8 +129,9 @@ function generate (Base: Constructor, layout: Layout, runtime: AccessorRuntime):
 		const slot = `${p}f_${key}`;
 		prelude.push(`const select_${key} = forward.${key};`);
 		members.push(`${p}g_${key} () { const f = this.${slot}; return f !== null && !f.disposed ? f : this.${slot} = F.bindForward(this, "${key}", select_${key}(this)); }`);
-		members.push(`get ${key} () { return this.${p}g_${key}().value; }`);
-		members.push(`set ${key} (v) { this.${p}g_${key}().set(v); }`);
+		// Fields hold undefined where states hold null, as through `$x`.
+		members.push(`get ${key} () { const v = this.${p}g_${key}().value; return v === null ? undefined : v; }`);
+		members.push(`set ${key} (v) { this.${p}g_${key}().set(v === undefined ? null : v); }`);
 		members.push(`get $${key} () { return this.${p}g_${key}(); }`);
 	}
 
@@ -270,10 +271,11 @@ function assemble (Base: Constructor, layout: Layout, F: AccessorRuntime): Const
 		Object.defineProperty(prototype, key, {
 			configurable: true,
 			get (this: Host) {
-				return forwardOf(this).value;
+				const value = forwardOf(this).value;
+				return value === null ? undefined : value;
 			},
 			set (this: Host, value: unknown) {
-				forwardOf(this).set(value);
+				forwardOf(this).set(value === undefined ? null : value);
 			},
 		});
 		Object.defineProperty(prototype, `$${key}`, { configurable: true, get (this: Host) { return forwardOf(this); } });

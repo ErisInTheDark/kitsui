@@ -32,7 +32,9 @@ type EventNextProxyFor<THost extends Owner, THostKey extends string, TEventMap> 
 	[KEventName in keyof TEventMap & string]: (signal?: AbortSignal | Owner | null, priority?: number) => Promise<HostedEvent<EventMapValue<TEventMap, KEventName>, THost, THostKey>>;
 };
 
-type EventHasProxyFor<TEventMap> = { [KEventName in keyof TEventMap & string]: () => boolean };
+type EventHasProxyFor<THost extends Owner, THostKey extends string, TEventMap> = {
+	[KEventName in keyof TEventMap & string]: (listener?: ListenerInput<THost, THostKey, TEventMap, KEventName>, priority?: number) => boolean;
+};
 
 type EventWhenProxyFor<TEventMap> = { readonly [KEventName in keyof TEventMap & string]: Emitter.EventTrigger };
 
@@ -274,9 +276,9 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 		return this.verbView(nextVerb) as EventNextProxyFor<THost, THostKey, TEventMap>;
 	}
 
-	/** `event.has.x()`: whether any kitsui listener would run for this event. */
-	get has (): EventHasProxyFor<TEventMap> {
-		return this.verbView(hasVerb) as EventHasProxyFor<TEventMap>;
+	/** `event.has.x()`: whether any kitsui listener would run for this event. `event.has.x(listener, priority?)`: whether that exact one is subscribed. */
+	get has (): EventHasProxyFor<THost, THostKey, TEventMap> {
+		return this.verbView(hasVerb) as EventHasProxyFor<THost, THostKey, TEventMap>;
 	}
 
 	/** `event.when.x`: a trigger for `until` that fires on this event. */
@@ -340,8 +342,12 @@ export class EventManipulator<THost extends Owner = Component, THostKey extends 
 		(this.cellLimits ??= new Map()).set(cell, max);
 	}
 
-	private hasHandlers (cell: EventCell): boolean {
-		return anyHandler(findInstanceList(this.lists, cell)?.records ?? []);
+	private hasHandlers (cell: EventCell, listener: HandlerInput | null | undefined, priority = 0): boolean {
+		const list = findInstanceList(this.lists, cell);
+		if (listener !== undefined && listener !== null) {
+			return list?.find(listener, priority) !== undefined;
+		}
+		return anyHandler(list?.records ?? []);
 	}
 
 	private nextValue (received: readonly unknown[]): unknown {

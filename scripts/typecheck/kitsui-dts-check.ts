@@ -168,6 +168,9 @@ emitterPlayer.event.async.statChanged("a", 1) satisfies Promise<string[]>;
 emitterPlayer.event.parallel.statChanged("a", 1) satisfies Promise<string[]>;
 emitterPlayer.event.next.moved(emitterOwner, 5) satisfies Promise<[x: number, y: number]>;
 emitterPlayer.event.has.moved() satisfies boolean;
+emitterPlayer.event.has.moved((_player, x, y) => x + y, 100) satisfies boolean;
+Emitter.of(EmitterHuman).self.creatureKilled(null, (human, creature) => void [human satisfies EmitterHuman, creature satisfies EmitterEntity], 5);
+Emitter.of(EmitterHuman).has.creatureKilled() satisfies boolean;
 emitterPlayer.event.limit.moved(500) satisfies EmitterPlayer;
 emitterPlayer.event.until(emitterOwner, Promise.resolve(), State(emitterOwner, 1), emitterPlayer.event.when.removed).until(emitterOwner).on.moved((player, x) => {
 	player.name satisfies string;
@@ -458,6 +461,7 @@ draggableHost.event.owned.once.DragStart(event => event.component.draggable.canc
 draggableHost.event.on.click(standaloneOwner, event => event.component satisfies typeof draggableHost, -1);
 draggableHost.event.next.DragStart() satisfies Promise<{ readonly component: typeof draggableHost }>;
 draggableHost.event.has.click() satisfies boolean;
+draggableHost.event.has.click(event => event.clientX, 2) satisfies boolean;
 draggableHost.event.until(draggableHost.event.when.DragEnd, emitterPlayer.event.when.removed).on.pointermove(event => event.clientX.toFixed());
 draggableHost.event.limit.click(10) satisfies typeof draggableHost;
 

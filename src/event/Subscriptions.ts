@@ -307,7 +307,10 @@ const classInfos = new WeakMap<object, ClassInfo>();
 export class ClassInfo {
 	/** This class first, then each superclass. Sibling classes never share an entry. */
 	readonly chain: readonly ClassInfo[];
+	/** Outside observers of every instance, through `Emitter.of(C).on`. */
 	private readonly classLists = new Map<EventCell, ClassSubscriptionList>();
+	/** The class's own behaviour, through `Emitter.of(C).self`. */
+	private readonly selfLists = new Map<EventCell, ClassSubscriptionList>();
 	private readonly tables: Array<ClassTable | undefined> = [];
 
 	constructor (parent: ClassInfo | null) {
@@ -315,13 +318,11 @@ export class ClassInfo {
 	}
 
 	classList (cell: EventCell): SubscriptionList {
-		let list = this.classLists.get(cell);
-		if (list === undefined) {
-			list = new ClassSubscriptionList(cell);
-			this.classLists.set(cell, list);
-		}
+		return listIn(this.classLists, cell);
+	}
 
-		return list;
+	selfList (cell: EventCell): SubscriptionList {
+		return listIn(this.selfLists, cell);
 	}
 
 	handlers (cell: EventCell): readonly Subscription[] {
@@ -334,20 +335,31 @@ export class ClassInfo {
 	}
 
 	private buildTable (cell: EventCell): ClassTable {
-		const handlers: Subscription[] = [];
-		for (const info of this.chain) {
-			const classList = info.classLists.get(cell);
-			if (classList !== undefined) {
-				handlers.push(...classList.records);
-			}
+		// Observers run concrete class first, behaviour parent first, as an override extends what it overrides.
+		const observers: Subscription[] = [];
+		const behaviour: Subscription[] = [];
+		for (let index = 0; index < this.chain.length; index++) {
+			observers.push(...this.chain[index].classLists.get(cell)?.records ?? NO_SUBSCRIPTIONS);
+			behaviour.push(...this.chain[this.chain.length - 1 - index].selfLists.get(cell)?.records ?? NO_SUBSCRIPTIONS);
 		}
 
 		// Array.prototype.sort is stable, so equal priorities keep chain order, and registration order within a class.
-		handlers.sort(byPriorityDescending);
-		const table: ClassTable = { handlers, version: cell.version };
+		observers.sort(byPriorityDescending);
+		behaviour.sort(byPriorityDescending);
+		const table: ClassTable = { handlers: mergeByPriority(observers, behaviour), version: cell.version };
 		this.tables[cell.index] = table;
 		return table;
 	}
+}
+
+function listIn (lists: Map<EventCell, ClassSubscriptionList>, cell: EventCell): SubscriptionList {
+	let list = lists.get(cell);
+	if (list === undefined) {
+		list = new ClassSubscriptionList(cell);
+		lists.set(cell, list);
+	}
+
+	return list;
 }
 
 /** The class info of scopes without a host class: it has no subscriptions, so only instance subscriptions fire. */

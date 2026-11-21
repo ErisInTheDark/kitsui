@@ -257,11 +257,11 @@ const canMove = human.event.first.canMove(direction)
 
 `first` runs every handler and returns the first non-nullish result. `reduce` threads its first argument through them. There is also `collect`, `async` and `parallel`.
 
-`Emitter.of(Human)` subscribes for every instance of a class and its subclasses, including ones defined later, without allocating anything per instance. Higher priorities fire first; ties fire by concrete class, then up the chain, then instance. A `null` owner lives as long as the class, which suits handlers a class declares as its own behaviour.
+`Emitter.of(Human)` subscribes for every instance of a class and its subclasses, including ones defined later, without allocating anything per instance. `on` observes them; `self` is the class's own behaviour, like a method. Higher priorities fire first; ties fire observers by concrete class then up the chain, then behaviour parent class first, then instance subscriptions. A `null` owner lives as long as the class.
 
 ```ts
 Emitter.of(Human).on.creatureKilled(owner, (human, creature) => recordKill(human, creature))
-Emitter.of(Human).on.getDefense(null, (human, defense) => human.applyArmor(defense))
+Emitter.of(Human).self.getDefense(null, (human, defense) => human.applyArmor(defense))
 ```
 
 `close()` drops every instance subscription and stops the emitter firing, for an object that is removed but may come back; `open()` brings it back with none. Class-level subscriptions stay through both. `Emitter.warnings(handler)` receives misuse reports, such as an event passing its `limit`, for the whole process.
